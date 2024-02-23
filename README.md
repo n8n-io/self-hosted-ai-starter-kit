@@ -9,7 +9,9 @@ This repo helps quickly bootstrap an n8n demo environment using docker-compose.
 ### Setup
 - Clone this repo
 - **Optionally** edit the credentials in the `.env` file
-- Run `docker compose up -d`, and wait a couple of minutes for all the containers to become healthy.
+- If you have an Nvidia GPU, run `docker compose --profile gpu-nvidia up`
+- Otherwise to run inference services on your CPU, run `docker compose --profile cpu up`
+- Wait a couple of minutes for all the containers to become healthy.
 
 ### Included service endpoints
 - [n8n](http://localhost:5678/)

@@ -9,6 +9,37 @@ volumes:
 networks:
   n8n:
 
+x-ollama: &service-ollama
+  image: ollama/ollama:latest
+  container_name: ollama
+  networks: ['n8n']
+  restart: unless-stopped
+  ports:
+    - 11434:11434
+  volumes:
+    - ollama_storage:/root/.ollama
+
+x-infinity: &service-infinity
+  image: michaelf34/infinity
+  container_name: infinity
+  networks: ['n8n']
+  restart: unless-stopped
+  environment:
+    - SENTENCE_TRANSFORMERS_HOME=/infinity
+    - MODEL_ID=BAAI/bge-small-en-v1.5
+  ports:
+    - 7997:7997
+  volumes:
+    - infinity_storage:/infinity
+
+x-gpu-support: &deploy-gpu
+  resources:
+    reservations:
+      devices:
+        - driver: nvidia
+          count: 1
+          capabilities: [gpu]
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -55,23 +86,6 @@ services:
       postgres:
         condition: service_healthy
 
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ollama
-    networks: ['n8n']
-    restart: unless-stopped
-    ports:
-      - 11434:11434
-    volumes:
-      - ollama_storage:/root/.ollama
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-
   qdrant:
     image: qdrant/qdrant
     container_name: qdrant
@@ -82,22 +96,22 @@ services:
     volumes:
       - qdrant_storage:/qdrant/storage
 
-  infinity:
-    image: michaelf34/infinity
-    container_name: infinity
-    networks: ['n8n']
-    restart: unless-stopped
-    environment:
-      - SENTENCE_TRANSFORMERS_HOME=/infinity
-      - MODEL_ID=BAAI/bge-small-en-v1.5
-    ports:
-      - 7997:7997
-    volumes:
-      - infinity_storage:/infinity
+  ollama-cpu:
+    profiles: ["cpu"]
+    <<: *service-ollama
+
+  infinity-cpu:
+    profiles: ["cpu"]
+    <<: *service-infinity
+
+  ollama-gpu:
+    profiles: ["gpu-nvidia"]
+    <<: *service-ollama
     deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+      <<: *deploy-gpu
+
+  infinity-gpu:
+    profiles: ["gpu-nvidia"]
+    <<: *service-infinity
+    deploy:
+      <<: *deploy-gpu
