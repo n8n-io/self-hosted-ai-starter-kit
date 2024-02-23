@@ -4,6 +4,7 @@ volumes:
   postgres_storage:
   ollama_storage:
   qdrant_storage:
+  infinity_storage:
 
 networks:
   n8n:
@@ -74,3 +75,23 @@ services:
       - 6333:6333
     volumes:
       - qdrant_storage:/qdrant/storage
+
+  infinity:
+    image: michaelf34/infinity
+    container_name: infinity
+    networks: ['n8n']
+    restart: unless-stopped
+    environment:
+      - SENTENCE_TRANSFORMERS_HOME=/infinity
+      - MODEL_ID=BAAI/bge-small-en-v1.5
+    ports:
+      - 7997:7997
+    volumes:
+      - infinity_storage:/infinity
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
