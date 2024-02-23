@@ -9,6 +9,22 @@ volumes:
 networks:
   n8n:
 
+x-n8n: &service-n8n
+  image: n8nio/n8n:latest
+  networks: ['n8n']
+  environment:
+    - DB_TYPE=postgresdb
+    - DB_POSTGRESDB_HOST=postgres
+    - DB_POSTGRESDB_USER=${POSTGRES_USER}
+    - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+    - N8N_DIAGNOSTICS_ENABLED=false
+    - N8N_PERSONALIZATION_ENABLED=false
+    - N8N_ENCRYPTION_KEY
+    - N8N_USER_MANAGEMENT_JWT_SECRET
+    - EXTERNAL_HOOK_FILES=/hooks.js
+  links:
+    - postgres
+
 x-ollama: &service-ollama
   image: ollama/ollama:latest
   container_name: ollama
@@ -60,31 +76,34 @@ services:
       timeout: 5s
       retries: 10
 
-  n8n:
-    image: n8nio/n8n:latest
-    container_name: n8n
-    networks: ['n8n']
-    restart: unless-stopped
-    environment:
-      - DB_TYPE=postgresdb
-      - DB_POSTGRESDB_HOST=postgres
-      - DB_POSTGRESDB_USER=${POSTGRES_USER}
-      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
-      - N8N_DIAGNOSTICS_ENABLED=false
-      - N8N_PERSONALIZATION_ENABLED=false
-      - N8N_ENCRYPTION_KEY
-      - N8N_USER_MANAGEMENT_JWT_SECRET
-      - EXTERNAL_HOOK_FILES=/hooks.js
-    ports:
-      - 5678:5678
-    links:
-      - postgres
+  n8n-import:
+    <<: *service-n8n
+    container_name: n8n-import
+    entrypoint: /bin/sh
+    command:
+      - "-c"
+      - "n8n import:credentials --separate --input=/backup/credentials && n8n import:workflow --separate --input=/backup/workflows"
     volumes:
-      - n8n_storage:/home/node/.n8n
-      - ./n8n/hooks.js:/hooks.js
+      - ./n8n/backup:/backup
     depends_on:
       postgres:
         condition: service_healthy
+
+  n8n:
+    <<: *service-n8n
+    container_name: n8n
+    restart: unless-stopped
+    ports:
+      - 5678:5678
+    volumes:
+      - n8n_storage:/home/node/.n8n
+      - ./n8n/hooks.js:/hooks.js
+      - ./n8n/backup:/backup
+    depends_on:
+      postgres:
+        condition: service_healthy
+      n8n-import:
+        condition: service_completed_successfully
 
   qdrant:
     image: qdrant/qdrant
