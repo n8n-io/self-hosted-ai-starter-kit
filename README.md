@@ -1,9 +1,10 @@
 # n8n Demo setup
 
-This repo helps setup a docker-compose based setup to quickly bootstrap an n8n demo environment.
+This repo helps quickly bootstrap an n8n demo environment using docker-compose.
 
 ### Requirements
 - [Docker compose](https://docs.docker.com/compose/)
+- **Optionally** an Nvidia GPU for faster inference on Ollama and Infinity
 
 ### Setup
 - Clone this repo
