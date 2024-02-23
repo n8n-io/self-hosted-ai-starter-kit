@@ -14,6 +14,7 @@ This repo helps setup a docker-compose based setup to quickly bootstrap an n8n d
 - [n8n](http://localhost:5678/)
 - [Ollama](http://localhost:11434/)
 - [Qdrant](http://localhost:6333/dashboard)
+- [Infinity](http://localhost:7997/docs)
 
 ### Updating
 - Run `docker compose pull` to fetch all the latest images
