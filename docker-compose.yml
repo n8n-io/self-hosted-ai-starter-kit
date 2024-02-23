@@ -38,7 +38,7 @@ services:
       - DB_TYPE=postgresdb
       - DB_POSTGRESDB_HOST=postgres
       - DB_POSTGRESDB_USER=${POSTGRES_USER}
-      - DB_POSTGRESDB_PASSWORD=${POSTGRES_DB}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
     ports:
       - 5678:5678
     links:
