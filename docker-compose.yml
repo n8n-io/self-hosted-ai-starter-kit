@@ -19,7 +19,6 @@ x-n8n: &service-n8n
     - N8N_PERSONALIZATION_ENABLED=false
     - N8N_ENCRYPTION_KEY
     - N8N_USER_MANAGEMENT_JWT_SECRET
-    - EXTERNAL_HOOK_FILES=/hooks.js
   links:
     - postgres
 
@@ -71,7 +70,6 @@ services:
       - 5678:5678
     volumes:
       - n8n_storage:/home/node/.n8n
-      - ./n8n/hooks.js:/hooks.js
       - ./n8n/backup:/backup
     depends_on:
       postgres:
