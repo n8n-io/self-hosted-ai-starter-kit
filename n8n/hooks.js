@@ -5,7 +5,7 @@ const { dirname, resolve } = require("path");
 const Layer = require("express/lib/router/layer");
 
 const n8nDir = dirname(require.resolve("n8n"));
-const jwtAuth = require(resolve(n8nDir, "auth/jwt"));
+const { AuthService } = require(resolve(n8nDir, "auth/auth.service"));
 
 async function disableUmHook({ app }, config) {
   await this.dbCollections.Settings.update(
@@ -21,17 +21,14 @@ async function disableUmHook({ app }, config) {
 
   owner.email = "demo@n8n.io";
   owner.firstName = "Demo";
-  owner.lastName = "McDemoFace";
+  owner.lastName = "User";
 
   await this.dbCollections.User.save(owner);
 
-  jwtAuth.resolveJwt = () => owner;
+  AuthService.prototype.resolveJwt = () => owner;
 
   const { stack } = app._router;
-  const index = stack.findIndex((l) => l.name === "cookieParser");
-  stack.splice(
-    index + 4,
-    3,
+  stack.unshift(
     new Layer(
       "/",
       {
@@ -39,7 +36,6 @@ async function disableUmHook({ app }, config) {
         end: false,
       },
       async (req, res, next) => {
-        req.user = owner;
         req.cookies = { "n8n-auth": "fake" };
         next();
       }

@@ -1,17 +1,15 @@
-version: '3.8'
 volumes:
   n8n_storage:
   postgres_storage:
   ollama_storage:
   qdrant_storage:
-  infinity_storage:
 
 networks:
-  n8n:
+  demo:
 
 x-n8n: &service-n8n
   image: n8nio/n8n:latest
-  networks: ['n8n']
+  networks: ['demo']
   environment:
     - DB_TYPE=postgresdb
     - DB_POSTGRESDB_HOST=postgres
@@ -28,39 +26,17 @@ x-n8n: &service-n8n
 x-ollama: &service-ollama
   image: ollama/ollama:latest
   container_name: ollama
-  networks: ['n8n']
+  networks: ['demo']
   restart: unless-stopped
   ports:
     - 11434:11434
   volumes:
     - ollama_storage:/root/.ollama
 
-x-infinity: &service-infinity
-  image: michaelf34/infinity
-  container_name: infinity
-  networks: ['n8n']
-  restart: unless-stopped
-  environment:
-    - SENTENCE_TRANSFORMERS_HOME=/infinity
-    - MODEL_ID=BAAI/bge-small-en-v1.5
-  ports:
-    - 7997:7997
-  volumes:
-    - infinity_storage:/infinity
-
-x-gpu-support: &deploy-gpu
-  resources:
-    reservations:
-      devices:
-        - driver: nvidia
-          count: 1
-          capabilities: [gpu]
-
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: postgres
-    networks: ['n8n']
+    networks: ['demo']
     restart: unless-stopped
     environment:
       - POSTGRES_USER
@@ -68,8 +44,6 @@ services:
       - POSTGRES_DB
     volumes:
       - postgres_storage:/var/lib/postgresql/data
-    ports:
-      - 5432:5432
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
       interval: 5s
@@ -108,7 +82,7 @@ services:
   qdrant:
     image: qdrant/qdrant
     container_name: qdrant
-    networks: ['n8n']
+    networks: ['demo']
     restart: unless-stopped
     ports:
       - 6333:6333
@@ -119,18 +93,13 @@ services:
     profiles: ["cpu"]
     <<: *service-ollama
 
-  infinity-cpu:
-    profiles: ["cpu"]
-    <<: *service-infinity
-
   ollama-gpu:
     profiles: ["gpu-nvidia"]
     <<: *service-ollama
     deploy:
-      <<: *deploy-gpu
-
-  infinity-gpu:
-    profiles: ["gpu-nvidia"]
-    <<: *service-infinity
-    deploy:
-      <<: *deploy-gpu
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
