@@ -35,13 +35,13 @@ x-ollama: &service-ollama
 x-init-ollama: &init-ollama
   image: ollama/ollama:latest
   networks: ['demo']
-  container_name: ollama-load-llama2
+  container_name: ollama-pull-llama
   volumes:
     - ollama_storage:/root/.ollama
   entrypoint: /bin/sh
   command:
     - "-c"
-    - "sleep 3; OLLAMA_HOST=ollama:11434 ollama pull llama2"
+    - "sleep 3; OLLAMA_HOST=ollama:11434 ollama pull llama3.1"
 
 services:
   postgres:
@@ -113,13 +113,13 @@ services:
               count: 1
               capabilities: [gpu]
 
-  ollama-load-llama2-cpu:
+  ollama-pull-llama-cpu:
     profiles: ["cpu"]
     <<: *init-ollama
     depends_on:
       - ollama-cpu
 
-  ollama-load-llama2-gpu:
+  ollama-pull-llama-gpu:
     profiles: ["gpu-nvidia"]
     <<: *init-ollama
     depends_on:
