@@ -9,9 +9,14 @@ This repo helps quickly bootstrap an n8n demo environment using docker-compose.
 ### Setup
 - Clone this repo
 - **Optionally** edit the credentials in the `.env` file
-- If you have an Nvidia GPU, run `docker compose --profile gpu-nvidia up`
-- Otherwise to run inference services on your CPU, run `docker compose --profile cpu up`
-- Wait a couple of minutes for all the containers to become healthy.
+- Start the containers:
+    - If you have an Nvidia GPU, run `docker compose --profile gpu-nvidia up`
+    - Otherwise to run inference services on your CPU, run `docker compose --profile cpu up`
+- Wait a couple of minutes for all the containers to become healthy
+- Open http://localhost:5678 in your browser and fill in the details
+- Open the included workflow: http://localhost:5678/workflow/srOnR8PAY3u4RSwb
+- Wait until Ollama has downloaded the `llama3.1` model (you can check the
+  docker console)
 
 ### Included service endpoints
 - [n8n](http://localhost:5678/)
