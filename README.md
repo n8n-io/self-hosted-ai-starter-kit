@@ -4,7 +4,7 @@ This repo helps quickly bootstrap an n8n demo environment using docker-compose.
 
 ### Requirements
 - [Docker compose](https://docs.docker.com/compose/)
-- **Optionally** an Nvidia GPU for faster inference on Ollama and Infinity
+- **Optionally** an Nvidia GPU for faster inference on Ollama
 
 ### Setup
 - Clone this repo
@@ -22,7 +22,6 @@ This repo helps quickly bootstrap an n8n demo environment using docker-compose.
 - [n8n](http://localhost:5678/)
 - [Ollama](http://localhost:11434/)
 - [Qdrant](http://localhost:6333/dashboard)
-- [Infinity](http://localhost:7997/docs)
 
 ### Updating
 - Run `docker compose pull` to fetch all the latest images
