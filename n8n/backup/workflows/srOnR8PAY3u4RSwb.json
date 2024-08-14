@@ -44,7 +44,7 @@
       "credentials": {
         "ollamaApi": {
           "id": "xHuYe0MDGOs9IpBW",
-          "name": "Ollama account"
+          "name": "Local Ollama service"
         }
       }
     }
