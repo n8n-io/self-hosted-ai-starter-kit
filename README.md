@@ -23,6 +23,16 @@ This repo helps quickly bootstrap an n8n demo environment using docker-compose.
 - [Ollama](http://localhost:11434/)
 - [Qdrant](http://localhost:6333/dashboard)
 
+### Local files
+
+When running the demo for the first time, Docker will create a folder `shared`
+next to the `docker-compose.yml` file. You can add files to that, that will be
+visible on the `/data/shared` folder inside the n8n container, and you can use
+that, for example, with the Local File Trigger node.
+
 ### Updating
 - Run `docker compose pull` to fetch all the latest images
-- Run `docker compose create && docker compose up -d` to update and restart all the containers
+- If you use Ollama, use either `docker compose --profile cpu pull` or
+  `docker compose --profile gpu pull` to pull the correct ollama images
+- Run `docker compose create && docker compose up -d` to update and restart
+  all the containers
