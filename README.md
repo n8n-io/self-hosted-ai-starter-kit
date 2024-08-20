@@ -5,8 +5,8 @@ quickly bootstraps a fully featured Local AI and Low Code development
 environment.
 
 Curated by <https://github.com/n8n-io>, it combines the self-hosted n8n
-platform with a curated list of compatible AI products and components that
-lets you build production-level AI workflows in minutes.
+platform with a curated list of compatible AI products and components to
+quickly get started with building self-hosted AI workflows.
 
 > [!TIP]
 > [Read the announcement]()
@@ -63,8 +63,10 @@ docker compose --profile cpu up
 
 ## ⚡️ Quick start and usage
 
-The Self-hosted AI Starter Kit is a docker compose file pre-configured with
-network and disk so there isn’t much else you need to install.
+The main component of the self-hosted AI starter kit is a docker compose file
+pre-configured with network and disk so there isn’t much else you need to
+install. After completing the installation steps above, follow the steps below
+to get started.
 
 1. Open <http://localhost:5678/> in your browser to set up n8n. You’ll only
    have to do this once.
@@ -73,7 +75,7 @@ network and disk so there isn’t much else you need to install.
 3. Select **Test workflow** to start running the workflow.
 4. If this is the first time you’re running the workflow, you may need to wait
    until Ollama finishes downloading Llama3.1. You can inspect the docker
-   console logs.
+   console logs to check on the progress.
 
 To open n8n at any time, visit <http://localhost:5678/> in your browser.
 
@@ -110,8 +112,7 @@ docker compose create && docker compose up
 ## 👓 Recommended reading
 
 n8n is full of useful content for getting started quickly with its AI concepts
-and nodes. If you can’t find an answer to your question, remember to visit the
-community forum and pop a message in the Discord!
+and nodes. If you run into an issue, go to [support](#support).
 
 - [AI agents for developers: from theory to practice with n8n](https://blog.n8n.io/ai-agents/)
 - [Tutorial: Build an AI workflow in n8n](https://docs.n8n.io/advanced-ai/intro-tutorial/)
@@ -150,11 +151,11 @@ your local n8n instance.
 
 ### Accessing local files
 
-The Self-hosted AI Starter Kit will create a shared folder (by default, located in
-the same directory) which is mounted to the n8n container and allows n8n to
-access files on disk. This folder within the n8n container is located at
-`/data/shared` - this is the path you’ll need to use in nodes that interact
-with the local filesystem.
+The self-hosted AI starter kit will create a shared folder (by default,
+located in the same directory) which is mounted to the n8n container and
+allows n8n to access files on disk. This folder within the n8n container is
+located at `/data/shared` -- this is the path you’ll need to use in nodes that
+interact with the local filesystem.
 
 **Nodes that interact with the local filesystem**
 
