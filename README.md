@@ -1,4 +1,4 @@
-# Self-hosted AI Starter Kit
+# Self-hosted AI starter kit
 
 **Self-hosted AI Starter Kit** is an open, docker compose template that
 quickly bootstraps a fully featured Local AI and Low Code development
@@ -9,14 +9,7 @@ platform with a curated list of compatible AI products and components that
 lets you build production-level AI workflows in minutes.
 
 > [!TIP]
-> 📣 [Read the announcement]()
-
-> [!NOTE]
-> This kit is an early release, intended for experimentation and light
-> proof-of-concept projects. While it can be customized to suit your needs, it
-> is not yet recommended for production environments. We highly encourage you
-> to share your feedback and ideas, as they will help us refine and improve
-> future versions.
+> [Read the announcement]()
 
 ### What’s included
 
@@ -66,7 +59,7 @@ the GPU to Docker instances. Check the [Ollama homepage](https://ollama.com/)
 for installation instructions, and use `http://host.docker.internal:11434/` as
 the Ollama host in your credentials.
 
-## ⚡️ QuickStart and usage
+## ⚡️ Quick start and usage
 
 The Self-hosted AI Starter Kit is a docker compose file pre-configured with
 network and disk so there isn’t much else you need to install.
@@ -90,6 +83,12 @@ and [Information Extractor](https://docs.n8n.io/integrations/builtin/cluster-nod
 nodes. To keep everything local, just remember to use the Ollama node for your
 language model and Qdrant as your vector store.
 
+> [!NOTE]
+> This starter kit is designed to help you get started with self-hosted AI
+> workflows. While it’s not fully optimized for production environments, it
+> combines robust components that work well together for proof-of-concept
+> projects. You can customize it to meet your specific needs
+
 ## Upgrading
 
 ### For Nvidia GPU users
@@ -106,7 +105,7 @@ docker compose --profile cpu pull
 docker compose create && docker compose up
 ```
 
-## 👓 Recommended Reading
+## 👓 Recommended reading
 
 n8n is full of useful content for getting started quickly with its AI concepts
 and nodes. If you can’t find an answer to your question, remember to visit the
@@ -122,14 +121,14 @@ community forum and pop a message in the Discord!
 
 - [Installing and using Local AI for n8n](https://www.youtube.com/watch?v=xz_X2N-hPg0)
 
-## 🛍️ More AI Templates
+## 🛍️ More AI templates
 
 For more AI workflow ideas, visit the [**official n8n AI template
 gallery**](https://n8n.io/workflows/?categories=AI). From each workflow,
 select the **Use workflow** button to automatically import the workflow into
 your local n8n instance.
 
-### Learn AI Key Concepts
+### Learn AI key concepts
 
 - [AI Agent Chat](https://n8n.io/workflows/1954-ai-agent-chat/)
 - [AI chat with any data source (using the n8n workflow too)](https://n8n.io/workflows/2026-ai-chat-with-any-data-source-using-the-n8n-workflow-tool/)
@@ -145,9 +144,9 @@ your local n8n instance.
 - [Financial Documents Assistant using Qdrant and](https://n8n.io/workflows/2335-build-a-financial-documents-assistant-using-qdrant-and-mistralai/) [Mistral.ai](http://mistral.ai/)
 - [Recipe Recommendations with Qdrant and Mistral](https://n8n.io/workflows/2333-recipe-recommendations-with-qdrant-and-mistral/)
 
-## Tips & Tricks
+## Tips & tricks
 
-### Accessing Local Files
+### Accessing local files
 
 The Self-hosted AI Starter Kit will create a shared folder (by default, located in
 the same directory) which is mounted to the n8n container and allows n8n to
