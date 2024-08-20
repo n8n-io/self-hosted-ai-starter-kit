@@ -8,7 +8,8 @@ Curated by <https://github.com/n8n-io>, it combines the self-hosted n8n
 platform with a curated list of compatible AI products and components that
 lets you build production-level AI workflows in minutes.
 
-[📣 Read the announcement]()
+> [!TIP]
+> 📣 [Read the announcement]()
 
 > [!NOTE]
 > This kit is an early release, intended for experimentation and light
