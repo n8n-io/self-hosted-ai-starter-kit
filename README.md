@@ -2,8 +2,9 @@
 >
 > 💡 Help and Support: [💬 Discord]() [📖 Community Forum]()
 
-*Self-hosted AI Starter Kit* is an open, docker compose template that quickly
-bootstraps a fully featured Local AI and Low Code development environment.
+**Self-hosted AI Starter Kit** is an open, docker compose template that
+quickly bootstraps a fully featured Local AI and Low Code development
+environment.
 
 Curated by <https://github.com/n8n-io>, it combines the self-hosted n8n
 platform with a curated list of compatible AI products and components that
