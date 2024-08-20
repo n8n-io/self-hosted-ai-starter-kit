@@ -1,6 +1,4 @@
-> [📣 Read the announcement]()
->
-> 💡 Help and Support: [💬 Discord]() [📖 Community Forum]()
+# Self-hosted AI Starter Kit
 
 **Self-hosted AI Starter Kit** is an open, docker compose template that
 quickly bootstraps a fully featured Local AI and Low Code development
@@ -10,15 +8,28 @@ Curated by <https://github.com/n8n-io>, it combines the self-hosted n8n
 platform with a curated list of compatible AI products and components that
 lets you build production-level AI workflows in minutes.
 
+[📣 Read the announcement]()
+
+> [!NOTE]
+> This kit is an early release, intended for experimentation and light
+> proof-of-concept projects. While it can be customized to suit your needs, it
+> is not yet recommended for production environments. We highly encourage you
+> to share your feedback and ideas, as they will help us refine and improve
+> future versions.
+
 ### What’s included
 
-✅ [**Self-hosted n8n**](https://n8n.io/) - Low-code platform with over 400 integrations and advanced AI components
+✅ [**Self-hosted n8n**](https://n8n.io/) - Low-code platform with over 400
+integrations and advanced AI components
 
-✅ [**Ollama**](https://ollama.com/) - Cross-platform LLM platform to install and run the latest local LLMs
+✅ [**Ollama**](https://ollama.com/) - Cross-platform LLM platform to install
+and run the latest local LLMs
 
-✅ [**Qdrant**](https://qdrant.tech/) - Open-source, high performance vector store with an comprehensive API
+✅ [**Qdrant**](https://qdrant.tech/) - Open-source, high performance vector
+store with an comprehensive API
 
-✅ [**PostgreSQL**](https://www.postgresql.org/) -  Workhorse of the Data Engineering world, handles large amounts of data safely.
+✅ [**PostgreSQL**](https://www.postgresql.org/) -  Workhorse of the Data
+Engineering world, handles large amounts of data safely.
 
 ### What you can build
 
@@ -48,12 +59,11 @@ cd self-hosted-ai-demo
 docker compose --profile cpu up
 ```
 
-If you run on a Mac with an M1 or newer processor, you can also run Ollama on
-your host machine to be able to use faster inference on the GPU.
-Unfortunately, you can't expose the GPU to docker instances. Refer to the
-[Ollama homepage](https://ollama.com/) for installation instructions and use
-`http://host.docker.internal:11434/` as the Ollama host in your credentials.
-
+If you’re using a Mac with an M1 or newer processor, you can run Ollama on
+your host machine for faster GPU inference. Unfortunately, you can’t expose
+the GPU to Docker instances. Check the [Ollama homepage](https://ollama.com/)
+for installation instructions, and use `http://host.docker.internal:11434/` as
+the Ollama host in your credentials.
 
 ## ⚡️ QuickStart and usage
 
@@ -149,3 +159,20 @@ with the local filesystem.
 - [Read/Write Files from Disk](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.filesreadwrite/)
 - [Local File Trigger](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.localfiletrigger/)
 - [Execute Command](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.executecommand/)
+
+## 📜 License
+
+This project is licensed under the Apache License 2.0 - see the
+[LICENSE](LICENSE) file for details.
+
+## 💬 Support
+
+Join the conversation in the [n8n Forum](https://community.n8n.io/), where you
+can:
+
+- **Share Your Work**: Show off what you’ve built with n8n and inspire others
+  in the community.
+- **Ask Questions**: Whether you’re just getting started or you’re a seasoned
+  pro, the community and our team are ready to support with any challenges.
+- **Propose Ideas**: Have an idea for a feature or improvement? Let us know!
+  We’re always eager to hear what you’d like to see next.
