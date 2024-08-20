@@ -1,12 +1,13 @@
-> 📣 Read the announcement
-> 💡 Help and Support: 💬 Discord 📖 Community Forum
+> [📣 Read the announcement]()
+>
+> 💡 Help and Support: [💬 Discord]() [📖 Community Forum]()
 
 *Self-hosted AI Starter Kit* is an open, docker compose template that quickly
 bootstraps a fully featured Local AI and Low Code development environment.
 
-Curated by https://github.com/n8n-io, it combines the self-hosted n8n platform
-with a curated list of compatible AI products and components that lets you
-build production-level AI workflows in minutes.
+Curated by <https://github.com/n8n-io>, it combines the self-hosted n8n
+platform with a curated list of compatible AI products and components that
+lets you build production-level AI workflows in minutes.
 
 ### What’s included
 
@@ -46,26 +47,28 @@ cd self-hosted-ai-demo
 docker compose --profile cpu up
 ```
 
+If you run on a Mac with an M1 or newer processor, you can also run Ollama on
+your host machine to be able to use faster inference on the GPU.
+Unfortunately, you can't expose the GPU to docker instances. Refer to the
+[Ollama homepage](https://ollama.com/) for installation instructions and use
+`http://host.docker.internal:11434/` as the Ollama host in your credentials.
+
 
 ## ⚡️ QuickStart and usage
 
-The Self-hosted AI Starter Kit is a docker compose file pre-configured with network
-and disk so there isn’t much else you need to install.
+The Self-hosted AI Starter Kit is a docker compose file pre-configured with
+network and disk so there isn’t much else you need to install.
 
-Once all the containers become healthy, you’re ready to start using n8n
-immediately!
+1. Open <http://localhost:5678/> in your browser to set up n8n. You’ll only
+   have to do this once.
+2. Open the included workflow:
+   <http://localhost:5678/workflow/srOnR8PAY3u4RSwb>
+3. Select **Test workflow** to start running the workflow.
+4. If this is the first time you’re running the workflow, you may need to wait
+   until Ollama finishes downloading Llama3.1. You can inspect the docker
+   console logs.
 
-- Open <http://localhost:5678/> in your browser to set up n8n. You’ll only
-  have to do this once.
-- Open the included workflow:
-  <http://localhost:5678/workflow/srOnR8PAY3u4RSwb>
-- Select **Test workflow** to start running the workflow.
-- If this is the first time you’re running the workflow, you may need to wait
-  until Ollama finishes downloading Llama3.1. You can inspect the docker
-  console logs.
-
-To open n8n at any time, bookmark and open <http://localhost:5678/> in your
-browser.
+To open n8n at any time, visit <http://localhost:5678/> in your browser.
 
 With your n8n instance, you’ll have access to over 400 integrations and a
 suite of basic and advanced AI nodes such as
@@ -80,15 +83,15 @@ language model and Qdrant as your vector store.
 ### For Nvidia GPU users
 
 ```
-docker compose -profile gpu-nvidia pull
-docker compose create && docker compose up -d
+docker compose --profile gpu-nvidia pull
+docker compose create && docker compose up
 ```
 
 ### For everyone else
 
 ```
 docker compose --profile cpu pull
-docker compose create && docker compose up -d
+docker compose create && docker compose up
 ```
 
 ## 👓 Recommended Reading
@@ -102,7 +105,10 @@ community forum and pop a message in the Discord!
 - [Langchain Concepts in n8n](https://docs.n8n.io/advanced-ai/langchain/langchain-n8n/)
 - [Demonstration of key differences between agents and chains](https://docs.n8n.io/advanced-ai/examples/agent-chain-comparison/)
 - [What are vector databases?](https://docs.n8n.io/advanced-ai/examples/understand-vector-databases/)
-- Oleg’s Hangout demo (currently unlisted on n8n’s Youtube channel)
+
+## 🎥 Video walkthrough
+
+- [Installing and using Local AI for n8n](https://www.youtube.com/watch?v=xz_X2N-hPg0)
 
 ## 🛍️ More AI Templates
 
