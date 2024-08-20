@@ -53,11 +53,13 @@ cd self-hosted-ai-demo
 docker compose --profile cpu up
 ```
 
-If you’re using a Mac with an M1 or newer processor, you can run Ollama on
-your host machine for faster GPU inference. Unfortunately, you can’t expose
-the GPU to Docker instances. Check the [Ollama homepage](https://ollama.com/)
-for installation instructions, and use `http://host.docker.internal:11434/` as
-the Ollama host in your credentials.
+> [!TIP]
+> If you’re using a Mac with an M1 or newer processor, you can run Ollama on
+> your host machine for faster GPU inference. Unfortunately, you can’t expose
+> the GPU to Docker instances. Check the
+> [Ollama homepage](https://ollama.com/) for installation instructions, and
+> use `http://host.docker.internal:11434/` as the Ollama host in your
+> credentials.
 
 ## ⚡️ Quick start and usage
 
