@@ -9,7 +9,7 @@ platform with a curated list of compatible AI products and components to
 quickly get started with building self-hosted AI workflows.
 
 > [!TIP]
-> [Read the announcement]()
+> [Read the announcement](https://blog.n8n.io/self-hosted-ai/)
 
 ### What’s included
 
