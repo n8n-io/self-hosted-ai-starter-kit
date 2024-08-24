@@ -50,6 +50,9 @@ cd self-hosted-ai-starter-kit
    ```bash
    docker compose --profile gpu-nvidia up
    ```
+   *You must have an Nvidia GPU to use this profile.*
+   *If you don't have an Nvidia GPU, use the CPU profile.*
+
 
 * For CPU Setup ( *No GPU* or *Non-Nvidia GPU* )
    ```bash
