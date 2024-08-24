@@ -44,15 +44,17 @@ git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
 cd self-hosted-ai-starter-kit
 ```
 
-### For Nvidia GPU Setup
-```bash
-docker compose --profile gpu-nvidia up
-```
+### Running n8n using Docker Compose
 
-### For CPU Setup
-```bash
-docker compose --profile cpu up
-```
+* For Nvidia GPU Setup
+   ```bash
+   docker compose --profile gpu-nvidia up
+   ```
+
+* For CPU Setup
+   ```bash
+   docker compose --profile cpu up
+   ```
 
 
 
