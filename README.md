@@ -1,8 +1,6 @@
 # Self-hosted AI starter kit
 
-**Self-hosted AI Starter Kit** is an open, docker compose template that
-quickly bootstraps a fully featured Local AI and Low Code development
-environment.
+**Self-hosted AI Starter Kit** is an open-source Docker Compose template designed to swiftly initialize a comprehensive local AI and low-code development environment.
 
 ![n8n.io - Screenshot](https://raw.githubusercontent.com/n8n-io/self-hosted-ai-starter-kit/main/assets/n8n-demo.gif)
 
@@ -27,15 +25,15 @@ store with an comprehensive API
 ✅ [**PostgreSQL**](https://www.postgresql.org/) -  Workhorse of the Data
 Engineering world, handles large amounts of data safely.
 
-### What you can build
+### What You Can Build
 
-⭐️ AI Agents which can schedule appointments
+⭐️ **AI Agents** for scheduling appointments
 
-⭐️ Summarise company PDFs without leaking data
+⭐️ **Summarize Company PDFs** securely without data leaks
 
-⭐️ Smarter slack bots for company comms and IT-ops
+⭐️ **Smarter Slack Bots** for enhanced company communications and IT operations
 
-⭐️ Analyse financial documents privately and for little cost
+⭐️ **Private Financial Document Analysis** at minimal cost
 
 ## Installation
 
@@ -68,10 +66,8 @@ docker compose --profile cpu up
 
 ## ⚡️ Quick start and usage
 
-The main component of the self-hosted AI starter kit is a docker compose file
-pre-configured with network and disk so there isn’t much else you need to
-install. After completing the installation steps above, follow the steps below
-to get started.
+The core of the Self-hosted AI Starter Kit is a Docker Compose file, pre-configured with network and storage settings, minimizing the need for additional installations.
+After completing the installation steps above, simply follow the steps below to get started.
 
 1. Open <http://localhost:5678/> in your browser to set up n8n. You’ll only
    have to do this once.
@@ -100,16 +96,16 @@ language model and Qdrant as your vector store.
 
 ## Upgrading
 
-### For Nvidia GPU users
+* ### For Nvidia GPU Setups:
 
-```
+```bash
 docker compose --profile gpu-nvidia pull
 docker compose create && docker compose up
 ```
 
-### For everyone else
+* ### For Non-GPU Setups:
 
-```
+```bash
 docker compose --profile cpu pull
 docker compose create && docker compose up
 ```
