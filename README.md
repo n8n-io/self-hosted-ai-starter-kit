@@ -39,21 +39,24 @@ Engineering world, handles large amounts of data safely.
 
 ## Installation
 
-### For Nvidia GPU users
+### Cloning the Repository
 
-```
+```bash
 git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
 cd self-hosted-ai-starter-kit
+```
+
+### For Nvidia GPU Setup
+```bash
 docker compose --profile gpu-nvidia up
 ```
 
-### For everyone else
-
-```
-git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
-cd self-hosted-ai-starter-kit
+### For CPU Setup
+```bash
 docker compose --profile cpu up
 ```
+
+
 
 > [!TIP]
 > If you’re using a Mac with an M1 or newer processor, you can run Ollama on
