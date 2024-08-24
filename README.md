@@ -51,7 +51,7 @@ cd self-hosted-ai-starter-kit
    docker compose --profile gpu-nvidia up
    ```
 
-* For CPU Setup
+* For CPU Setup ( *No GPU* or *Non-Nvidia GPU* )
    ```bash
    docker compose --profile cpu up
    ```
