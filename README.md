@@ -65,7 +65,8 @@ docker compose --profile cpu up
 > the GPU to Docker instances. Check the
 > [Ollama homepage](https://ollama.com/) for installation instructions, and
 > use `http://host.docker.internal:11434/` as the Ollama host in your
-> credentials.
+> credentials. You can prevent starting up Ollama in docker by not passing in
+> a profile in the commands below: `docker compose up`
 
 ## ⚡️ Quick start and usage
 
