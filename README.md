@@ -47,6 +47,10 @@ cd self-hosted-ai-starter-kit
 docker compose --profile gpu-nvidia up
 ```
 
+> [!NOTE]
+> If you have not used your Nvidia GPU with Docker before, please follow the
+> [Ollama Docker instructions](https://github.com/ollama/ollama/blob/main/docs/docker.md).
+
 ### For everyone else
 
 ```
