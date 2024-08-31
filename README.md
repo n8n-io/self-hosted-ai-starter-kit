@@ -70,9 +70,9 @@ git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
 cd self-hosted-ai-starter-kit
 docker compose up
 ```
-
-After you followed the quick start set-up below, change the Ollama credentials
-by using `http://host.docker.internal:11434/` as the host.
+After you see Editor is now accessible via: http://localhost:5678/
+Head to http://localhost:5678/home/credentials
+Click on Local Ollama service and change the base url to http://host.docker.internal:11434/
 
 ### For everyone else
 
