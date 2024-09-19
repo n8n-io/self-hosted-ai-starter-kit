@@ -121,7 +121,7 @@ language model and Qdrant as your vector store.
 
 ## Upgrading
 
-* ### For Nvidia GPU Setups:
+* ### For Nvidia GPU setups:
 
 ```bash
 docker compose --profile gpu-nvidia pull
