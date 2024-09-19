@@ -135,7 +135,7 @@ docker compose pull
 docker compose create && docker compose up
 ```
 
-* ### For Non-GPU Setups:
+* ### For Non-GPU setups:
 
 ```bash
 docker compose --profile cpu pull
