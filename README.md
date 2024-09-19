@@ -25,7 +25,7 @@ store with an comprehensive API
 ✅ [**PostgreSQL**](https://www.postgresql.org/) -  Workhorse of the Data
 Engineering world, handles large amounts of data safely.
 
-### What You Can Build
+### What you can build
 
 ⭐️ **AI Agents** for scheduling appointments
 
