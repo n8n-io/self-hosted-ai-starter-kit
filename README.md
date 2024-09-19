@@ -46,28 +46,48 @@ cd self-hosted-ai-starter-kit
 
 ### Running n8n using Docker Compose
 
-* For Nvidia GPU Setup
-   ```bash
-   docker compose --profile gpu-nvidia up
-   ```
-   *You must have an Nvidia GPU to use this profile.*
-   *If you don't have an Nvidia GPU, use the CPU profile.*
+#### For Nvidia GPU users
 
+```
+git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
+cd self-hosted-ai-starter-kit
+docker compose --profile gpu-nvidia up
+```
 
-* For CPU Setup ( *No GPU* or *Non-Nvidia GPU* )
-   ```bash
-   docker compose --profile cpu up
-   ```
+> [!NOTE]
+> If you have not used your Nvidia GPU with Docker before, please follow the
+> [Ollama Docker instructions](https://github.com/ollama/ollama/blob/main/docs/docker.md).
 
+#### For Mac / Apple Silicon users
 
+If you’re using a Mac with an M1 or newer processor, you can't expose your GPU
+to the Docker instance, unfortunately. There are two options in this case:
 
-> [!TIP]
-> If you’re using a Mac with an M1 or newer processor, you can run Ollama on
-> your host machine for faster GPU inference. Unfortunately, you can’t expose
-> the GPU to Docker instances. Check the
-> [Ollama homepage](https://ollama.com/) for installation instructions, and
-> use `http://host.docker.internal:11434/` as the Ollama host in your
-> credentials.
+1. Run the starter kit fully on CPU, like in the section "For everyone else"
+   below
+2. Run Ollama on your Mac for faster inference, and connect to that from the
+   n8n instance
+
+If you want to run Ollama on your mac, check the
+[Ollama homepage](https://ollama.com/)
+for installation instructions, and run the starter kit as follows:
+
+```
+git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
+cd self-hosted-ai-starter-kit
+docker compose up
+```
+
+After you followed the quick start set-up below, change the Ollama credentials
+by using `http://host.docker.internal:11434/` as the host.
+
+#### For everyone else
+
+```
+git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
+cd self-hosted-ai-starter-kit
+docker compose --profile cpu up
+```
 
 ## ⚡️ Quick start and usage
 
@@ -105,6 +125,13 @@ language model and Qdrant as your vector store.
 
 ```bash
 docker compose --profile gpu-nvidia pull
+docker compose create && docker compose --profile gpu-nvidia up
+```
+
+### For Mac / Apple Silicon users
+
+```
+docker compose pull
 docker compose create && docker compose up
 ```
 
@@ -112,7 +139,7 @@ docker compose create && docker compose up
 
 ```bash
 docker compose --profile cpu pull
-docker compose create && docker compose up
+docker compose create && docker compose --profile cpu up
 ```
 
 ## 👓 Recommended reading
