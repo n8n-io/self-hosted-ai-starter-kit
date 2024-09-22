@@ -74,6 +74,14 @@ docker compose up
 After you followed the quick start set-up below, change the Ollama credentials
 by using `http://host.docker.internal:11434/` as the host.
 
+### For AMD GPU users
+
+```
+git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
+cd self-hosted-ai-starter-kit
+docker compose --profile gpu-amd up
+```
+
 ### For everyone else
 
 ```
