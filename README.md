@@ -1,8 +1,6 @@
 # Self-hosted AI starter kit
 
-**Self-hosted AI Starter Kit** is an open, docker compose template that
-quickly bootstraps a fully featured Local AI and Low Code development
-environment.
+**Self-hosted AI Starter Kit** is an open-source Docker Compose template designed to swiftly initialize a comprehensive local AI and low-code development environment.
 
 ![n8n.io - Screenshot](https://raw.githubusercontent.com/n8n-io/self-hosted-ai-starter-kit/main/assets/n8n-demo.gif)
 
@@ -29,17 +27,26 @@ Engineering world, handles large amounts of data safely.
 
 ### What you can build
 
-⭐️ AI Agents which can schedule appointments
+⭐️ **AI Agents** for scheduling appointments
 
-⭐️ Summarise company PDFs without leaking data
+⭐️ **Summarize Company PDFs** securely without data leaks
 
-⭐️ Smarter slack bots for company comms and IT-ops
+⭐️ **Smarter Slack Bots** for enhanced company communications and IT operations
 
-⭐️ Analyse financial documents privately and for little cost
+⭐️ **Private Financial Document Analysis** at minimal cost
 
 ## Installation
 
-### For Nvidia GPU users
+### Cloning the Repository
+
+```bash
+git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
+cd self-hosted-ai-starter-kit
+```
+
+### Running n8n using Docker Compose
+
+#### For Nvidia GPU users
 
 ```
 git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
@@ -51,7 +58,7 @@ docker compose --profile gpu-nvidia up
 > If you have not used your Nvidia GPU with Docker before, please follow the
 > [Ollama Docker instructions](https://github.com/ollama/ollama/blob/main/docs/docker.md).
 
-### For Mac / Apple Silicon users
+#### For Mac / Apple Silicon users
 
 If you’re using a Mac with an M1 or newer processor, you can't expose your GPU
 to the Docker instance, unfortunately. There are two options in this case:
@@ -74,7 +81,7 @@ docker compose up
 After you followed the quick start set-up below, change the Ollama credentials
 by using `http://host.docker.internal:11434/` as the host.
 
-### For everyone else
+#### For everyone else
 
 ```
 git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
@@ -84,10 +91,8 @@ docker compose --profile cpu up
 
 ## ⚡️ Quick start and usage
 
-The main component of the self-hosted AI starter kit is a docker compose file
-pre-configured with network and disk so there isn’t much else you need to
-install. After completing the installation steps above, follow the steps below
-to get started.
+The core of the Self-hosted AI Starter Kit is a Docker Compose file, pre-configured with network and storage settings, minimizing the need for additional installations.
+After completing the installation steps above, simply follow the steps below to get started.
 
 1. Open <http://localhost:5678/> in your browser to set up n8n. You’ll only
    have to do this once.
@@ -116,9 +121,9 @@ language model and Qdrant as your vector store.
 
 ## Upgrading
 
-### For Nvidia GPU users
+* ### For Nvidia GPU setups:
 
-```
+```bash
 docker compose --profile gpu-nvidia pull
 docker compose create && docker compose --profile gpu-nvidia up
 ```
@@ -130,9 +135,9 @@ docker compose pull
 docker compose create && docker compose up
 ```
 
-### For everyone else
+* ### For Non-GPU setups:
 
-```
+```bash
 docker compose --profile cpu pull
 docker compose create && docker compose --profile cpu up
 ```
