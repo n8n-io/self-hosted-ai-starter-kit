@@ -100,7 +100,7 @@ After completing the installation steps above, simply follow the steps below to 
    <http://localhost:5678/workflow/srOnR8PAY3u4RSwb>
 3. Select **Test workflow** to start running the workflow.
 4. If this is the first time you’re running the workflow, you may need to wait
-   until Ollama finishes downloading Llama3.1. You can inspect the docker
+   until Ollama finishes downloading Llama3.2. You can inspect the docker
    console logs to check on the progress.
 
 To open n8n at any time, visit <http://localhost:5678/> in your browser.
