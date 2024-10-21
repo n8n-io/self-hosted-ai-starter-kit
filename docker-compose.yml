@@ -3,6 +3,7 @@ volumes:
   postgres_storage:
   ollama_storage:
   qdrant_storage:
+  redis_storage:
 
 networks:
   demo:
@@ -21,6 +22,7 @@ x-n8n: &service-n8n
     - N8N_USER_MANAGEMENT_JWT_SECRET
   links:
     - postgres
+    - redis
 
 x-ollama: &service-ollama
   image: ollama/ollama:latest
@@ -60,6 +62,21 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:latest
+    container_name: redis
+    networks: ['demo']
+    restart: unless-stopped
+    volumes:
+      - redis_storage:/data
+    ports:
+      - 6379:6379
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+ 
   n8n-import:
     <<: *service-n8n
     container_name: n8n-import
@@ -71,6 +88,8 @@ services:
       - ./n8n/backup:/backup
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   n8n:
@@ -88,6 +107,8 @@ services:
         condition: service_healthy
       n8n-import:
         condition: service_completed_successfully
+      redis:
+        condition: service_healthy
 
   qdrant:
     image: qdrant/qdrant
