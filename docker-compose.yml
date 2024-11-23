@@ -105,12 +105,10 @@ services:
 
   ollama-cpu:
     profiles: ["cpu"]
-    hostname: ollama-cpu
     <<: *service-ollama
 
   ollama-gpu:
     profiles: ["gpu-nvidia"]
-    hostname: ollama-gpu
     <<: *service-ollama
     deploy:
       resources:
