@@ -1,0 +1,6 @@
+# Ignore Local Environment Variables
+
+data/
+letsencrypt/
+n8n/backup/
+.env

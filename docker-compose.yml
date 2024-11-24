@@ -1,8 +1,28 @@
 volumes:
   n8n_storage:
+    driver: local
+    driver_opts:
+      type: none
+      device: /Volumes/T7/Storage/n8n_storage
+      o: bind
   postgres_storage:
+    driver: local
+    driver_opts:
+      type: none
+      device: /Volumes/T7/Storage/n8n_postgres
+      o: bind
   ollama_storage:
+    driver: local
+    driver_opts:
+      type: none
+      device: /Volumes/T7/Storage/models
+      o: bind
   qdrant_storage:
+    driver: local
+    driver_opts:
+      type: none
+      device: /Volumes/T7/Storage/n8n_qdrant_storage
+      o: bind
 
 networks:
   demo:
@@ -19,6 +39,12 @@ x-n8n: &service-n8n
     - N8N_PERSONALIZATION_ENABLED=false
     - N8N_ENCRYPTION_KEY
     - N8N_USER_MANAGEMENT_JWT_SECRET
+    - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS
+    - N8N_PROTOCOL
+    - N8N_SSL_CERT
+    - N8N_SSL_KEY
+    - N8N_PORT
+    - WEBHOOK_URL
   links:
     - postgres
 
@@ -41,7 +67,7 @@ x-init-ollama: &init-ollama
   entrypoint: /bin/sh
   command:
     - "-c"
-    - "sleep 3; OLLAMA_HOST=ollama:11434 ollama pull llama3.2"
+    - "sleep 3; OLLAMA_HOST=ollama:11434 ollama pull llama3.2; OLLAMA_HOST=ollama:11434 ollama pull nomic-embed-text; OLLAMA_HOST=ollama:11434 ollama run moondream"
 
 services:
   postgres:
@@ -79,6 +105,7 @@ services:
     restart: unless-stopped
     ports:
       - 5678:5678
+      - 443:443
     volumes:
       - n8n_storage:/home/node/.n8n
       - ./n8n/backup:/backup
@@ -125,3 +152,12 @@ services:
     <<: *init-ollama
     depends_on:
       - ollama-gpu
+
+  nginx:
+    image: 'jc21/nginx-proxy-manager:latest'
+    restart: unless-stopped
+    ports:
+      - '81:81'
+    volumes:
+      - ./data:/data
+      - ./letsencrypt:/etc/letsencrypt
