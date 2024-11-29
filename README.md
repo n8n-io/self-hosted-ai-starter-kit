@@ -19,6 +19,9 @@ integrations and advanced AI components
 ✅ [**Ollama**](https://ollama.com/) - Cross-platform LLM platform to install
 and run the latest local LLMs
 
+✅ [**Open WebUI**](https://openwebui.com/) - ChatGPT-like interface to
+privately interact with your local models and N8N agents
+
 ✅ [**Qdrant**](https://qdrant.tech/) - Open-source, high performance vector
 store with an comprehensive API
 
@@ -104,6 +107,7 @@ After completing the installation steps above, simply follow the steps below to 
    console logs to check on the progress.
 
 To open n8n at any time, visit <http://localhost:5678/> in your browser.
+To open Open WebUI at any time, visit <http://localhost:3000/>.
 
 With your n8n instance, you’ll have access to over 400 integrations and a
 suite of basic and advanced AI nodes such as
