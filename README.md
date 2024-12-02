@@ -75,9 +75,27 @@ If you want to run Ollama on your mac, check the
 [Ollama homepage](https://ollama.com/)
 for installation instructions, and run the starter kit as follows:
 
+1. Getting source files
+Clone this repository into your host server and cd into it
+
 ```
-git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
+git clone https://github.com/pulsar-code/self-hosted-ai-starter-kit.git
 cd self-hosted-ai-starter-kit
+```
+
+2. Preparing the configuration
+This is perhaps the most important part of the deployment process, please read carefully.
+It is required that there is a .env file in the root directory of the repository.
+To get started, copy the template deploy.env as .env using the following shell commands:
+cp deploy.env .env
+Kindly read through the comments for each option
+Modify the values in .env according to your needs
+
+3. Running the services
+Start and run the AI Starter Kit.
+The following command will build and start the AI Starter Kit.
+
+```
 docker compose up
 ```
 
