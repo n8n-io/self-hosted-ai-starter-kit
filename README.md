@@ -61,11 +61,15 @@ cd self-hosted-ai-starter-kit
 2. Preparing the configuration
 
 This is perhaps the most important part of the deployment process, please read carefully.
-It is required that there is a .env file in the root directory of the repository.
-To get started, copy the template deploy.env as .env using the following shell commands:
-cp deploy.env .env
-Kindly read through the comments for each option
-Modify the values in .env according to your needs
+It is required that there is a `.env` file in the root directory of the repository.
+To get started, copy the template `env.example` as `.env` using the following shell commands:
+
+```
+cp env.example .env
+```
+
+Kindly read through the comments for each option.
+Modify the values in `.env` according to your needs.
 
 3. Running the services
 
