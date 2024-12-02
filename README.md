@@ -49,20 +49,6 @@ cd self-hosted-ai-starter-kit
 
 ### Running n8n using Docker Compose
 
-#### For Nvidia GPU users
-
-```
-git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
-cd self-hosted-ai-starter-kit
-docker compose --profile gpu-nvidia up
-```
-
-> [!NOTE]
-> If you have not used your Nvidia GPU with Docker before, please follow the
-> [Ollama Docker instructions](https://github.com/ollama/ollama/blob/main/docs/docker.md).
-
-#### For Mac / Apple Silicon users
-
 1. Getting source files
 
 Clone this repository into your host server and cd into it
@@ -85,6 +71,18 @@ Modify the values in .env according to your needs
 
 Start and run the AI Starter Kit.
 
+#### For Nvidia GPU users
+
+```
+docker compose --profile gpu-nvidia up
+```
+
+> [!NOTE]
+> If you have not used your Nvidia GPU with Docker before, please follow the
+> [Ollama Docker instructions](https://github.com/ollama/ollama/blob/main/docs/docker.md).
+
+#### For Mac / Apple Silicon users
+
 If you’re using a Mac with an M1 or newer processor, you can't expose your GPU
 to the Docker instance, unfortunately. There are two options in this case:
 
@@ -96,8 +94,6 @@ to the Docker instance, unfortunately. There are two options in this case:
 If you want to run Ollama on your mac, check the
 [Ollama homepage](https://ollama.com/)
 for installation instructions, and run the starter kit as follows:
-
-The following command will build and start the AI Starter Kit.
 
 ```
 docker compose up
