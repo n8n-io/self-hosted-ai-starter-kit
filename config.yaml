@@ -1,0 +1,6 @@
+# Configuration file for the project
+
+# Set to 'cpu' or 'gpu'
+execution_mode: 'gpu'
+# Set to 'create' or 'up'
+compose_mode: 'up'

@@ -46,13 +46,41 @@ cd self-hosted-ai-starter-kit
 
 ### Running n8n using Docker Compose
 
-#### For Nvidia GPU users
+The application can be run using the included `run.bat` script, which automatically handles different execution modes based on your system configuration:
 
-```
-git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
+```bash
+git pull origin dev
 cd self-hosted-ai-starter-kit
-docker compose --profile gpu-nvidia up
+run.bat
 ```
+
+The script will:
+1. Read configuration from `config.yaml`
+2. Automatically detect and use the appropriate execution mode (CPU or GPU)
+3. Handle Docker container management
+4. Start the application with the correct Docker Compose profile
+
+You can configure the execution mode in `config.yaml`:
+```yaml
+execution_mode: cpu  # Options: cpu, gpu
+compose_mode: up     # Options: create, up
+```
+
+- `execution_mode`: 
+  - `cpu`: Forces CPU-only execution
+    - Useful for systems without GPU or when you want to limit resource usage
+  - `gpu`: Forces GPU execution
+    - Requires NVIDIA GPU with CUDA support
+    - Provides optimal performance for AI and machine learning workloads
+
+- `compose_mode`: 
+  - `create`: Prepares containers without starting them
+    - Useful for configuration checks
+    - Allows manual inspection of container setup
+    - Prevents immediate container startup
+  - `up`: Creates and immediately starts containers
+    - Fully initializes and launches all configured services
+    - Recommended for standard deployment scenarios
 
 > [!NOTE]
 > If you have not used your Nvidia GPU with Docker before, please follow the
@@ -119,14 +147,29 @@ language model and Qdrant as your vector store.
 > combines robust components that work well together for proof-of-concept
 > projects. You can customize it to meet your specific needs
 
-## Upgrading
+## System Requirements Check
 
-* ### For Nvidia GPU setups:
+Before running the starter kit, you can check if your system meets the recommended requirements by running the included `check_system.bat` script:
 
 ```bash
-docker compose --profile gpu-nvidia pull
-docker compose create && docker compose --profile gpu-nvidia up
+check_system.bat
 ```
+The script will check and provide information about:
+- CPU cores and specifications
+- GPU RAM and capabilities
+- Docker installation status
+- Python installation status
+
+The system will be rated based on the following criteria:
+- **Excellent**: 8+ CPU cores and 4GB+ GPU RAM
+- **Good**: 8+ CPU cores with less GPU RAM
+- **Fair**: 4+ CPU cores
+- **Poor**: Less than 4 CPU cores
+
+This rating helps you understand how well your system will perform with AI workloads.
+
+## Upgrading
+
 
 ### For Mac / Apple Silicon users
 
@@ -135,12 +178,18 @@ docker compose pull
 docker compose create && docker compose up
 ```
 
-* ### For Non-GPU setups:
+### For Non-GPU setups and For Nvidia GPU setups
 
 ```bash
-docker compose --profile cpu pull
-docker compose create && docker compose --profile cpu up
+run.bat
 ```
+(Set `compose_mode: up` in `config.yaml` to start containers)
+(Set `execution_mode: gpu` in `config.yaml` to set for CPU or GPU)
+
+The script supports flexible container management:
+- Prepare containers without immediate startup
+- Create and launch services in a single step
+- Easily switch between configuration and deployment modes
 
 ## 👓 Recommended reading
 
@@ -177,7 +226,8 @@ your local n8n instance.
 
 - [Tax Code Assistant](https://n8n.io/workflows/2341-build-a-tax-code-assistant-with-qdrant-mistralai-and-openai/)
 - [Breakdown Documents into Study Notes with MistralAI and Qdrant](https://n8n.io/workflows/2339-breakdown-documents-into-study-notes-using-templating-mistralai-and-qdrant/)
-- [Financial Documents Assistant using Qdrant and](https://n8n.io/workflows/2335-build-a-financial-documents-assistant-using-qdrant-and-mistralai/) [Mistral.ai](http://mistral.ai/)
+- [Financial Documents Assistant using Qdrant and](https://n8n.io/workflows/2335-build-a-financial-documents-assistant-using-qdrant-and-mistralai/) [
+Mistral.ai](http://mistral.ai/)
 - [Recipe Recommendations with Qdrant and Mistral](https://n8n.io/workflows/2333-recipe-recommendations-with-qdrant-and-mistral/)
 
 ## Tips & tricks

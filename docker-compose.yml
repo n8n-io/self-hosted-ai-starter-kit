@@ -42,7 +42,7 @@ x-init-ollama: &init-ollama
   entrypoint: /bin/sh
   command:
     - "-c"
-    - "sleep 3; OLLAMA_HOST=ollama:11434 ollama pull Artunik/artunik1.1;  OLLAMA_HOST=ollama:11434 ollama pull nomic-embed-text"
+    - "sleep 3; OLLAMA_HOST=ollama:11434 ollama pull Artunik/artunik1.1; OLLAMA_HOST=ollama:11434 ollama pull nomic-embed-text; OLLAMA_HOST=ollama:11434 ollama pull llama3.2"
 
 services:
   open-webui:
@@ -123,11 +123,13 @@ services:
     <<: *service-ollama
     deploy:
       resources:
+        limits:
+          memory: 4G
         reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+          memory: 2G
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
   ollama-pull-llama-cpu:
     profiles: ["cpu"]
@@ -138,5 +140,8 @@ services:
   ollama-pull-llama-gpu:
     profiles: ["gpu-nvidia"]
     <<: *init-ollama
+    command:
+      - "-c"
+      - "sleep 3; OLLAMA_HOST=ollama:11434 ollama pull orca-mini:3b"
     depends_on:
       - ollama-gpu
