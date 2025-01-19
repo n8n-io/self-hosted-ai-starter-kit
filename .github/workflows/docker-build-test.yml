@@ -1,0 +1,42 @@
+name: Docker Compose Test
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'docker-compose.yml'
+      - 'Dockerfile.n8n'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'docker-compose.yml'
+      - 'Dockerfile.n8n'
+  workflow_dispatch:
+
+jobs:
+  test-docker-compose:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create env file
+        run: |
+          echo "POSTGRES_USER=n8n" > .env
+          echo "POSTGRES_PASSWORD=n8n" >> .env
+          echo "POSTGRES_DB=n8n" >> .env
+          echo "N8N_ENCRYPTION_KEY=randomkey" >> .env
+          echo "N8N_USER_MANAGEMENT_JWT_SECRET=randomsecret" >> .env
+
+      - name: Test Docker Compose
+        run: |
+          docker compose up -d
+          sleep 30
+          docker compose ps
+          docker compose logs
+          docker compose down
