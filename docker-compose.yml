@@ -19,8 +19,13 @@ x-n8n: &service-n8n
     - N8N_PERSONALIZATION_ENABLED=false
     - N8N_ENCRYPTION_KEY
     - N8N_USER_MANAGEMENT_JWT_SECRET
+    - NODE_FUNCTION_ALLOW_EXTERNAL=*
+    - PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
   links:
     - postgres
+  build:
+    context: .
+    dockerfile: Dockerfile.n8n
 
 x-ollama: &service-ollama
   image: ollama/ollama:latest
