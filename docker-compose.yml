@@ -3,25 +3,49 @@ volumes:
     driver: local
     driver_opts:
       type: none
-      device: /Volumes/T7/Storage/n8n_storage
+      device: /storage/n8n_storage
       o: bind
   postgres_storage:
     driver: local
     driver_opts:
       type: none
-      device: /Volumes/T7/Storage/n8n_postgres
+      device: /storage/n8n_postgres
       o: bind
   ollama_storage:
     driver: local
     driver_opts:
       type: none
-      device: /Volumes/T7/Storage/models
+      device: /storage/models
       o: bind
   qdrant_storage:
     driver: local
     driver_opts:
       type: none
-      device: /Volumes/T7/Storage/n8n_qdrant_storage
+      device: /storage/n8n_qdrant_storage
+      o: bind
+  letsencrypt_storage:
+    driver: local
+    driver_opts:
+      type: none
+      device: /storage/n8n_letsencrypt
+      o: bind
+  letsencrypt_data:
+    driver: local
+    driver_opts:
+      type: none
+      device: /storage/n8n_letsencrypt/data
+      o: bind
+  n8n_backup:
+    driver: local
+    driver_opts:
+      type: none
+      device: /storage/n8n_storage/backup
+      o: bind
+  n8n_shared:
+    driver: local
+    driver_opts:
+      type: none
+      device: /storage/n8n_storage/shared
       o: bind
 
 networks:
@@ -94,7 +118,7 @@ services:
       - "-c"
       - "n8n import:credentials --separate --input=/backup/credentials && n8n import:workflow --separate --input=/backup/workflows"
     volumes:
-      - ./n8n/backup:/backup
+      - n8n_backup:/backup
     depends_on:
       postgres:
         condition: service_healthy
@@ -108,8 +132,8 @@ services:
       - 443:443
     volumes:
       - n8n_storage:/home/node/.n8n
-      - ./n8n/backup:/backup
-      - ./shared:/data/shared
+      - n8n_backup:/backup
+      - n8n_shared:/data/shared
     depends_on:
       postgres:
         condition: service_healthy
@@ -159,5 +183,5 @@ services:
     ports:
       - '81:81'
     volumes:
-      - ./data:/data
-      - ./letsencrypt:/etc/letsencrypt
+      - letsencrypt_data:/data
+      - letsencrypt_storage:/etc/letsencrypt
