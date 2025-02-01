@@ -47,6 +47,12 @@ volumes:
       type: none
       device: /storage/n8n_storage/shared
       o: bind
+  minio_storage:
+    driver: local
+    driver_opts:
+      type: none
+      device: /storage/minio_storage
+      o: bind
 
 networks:
   demo:
@@ -72,6 +78,7 @@ x-n8n: &service-n8n
   links:
     - postgres
 
+# Settings and configurations that are common for all containers
 x-ollama: &service-ollama
   image: ollama/ollama:latest
   container_name: ollama
@@ -177,11 +184,29 @@ services:
     depends_on:
       - ollama-gpu
 
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-01-20T14-49-07Z
+    container_name: minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER
+      - MINIO_ROOT_PASSWORD
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    command: server --console-address ":9001" /data/minio
+    volumes:
+      - minio_storage:/data
+
   nginx:
     image: 'jc21/nginx-proxy-manager:latest'
     restart: unless-stopped
     ports:
-      - '81:81'
+      - 81:81
     volumes:
       - letsencrypt_data:/data
       - letsencrypt_storage:/etc/letsencrypt
