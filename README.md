@@ -51,7 +51,7 @@ cd self-hosted-ai-starter-kit
 ```
 git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
 cd self-hosted-ai-starter-kit
-docker compose --profile gpu-nvidia up
+docker-compose --profile gpu-nvidia up
 ```
 
 > [!NOTE]
