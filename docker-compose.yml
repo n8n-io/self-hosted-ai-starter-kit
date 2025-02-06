@@ -19,6 +19,7 @@ x-n8n: &service-n8n
     - N8N_PERSONALIZATION_ENABLED=false
     - N8N_ENCRYPTION_KEY
     - N8N_USER_MANAGEMENT_JWT_SECRET
+    - OLLAMA_HOST=ollama:11434
   links:
     - postgres
 
@@ -41,7 +42,7 @@ x-init-ollama: &init-ollama
   entrypoint: /bin/sh
   command:
     - "-c"
-    - "sleep 3; OLLAMA_HOST=ollama:11434 ollama pull llama3.2"
+    - "sleep 3; ollama pull llama3.2"
 
 services:
   postgres:

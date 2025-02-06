@@ -78,8 +78,24 @@ cd self-hosted-ai-starter-kit
 docker compose up
 ```
 
-After you followed the quick start set-up below, change the Ollama credentials
-by using `http://host.docker.internal:11434/` as the host.
+##### For Mac users running OLLAMA locally
+
+If you're running OLLAMA locally on your Mac (not in Docker), you need to modify the OLLAMA_HOST environment variable
+in the n8n service configuration. Update the x-n8n section in your Docker Compose file as follows:
+
+```yaml
+x-n8n: &service-n8n
+  # ... other configurations ...
+  environment:
+    # ... other environment variables ...
+    - OLLAMA_HOST=host.docker.internal:11434
+```
+
+Additionally, after you see "Editor is now accessible via: <http://localhost:5678/>":
+
+1. Head to <http://localhost:5678/home/credentials>
+2. Click on "Local Ollama service"
+3. Change the base URL to "http://host.docker.internal:11434/"
 
 #### For everyone else
 
