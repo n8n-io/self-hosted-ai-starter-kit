@@ -121,7 +121,7 @@ services:
     image: ollama/ollama:rocm
     devices:
       - "/dev/kfd"
-      - "dev/dri"
+      - "/dev/dri"
 
   ollama-pull-llama-cpu:
     profiles: ["cpu"]
