@@ -42,7 +42,7 @@ x-init-ollama: &init-ollama
   entrypoint: /bin/sh
   command:
     - "-c"
-    - "sleep 3; ollama pull llama3.1"
+    - "sleep 3; ollama pull llama3.2"
 
 services:
   postgres:
