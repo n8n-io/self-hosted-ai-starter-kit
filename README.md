@@ -1,8 +1,6 @@
 # Self-hosted AI starter kit
 
-**Self-hosted AI Starter Kit** is an open, docker compose template that
-quickly bootstraps a fully featured Local AI and Low Code development
-environment.
+**Self-hosted AI Starter Kit** is an open-source Docker Compose template designed to swiftly initialize a comprehensive local AI and low-code development environment.
 
 ![n8n.io - Screenshot](https://raw.githubusercontent.com/n8n-io/self-hosted-ai-starter-kit/main/assets/n8n-demo.gif)
 
@@ -29,17 +27,26 @@ Engineering world, handles large amounts of data safely.
 
 ### What you can build
 
-⭐️ AI Agents which can schedule appointments
+⭐️ **AI Agents** for scheduling appointments
 
-⭐️ Summarise company PDFs without leaking data
+⭐️ **Summarize Company PDFs** securely without data leaks
 
-⭐️ Smarter slack bots for company comms and IT-ops
+⭐️ **Smarter Slack Bots** for enhanced company communications and IT operations
 
-⭐️ Analyse financial documents privately and for little cost
+⭐️ **Private Financial Document Analysis** at minimal cost
 
 ## Installation
 
-### For Nvidia GPU users
+### Cloning the Repository
+
+```bash
+git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
+cd self-hosted-ai-starter-kit
+```
+
+### Running n8n using Docker Compose
+
+#### For Nvidia GPU users
 
 ```
 git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
@@ -51,7 +58,15 @@ docker compose --profile gpu-nvidia up
 > If you have not used your Nvidia GPU with Docker before, please follow the
 > [Ollama Docker instructions](https://github.com/ollama/ollama/blob/main/docs/docker.md).
 
-### For Mac / Apple Silicon users
+### For AMD GPU users on Linux
+
+```
+git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
+cd self-hosted-ai-starter-kit
+docker compose --profile gpu-amd up
+```
+
+#### For Mac / Apple Silicon users
 
 If you’re using a Mac with an M1 or newer processor, you can't expose your GPU
 to the Docker instance, unfortunately. There are two options in this case:
@@ -71,18 +86,26 @@ cd self-hosted-ai-starter-kit
 docker compose up
 ```
 
-After you followed the quick start set-up below, change the Ollama credentials
-by using `http://host.docker.internal:11434/` as the host.
+##### For Mac users running OLLAMA locally
 
-### For AMD GPU users on Linux
+If you're running OLLAMA locally on your Mac (not in Docker), you need to modify the OLLAMA_HOST environment variable
+in the n8n service configuration. Update the x-n8n section in your Docker Compose file as follows:
 
+```yaml
+x-n8n: &service-n8n
+  # ... other configurations ...
+  environment:
+    # ... other environment variables ...
+    - OLLAMA_HOST=host.docker.internal:11434
 ```
-git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
-cd self-hosted-ai-starter-kit
-docker compose --profile gpu-amd up
-```
 
-### For everyone else
+Additionally, after you see "Editor is now accessible via: <http://localhost:5678/>":
+
+1. Head to <http://localhost:5678/home/credentials>
+2. Click on "Local Ollama service"
+3. Change the base URL to "http://host.docker.internal:11434/"
+
+#### For everyone else
 
 ```
 git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
@@ -92,10 +115,8 @@ docker compose --profile cpu up
 
 ## ⚡️ Quick start and usage
 
-The main component of the self-hosted AI starter kit is a docker compose file
-pre-configured with network and disk so there isn’t much else you need to
-install. After completing the installation steps above, follow the steps below
-to get started.
+The core of the Self-hosted AI Starter Kit is a Docker Compose file, pre-configured with network and storage settings, minimizing the need for additional installations.
+After completing the installation steps above, simply follow the steps below to get started.
 
 1. Open <http://localhost:5678/> in your browser to set up n8n. You’ll only
    have to do this once.
@@ -103,7 +124,7 @@ to get started.
    <http://localhost:5678/workflow/srOnR8PAY3u4RSwb>
 3. Select **Test workflow** to start running the workflow.
 4. If this is the first time you’re running the workflow, you may need to wait
-   until Ollama finishes downloading Llama3.1. You can inspect the docker
+   until Ollama finishes downloading Llama3.2. You can inspect the docker
    console logs to check on the progress.
 
 To open n8n at any time, visit <http://localhost:5678/> in your browser.
@@ -124,9 +145,9 @@ language model and Qdrant as your vector store.
 
 ## Upgrading
 
-### For Nvidia GPU users
+* ### For Nvidia GPU setups:
 
-```
+```bash
 docker compose --profile gpu-nvidia pull
 docker compose create && docker compose --profile gpu-nvidia up
 ```
@@ -138,9 +159,9 @@ docker compose pull
 docker compose create && docker compose up
 ```
 
-### For everyone else
+* ### For Non-GPU setups:
 
-```
+```bash
 docker compose --profile cpu pull
 docker compose create && docker compose --profile cpu up
 ```
@@ -172,7 +193,7 @@ your local n8n instance.
 - [AI Agent Chat](https://n8n.io/workflows/1954-ai-agent-chat/)
 - [AI chat with any data source (using the n8n workflow too)](https://n8n.io/workflows/2026-ai-chat-with-any-data-source-using-the-n8n-workflow-tool/)
 - [Chat with OpenAI Assistant (by adding a memory)](https://n8n.io/workflows/2098-chat-with-openai-assistant-by-adding-a-memory/)
-- [Use an open-source LLM (via HuggingFace)](https://n8n.io/workflows/1980-use-an-open-source-llm-via-huggingface/)
+- [Use an open-source LLM (via Hugging Face)](https://n8n.io/workflows/1980-use-an-open-source-llm-via-huggingface/)
 - [Chat with PDF docs using AI (quoting sources)](https://n8n.io/workflows/2165-chat-with-pdf-docs-using-ai-quoting-sources/)
 - [AI agent that can scrape webpages](https://n8n.io/workflows/2006-ai-agent-that-can-scrape-webpages/)
 
