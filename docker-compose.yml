@@ -20,8 +20,6 @@ x-n8n: &service-n8n
     - N8N_ENCRYPTION_KEY
     - N8N_USER_MANAGEMENT_JWT_SECRET
     - OLLAMA_HOST=ollama:11434
-  links:
-    - postgres
 
 x-ollama: &service-ollama
   image: ollama/ollama:latest
@@ -47,6 +45,7 @@ x-init-ollama: &init-ollama
 services:
   postgres:
     image: postgres:16-alpine
+    hostname: postgres
     networks: ['demo']
     restart: unless-stopped
     environment:
@@ -63,6 +62,7 @@ services:
 
   n8n-import:
     <<: *service-n8n
+    hostname: n8n-import
     container_name: n8n-import
     entrypoint: /bin/sh
     command:
@@ -76,6 +76,7 @@ services:
 
   n8n:
     <<: *service-n8n
+    hostname: n8n
     container_name: n8n
     restart: unless-stopped
     ports:
@@ -92,6 +93,7 @@ services:
 
   qdrant:
     image: qdrant/qdrant
+    hostname: qdrant
     container_name: qdrant
     networks: ['demo']
     restart: unless-stopped
