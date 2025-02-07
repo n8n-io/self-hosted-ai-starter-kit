@@ -152,7 +152,7 @@ docker compose --profile gpu-nvidia pull
 docker compose create && docker compose --profile gpu-nvidia up
 ```
 
-### For Mac / Apple Silicon users
+* ### For Mac / Apple Silicon users
 
 ```
 docker compose pull
