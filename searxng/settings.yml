@@ -1,0 +1,41 @@
+# see https://docs.searxng.org/admin/settings/settings.html#settings-use-default-settings
+use_default_settings: true
+
+general:
+  debug: false
+  enable_metrics: false
+
+server:
+  # base_url is defined in the SEARXNG_BASE_URL environment variable, see .env and docker-compose.yml
+  secret_key: "acf8f429d1affe7f7e952867c56be03145fe9e0647b65ce94c1b13da1a00ae80"  # change this!
+  limiter: false  # can be disabled for a private instance
+  default_http_headers:
+    X-Content-Type-Options: nosniff
+    X-XSS-Protection: 1; mode=block
+    X-Frame-Options: SAMEORIGIN
+    Referrer-Policy: no-referrer
+  method: "GET"
+  limiter: false
+  public_instance: false
+  request_timeout: 10.0
+  max_request_size: 16384
+
+ui:
+  static_use_hash: true
+
+redis:
+  url: redis://redis:6379/0
+
+cors: # CORS (Cross-Origin Resource Sharing)
+  enabled: true
+  allow_all_domains: true  # Allow all domains (set to true)
+
+search:
+  safe_search: 0
+  autocomplete: "google"
+  default_lang: "en"
+  formats: 
+    - json
+    - html
+  default_format: json
+  max_page: 10 
