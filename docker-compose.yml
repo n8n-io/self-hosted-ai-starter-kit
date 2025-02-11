@@ -35,6 +35,12 @@ volumes:
       type: none
       device: /storage/n8n_letsencrypt/data
       o: bind
+  nginx_data:
+    driver: local
+    driver_opts:
+      type: none
+      device: /storage/n8n_nginx_data
+      o: bind  
   n8n_backup:
     driver: local
     driver_opts:
@@ -139,10 +145,10 @@ services:
   n8n:
     <<: *service-n8n
     container_name: n8n
+    networks: ['demo']
     restart: unless-stopped
     ports:
       - 5678:5678
-      - 443:443
     volumes:
       - n8n_storage:/home/node/.n8n
       - n8n_backup:/backup
@@ -200,6 +206,8 @@ services:
     environment:
       - MINIO_ROOT_USER
       - MINIO_ROOT_PASSWORD
+      - MINIO_SERVER_URL
+      - MINIO_BROWSER_REDIRECT_URL
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 5s
@@ -212,11 +220,15 @@ services:
   nginx:
     image: 'jc21/nginx-proxy-manager:latest'
     restart: unless-stopped
+    networks: ['demo']
     ports:
+      - 80:80
       - 81:81
+      - 443:443
     volumes:
       - letsencrypt_data:/data
       - letsencrypt_storage:/etc/letsencrypt
+      - nginx_data:/etc/nginx
 
   redis:
     container_name: redis
