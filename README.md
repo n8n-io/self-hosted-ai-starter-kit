@@ -166,6 +166,20 @@ docker compose --profile cpu pull
 docker compose create && docker compose --profile cpu up
 ```
 
+* ### For Chrome functionality
+
+If you need Chrome functionality (for example, web scraping or PDF generation), use:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.chrome.yml --profile cpu up
+
+# NVIDIA GPU
+docker compose -f docker-compose.yml -f docker-compose.chrome.yml --profile gpu-nvidia up
+
+# AMD GPU
+docker compose -f docker-compose.yml -f docker-compose.chrome.yml --profile gpu-amd up
+```
+
 ## 👓 Recommended reading
 
 n8n is full of useful content for getting started quickly with its AI concepts
