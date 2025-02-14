@@ -1,0 +1,75 @@
+services:
+  - type: web
+    name: n8n
+    env: node
+    repo: https://github.com/YOUR_GITHUB_USERNAME/self-hosted-ai-starter-kit.git  # Your forked repo
+    branch: main # Or your branch
+    dockerfilePath: ./n8n/Dockerfile  # Path to the n8n Dockerfile
+    buildCommand: npm install && npm run build
+    startCommand: n8n start
+    envVars:
+      - key: DB_TYPE
+        value: postgresdb
+      - key: DB_POSTGRESDB_HOST
+        value: postgres
+      - key: DB_POSTGRESDB_PORT
+        value: "5432"
+      - key: DB_POSTGRESDB_DATABASE
+        value: ${POSTGRES_DB} #Use Render's default
+      - key: DB_POSTGRESDB_USER
+        value: ${POSTGRES_USER} #Use Render's default
+      - key: DB_POSTGRESDB_PASSWORD
+        value: ${POSTGRES_PASSWORD} #Use Render's default
+      - key: N8N_HOST
+        value: "0.0.0.0" # IMPORTANT for Render
+      - key: N8N_PORT
+        value: "5678"
+      - key: N8N_PROTOCOL
+        value: "http" #Change to https if you set up SSL
+      - key: WEBHOOK_URL
+        value: https://<YOUR_N8N_RENDER_APP_NAME>.onrender.com/  # Replace with your n8n app name
+      - key: N8N_LOG_LEVEL
+        value: info
+      - key: N8N_LOG_OUTPUT
+        value: console
+      - key: EXECUTIONS_DATA_PRUNE
+        value: "true"
+      - key: EXECUTIONS_DATA_MAX_AGE
+        value: "168"  # Example: keep data for 7 days
+      - key: EXECUTIONS_DATA_PRUNE_MAX_COUNT
+        value: "2000"
+      - key: N8N_DEFAULT_BINARY_DATA_MODE
+        value: filesystem
+      - key: N8N_METRICS
+        value: "false" # Disable if you do not want metrics
+    disk:
+      name: n8n_data
+      mountPath: /home/node/.n8n
+      sizeGB: 10 # Adjust as needed
+    healthCheckPath: /healthz
+    autoDeploy: true
+
+  - type: pserv # Persistent Service for Ollama
+    name: ollama
+    env: docker
+    image: ollama/ollama:latest
+    disk:
+      name: ollama_data
+      mountPath: /root/.ollama  # Where Ollama stores models
+      sizeGB: 20 # IMPORTANT: Adjust based on the size of the models you'll use!
+    startCommand: ollama serve # Ollama's serve command.
+    envVars:
+      - key: OLLAMA_HOST
+        value: 0.0.0.0 # Make Ollama accessible to other services.
+    autoDeploy: true
+
+  - type: pserv
+    name: postgres
+    env: postgres
+    plan: starter # Or another plan, if you choose
+    disk:
+      name: postgres_data
+      mountPath: /var/lib/postgresql/data
+      sizeGB: 10 # Or another size
+    postgres:
+      version: 14 # Or another supported version
