@@ -151,14 +151,14 @@ After completing the installation steps above, simply follow the steps below to 
    have to do this once.
 2. Open the included workflow:
    <http://localhost:5678/workflow/srOnR8PAY3u4RSwb>
-3. Before running the workflow, ensure the Llama2 model is downloaded:
+3. Before running the workflow, ensure the Llama3.2 model is downloaded:
    ```bash
    # If using sudo with Docker:
-   sudo docker exec -it ollama ollama pull llama2:latest
+   sudo docker exec -it ollama ollama pull llama3.2:latest
    # If your user is in the docker group:
-   docker exec -it ollama ollama pull llama2:latest
+   docker exec -it ollama ollama pull llama3.2:latest
    ```
-   This may take a few minutes depending on your internet connection.
+   This may take a few minutes depending on your internet connection. The model requires at least 16GB of RAM for optimal performance.
 4. Select **Test workflow** to start running the workflow.
 
 To open n8n at any time, visit <http://localhost:5678/> in your browser.
