@@ -4,12 +4,14 @@ volumes:
   ollama_storage:
   qdrant_storage:
 
+
 networks:
   demo:
 
+
 x-n8n: &service-n8n
   image: n8nio/n8n:latest
-  networks: ['demo']
+  networks: [ 'demo' ]
   environment:
     - DB_TYPE=postgresdb
     - DB_POSTGRESDB_HOST=postgres
@@ -19,12 +21,27 @@ x-n8n: &service-n8n
     - N8N_PERSONALIZATION_ENABLED=false
     - N8N_ENCRYPTION_KEY
     - N8N_USER_MANAGEMENT_JWT_SECRET
-    - OLLAMA_HOST=ollama:11434
+    - OLLAMA_HOST=http://host.docker.internal:11434
+    - N8N_HOST=localhost
+    - N8N_PORT=5678
+    #- WEBHOOK_URL=http://localhost:5678
+    #- WEBHOOK_TUNNEL_URL=http://localhost:5678
+    #- N8N_EDITOR_BASE_URL=http://localhost:5678
+    #- WEBHOOK_URL=https://kuuumz.app.n8n.cloud/
+    #- WEBHOOK_TUNNEL_URL=https://kuuumz.app.n8n.cloud/
+    #- N8N_EDITOR_BASE_URL=https://kuuumz.app.n8n.cloud/
+    - WEBHOOK_URL=https://ekxykxckl7p8f52ar56qjvjz.hooks.n8n.cloud/
+    - WEBHOOK_TUNNEL_URL=https://ekxykxckl7p8f52ar56qjvjz.hooks.n8n.cloud/
+    - N8N_EDITOR_BASE_URL=https://ekxykxckl7p8f52ar56qjvjz.hooks.n8n.cloud/
+    #- N8N_TUNNEL_SUBDOMAIN=kuuumz # Add this line
+    - N8N_TUNNEL_SUBDOMAIN=ekxykxckl7p8f52ar56qjvjz # Add this line
+    - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true # Add this line
+  command: start --tunnel
 
 x-ollama: &service-ollama
   image: ollama/ollama:latest
   container_name: ollama
-  networks: ['demo']
+  networks: [ 'demo' ]
   restart: unless-stopped
   ports:
     - 11434:11434
@@ -33,13 +50,13 @@ x-ollama: &service-ollama
 
 x-init-ollama: &init-ollama
   image: ollama/ollama:latest
-  networks: ['demo']
+  networks: [ 'demo' ]
   container_name: ollama-pull-llama
   volumes:
     - ollama_storage:/root/.ollama
   entrypoint: /bin/sh
   environment:
-    - OLLAMA_HOST=ollama:11434
+    - OLLAMA_HOST=http://host.docker.internal:11434
   command:
     - "-c"
     - "sleep 3; ollama pull llama3.2"
@@ -48,16 +65,16 @@ services:
   postgres:
     image: postgres:16-alpine
     hostname: postgres
-    networks: ['demo']
+    networks: [ 'demo' ]
     restart: unless-stopped
     environment:
-      - POSTGRES_USER
-      - POSTGRES_PASSWORD
-      - POSTGRES_DB
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
     volumes:
       - postgres_storage:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      test: [ 'CMD-SHELL', 'pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}' ]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -97,7 +114,7 @@ services:
     image: qdrant/qdrant
     hostname: qdrant
     container_name: qdrant
-    networks: ['demo']
+    networks: [ 'demo' ]
     restart: unless-stopped
     ports:
       - 6333:6333
@@ -105,11 +122,11 @@ services:
       - qdrant_storage:/qdrant/storage
 
   ollama-cpu:
-    profiles: ["cpu"]
+    profiles: [ "cpu" ]
     <<: *service-ollama
 
   ollama-gpu:
-    profiles: ["gpu-nvidia"]
+    profiles: [ "gpu-nvidia" ]
     <<: *service-ollama
     deploy:
       resources:
@@ -117,10 +134,10 @@ services:
           devices:
             - driver: nvidia
               count: 1
-              capabilities: [gpu]
+              capabilities: [ gpu ]
 
   ollama-gpu-amd:
-    profiles: ["gpu-amd"]
+    profiles: [ "gpu-amd" ]
     <<: *service-ollama
     image: ollama/ollama:rocm
     devices:
@@ -128,20 +145,20 @@ services:
       - "/dev/dri"
 
   ollama-pull-llama-cpu:
-    profiles: ["cpu"]
+    profiles: [ "cpu" ]
     <<: *init-ollama
     depends_on:
       - ollama-cpu
 
   ollama-pull-llama-gpu:
-    profiles: ["gpu-nvidia"]
+    profiles: [ "gpu-nvidia" ]
     <<: *init-ollama
     depends_on:
       - ollama-gpu
 
   ollama-pull-llama-gpu-amd:
-    profiles: [gpu-amd]
+    profiles: [ gpu-amd ]
     <<: *init-ollama
     image: ollama/ollama:rocm
     depends_on:
-     - ollama-gpu-amd
+      - ollama-gpu-amd
