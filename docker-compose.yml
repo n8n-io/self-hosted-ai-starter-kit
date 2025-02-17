@@ -29,7 +29,7 @@ x-n8n: &service-n8n
     #- N8N_EDITOR_BASE_URL=http://localhost:5678
     #- WEBHOOK_URL=https://kuuumz.app.n8n.cloud/
     #- WEBHOOK_TUNNEL_URL=https://kuuumz.app.n8n.cloud/
-    #- N8N_EDITOR_BASE_URL=https://kuuumz.app.n8n.cloud/
+    #- N8N_EDITOR_BASE_URL=https://kuuumz.app.n8n.cloud/ #
     - WEBHOOK_URL=https://ekxykxckl7p8f52ar56qjvjz.hooks.n8n.cloud/
     - WEBHOOK_TUNNEL_URL=https://ekxykxckl7p8f52ar56qjvjz.hooks.n8n.cloud/
     - N8N_EDITOR_BASE_URL=https://ekxykxckl7p8f52ar56qjvjz.hooks.n8n.cloud/
