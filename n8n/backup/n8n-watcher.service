@@ -1,0 +1,26 @@
+[Unit]
+Description=n8n File Change Watcher
+After=docker.service
+Requires=docker.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=groot
+Group=groot
+WorkingDirectory=/home/groot/Github/hosted-n8n/n8n/backup
+Environment="DOCKER_HOST=unix:///run/user/1000/docker.sock"
+Environment="XDG_RUNTIME_DIR=/run/user/1000"
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStartPre=/bin/sh -c 'until docker container inspect n8n >/dev/null 2>&1; do sleep 5; done'
+ExecStart=/home/groot/Github/hosted-n8n/n8n/backup/watch-n8n.sh
+ExecStop=/bin/sh -c 'docker rm -f n8n-watcher >/dev/null 2>&1 || true'
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=10
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target 

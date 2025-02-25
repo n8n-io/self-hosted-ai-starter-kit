@@ -1,0 +1,66 @@
+# N8N GPU Environment Setup Commands
+## Step 1: Check current environment state
+docker ps -a
+docker volume ls
+docker network ls
+## Step 2: Stop and remove all n8n-related containers
+docker compose down --volumes --remove-orphans
+docker ps -a | grep -E 'ollama|crawl4ai|nginx'
+# Check ollama volumes
+docker volume ls | grep ollama
+# Check ollama images
+docker images | grep ollama
+# Check crawl4ai image
+docker images | grep crawl4ai
+# Check if lab network exists
+docker network ls | grep lab
+# Check if .env file exists
+ls -la .env
+# Create backup of docker-compose.yml
+cp docker-compose.yml docker-compose.yml.backup
+## Step 3: Start the environment with GPU support
+docker compose --profile gpu-nvidia up -d
+## Step 4: Verify the containers are running
+docker ps
+docker ps -a | grep ollama-pull-llama
+## Step 5: Verify GPU usage
+docker exec -it ollama nvidia-smi
+docker exec -it crawl4ai nvidia-smi
+## Step 6: Check if services are accessible
+curl -I http://localhost:8080
+curl -Ik https://localhost:8443
+docker port n8n
+## Step 7: Check container logs for issues
+docker logs nginx-proxy
+docker logs n8n
+## Step 8: Check nginx configuration
+docker exec nginx-proxy cat /etc/nginx/nginx.conf
+docker exec nginx-proxy ls -la /etc/nginx/sites-enabled/
+docker exec nginx-proxy cat /etc/nginx/sites-enabled/n8n.conf
+## Step 9: Update /etc/hosts file
+cat /etc/hosts
+curl -Ik https://n8n.mulder.local:8443
+curl -Ik https://crawl4ai.mulder.local:8443
+curl -I http://localhost:11235
+docker logs crawl4ai | head -40
+curl -I http://localhost:11235/health
+curl http://localhost:11235/health
+## Step 10: Verify Ollama is working correctly
+curl -I http://localhost:11434/api/health
+curl http://localhost:11434/api/tags
+docker logs ollama
+docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ollama
+curl -I http://172.19.0.2:11434/api/health
+curl -I http://ollama.mulder.local:8443/api/tags
+docker exec nginx-proxy cat /etc/nginx/sites-enabled/ollama.conf
+curl https://ollama.mulder.local:8443/api/tags
+## Summary of Service Access
+# N8N: https://n8n.mulder.local:8443
+# Ollama: https://ollama.mulder.local:8443
+# Crawl4AI: http://localhost:11235/health
+# UPDATED: Crawl4AI: https://crawl4ai.mulder.local:8443/health
+# crawl4ai documentation: https://crawl4ai.mulder.local:8443/docs
+# crawl4ai OpenAPI schema: https://crawl4ai.mulder.local:8443/openapi.json
+# IMPORTANT: Within the Docker network, crawl4ai is accessible at http://crawl4ai:11235/
+# Within the Docker network, ollama is accessible at http://ollama:11434/
+# Within the Docker network, n8n is accessible at http://n8n:5678/
