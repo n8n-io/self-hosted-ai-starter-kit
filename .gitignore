@@ -1,0 +1,16 @@
+# Environment variables
+.env
+.env.*
+
+# IDE and editor files
+.vscode/
+.history/
+
+# Virtual environments
+.venv/
+.venv*/
+
+# Other
+node_modules/
+dist/
+*.log
