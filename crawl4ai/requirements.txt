@@ -1,0 +1,18 @@
+requests>=2.31.0
+urllib3>=2.1.0
+--extra-index-url https://download.pytorch.org/whl/cu126
+torch==2.6.0+cu126
+transformers==4.49.0
+numpy==2.2.3
+beautifulsoup4==4.13.3
+selenium==4.29.0
+playwright==1.50.0
+sentence-transformers==3.4.1
+tqdm>=4.67.1
+pillow>=11.1.0
+nvidia-cuda-runtime-cu12>=12.6
+fastapi==0.115.8
+uvicorn==0.34.0
+pydantic==2.10.6
+python-multipart==0.0.20
+httpx>=0.28.1 
