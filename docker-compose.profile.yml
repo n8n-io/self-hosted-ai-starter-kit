@@ -63,16 +63,7 @@ services:
     volumes:
       - /home/groot/nginx:/etc/nginx:ro
       - /home/groot/logs/nginx:/var/log/nginx
-    depends_on:
-      mcp-memory:
-        condition: service_healthy
-      mcp-seqthinking:
-        condition: service_healthy
-      n8n:
-        condition: service_healthy
-      qdrant:
-        condition: service_started
-    profiles: ["cpu", "gpu-nvidia", "gpu-amd"]
+    profiles: ["core", "mcp", "n8n", "ai", "cpu", "gpu-nvidia", "gpu-amd"]
     healthcheck:
       test: ["CMD", "nginx", "-t"]
       interval: 30s
@@ -90,6 +81,7 @@ services:
       - POSTGRES_DB
     volumes:
       - postgres_storage:/var/lib/postgresql/data
+    profiles: ["core", "n8n", "mcp", "cpu", "gpu-nvidia", "gpu-amd"]
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
       interval: 5s
@@ -109,6 +101,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    profiles: ["n8n", "cpu", "gpu-nvidia", "gpu-amd"]
 
   n8n:
     <<: *service-n8n
@@ -124,6 +117,7 @@ services:
         condition: service_healthy
       n8n-import:
         condition: service_completed_successfully
+    profiles: ["n8n", "cpu", "gpu-nvidia", "gpu-amd"]
     healthcheck:
       test: ["CMD", "wget", "--spider", "http://localhost:5678/healthz"]
       interval: 10s
@@ -139,13 +133,14 @@ services:
     restart: unless-stopped
     volumes:
       - qdrant_storage:/qdrant/storage
+    profiles: ["ai", "mcp", "cpu", "gpu-nvidia", "gpu-amd"]
 
   ollama-cpu:
-    profiles: ["cpu"]
+    profiles: ["ai", "cpu"]
     <<: *service-ollama
 
   ollama-gpu:
-    profiles: ["gpu-nvidia"]
+    profiles: ["ai", "gpu-nvidia"]
     <<: *service-ollama
     deploy:
       resources:
@@ -156,7 +151,7 @@ services:
               capabilities: [gpu]
 
   ollama-gpu-amd:
-    profiles: ["gpu-amd"]
+    profiles: ["ai", "gpu-amd"]
     <<: *service-ollama
     image: ollama/ollama:rocm
     devices:
@@ -164,19 +159,19 @@ services:
       - "/dev/dri"
 
   ollama-pull-llama-cpu:
-    profiles: ["cpu"]
+    profiles: ["ai", "cpu"]
     <<: *init-ollama
     depends_on:
       - ollama-cpu
 
   ollama-pull-llama-gpu:
-    profiles: ["gpu-nvidia"]
+    profiles: ["ai", "gpu-nvidia"]
     <<: *init-ollama
     depends_on:
       - ollama-gpu
 
   ollama-pull-llama-gpu-amd:
-    profiles: [gpu-amd]
+    profiles: ["ai", "gpu-amd"]
     <<: *init-ollama
     image: ollama/ollama:rocm
     depends_on:
@@ -214,7 +209,7 @@ services:
     depends_on:
       - qdrant
       - ollama-gpu
-    profiles: ["gpu-nvidia"]
+    profiles: ["utility", "gpu-nvidia"]
 
 
 #####################
@@ -245,7 +240,7 @@ services:
       start_period: 15s
     depends_on:
       - qdrant
-    profiles: ["cpu", "gpu-nvidia", "gpu-amd"]
+    profiles: ["mcp", "cpu", "gpu-nvidia", "gpu-amd"]
 
   mcp-seqthinking:
     image: mcp/sequentialthinking:latest
@@ -262,4 +257,10 @@ services:
       - OLLAMA_PORT=11434
     depends_on:
       - ollama-gpu
-    profiles: ["gpu-nvidia"]
+    profiles: ["mcp", "gpu-nvidia"]
+    healthcheck:
+      test: ["CMD-SHELL", "ps aux | grep python | grep -v grep || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s

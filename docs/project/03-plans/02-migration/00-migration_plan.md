@@ -29,6 +29,7 @@ Technical migration plan for documentation system implementation.
 
 ## Architecture
 ### Migration Process
+
 ```mermaid
 stateDiagram-v2
     [*] --> Analysis
@@ -41,6 +42,7 @@ stateDiagram-v2
 ```
 
 ### Resource Flow
+
 ```mermaid
 graph TD
     subgraph Source

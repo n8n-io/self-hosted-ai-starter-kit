@@ -1,6 +1,8 @@
 # Environment variables
 .env
 .env.*
+*/.env
+*/.env.*
 
 # IDE and editor files
 .vscode/

@@ -236,15 +236,3 @@ can:
   pro, the community and our team are ready to support with any challenges.
 - **Propose Ideas**: Have an idea for a feature or improvement? Let us know!
   We're always eager to hear what you'd like to see next.
-
-## Supabase Access Information
-
-The Supabase dashboard can be accessed at:
-- Direct access: http://localhost:8000
-- Nginx proxy: https://supabase.mulder.local:8443 (requires hosts file entry)
-
-**Credentials:**
-- Username: supabase
-- Password: yXTdO6z6NZt6jWdO+1sdTsaShy6Db5oh
-
-*Note: Keep this password secure and do not share it.*
