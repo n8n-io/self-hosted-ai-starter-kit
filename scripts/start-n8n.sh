@@ -5,8 +5,8 @@
 # in a project named "n8n" for better Docker UI organization.
 
 # Check if core services are running
-if ! docker ps | grep -q "core-postgres-1"; then
-  echo "Core services are not running. Starting them first..."
+if ! docker ps | grep -q "core-nginx-1"; then
+  echo "Core nginx is not running. Starting core infrastructure..."
   ./scripts/start-core.sh
 fi
 
@@ -21,17 +21,22 @@ else
   HW_PROFILE="cpu"
 fi
 
-# Start N8N services with hardware profile
-docker compose -f docker-compose.profile.yml -p n8n --profile n8n --profile $HW_PROFILE up -d
+# Start N8N services with hardware profile, explicitly listing services to avoid nginx
+docker compose -f docker-compose.profile.yml -p n8n --profile n8n --profile $HW_PROFILE up -d --no-deps n8n n8n-import
 
 # Check if N8N services started successfully
 if [ $? -eq 0 ]; then
   echo "Enabling nginx configuration for n8n..."
   # Create symbolic link for n8n.conf in sites-enabled
   sudo ln -sf /home/groot/nginx/sites-available/n8n.conf /home/groot/nginx/sites-enabled/n8n.conf
-  # Restart nginx to apply the configuration
-  docker restart nginx-proxy
-  echo "Nginx configuration for n8n enabled and nginx restarted."
+  # Restart core nginx to apply the configuration
+  if docker ps | grep -q "core-nginx-1"; then
+    echo "Restarting core nginx to apply configuration..."
+    docker restart core-nginx-1
+    echo "Nginx configuration for n8n enabled and core nginx restarted."
+  else
+    echo "Warning: core-nginx-1 container not found. Configuration enabled but nginx not restarted."
+  fi
 else
   echo "Failed to start N8N services. Nginx configuration not enabled."
 fi

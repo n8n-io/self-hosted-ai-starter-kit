@@ -15,7 +15,7 @@ if [ $? -eq 0 ]; then
   sudo rm -f /home/groot/nginx/sites-enabled/ollama.conf
   sudo rm -f /home/groot/nginx/sites-enabled/qdrant.conf
   # Restart nginx to apply the configuration
-  docker restart nginx-proxy
+  docker restart core-nginx
   echo "Nginx configuration for AI services disabled and nginx restarted."
 else
   echo "Failed to stop AI services. Nginx configuration not disabled."

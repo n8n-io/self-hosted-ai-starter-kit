@@ -1,6 +1,6 @@
 # Profile-Based Docker Compose Migration Plan
 
-**Version:** 1.1  
+**Version:** 1.3  
 **Date:** Feb 26, 2023  
 **Author:** System Administrator  
 **Status:** In Progress - Phase 1 Partially Completed  
@@ -10,18 +10,21 @@
 2. [Current State](#current-state)
 3. [Folder Structure](#folder-structure)
 4. [Architectural Considerations](#architectural-considerations)
-5. [Migration Goals](#migration-goals)
-6. [Implementation Timeline](#implementation-timeline)
-7. [Migration Plan](#migration-plan)
+5. [Network Configuration](#network-configuration)
+6. [Migration Goals](#migration-goals)
+7. [Implementation Timeline](#implementation-timeline)
+8. [Migration Plan](#migration-plan)
    - [Phase 1: Initial Deployment Testing](#phase-1-initial-deployment-testing)
+   - [Phase a: Resolve Current Issues](#phase-a-resolve-current-issues-new)
    - [Phase 2: Cross-Service Communication Verification](#phase-2-cross-service-communication-verification)
    - [Phase 3: GPU Resource Verification](#phase-3-gpu-resource-verification)
    - [Phase 4: Full System Test](#phase-4-full-system-test)
    - [Phase 5: Contingency Plan](#phase-5-contingency-plan)
    - [Phase 6: Implementation](#phase-6-implementation)
-8. [Go/No-Go Decision Points](#gono-go-decision-points)
-9. [Risk Assessment](#risk-assessment)
-10. [Post-Migration Tasks](#post-migration-tasks)
+9. [Current Issues and Resolutions](#current-issues-and-resolutions)
+10. [Go/No-Go Decision Points](#gono-go-decision-points)
+11. [Risk Assessment](#risk-assessment)
+12. [Post-Migration Tasks](#post-migration-tasks)
 
 ## Introduction
 
@@ -35,6 +38,9 @@ This document outlines the precise steps for migrating the hosted-n8n environmen
 - We have created a new profile-based configuration (docker-compose.profile.yml)
 - Helper scripts have been developed in the scripts/ directory
 - A rollback mechanism has been implemented
+- **New Observation**: Docker is running in rootless mode - containers don't have root access
+- **New Finding**: Nginx is currently in a restart loop due to upstream service dependencies
+- **Historical Context**: Nginx proxy was originally part of the n8n deployment but has been separated to be a core infrastructure service
 
 ## Folder Structure
 
@@ -88,7 +94,7 @@ This document outlines the precise steps for migrating the hosted-n8n environmen
 │   └── project/                     	 			 # Project documentation
 │       └── 03-plans/                	 			 # Plans documentation
 │           └── 02-migration/        	 			 # Migration plans
-│               └── 01-profile-compos	 			 e-migration.md  # This document
+│               └── 01-profile-compose-migration.md  # This document
 ├── mcp/                             	 			 # MCP service directory
 ├── n8n/                             	 			 # N8N service directory
 │   └── backup/                      	 			 # N8N backup directory
@@ -127,6 +133,9 @@ Before proceeding with the migration, it's important to understand the architect
    - It should start independently of application services
    - Located at `/home/groot/nginx/` outside the project directory
    - Used to access container UIs via web browser from secured network
+   - **Critical Requirement**: Nginx must be 100% agnostic to other containers and operate independently
+   - **Historical Context**: Originally deployed as part of n8n, now separated as a core function with no dependencies
+   - **Current Challenge**: Legacy configuration elements still reflect the previous tight integration with application services
 
 2. **Database Independence**:
    - Postgres database is a foundational service
@@ -159,104 +168,65 @@ Before proceeding with the migration, it's important to understand the architect
    - Hardware profiles (cpu, gpu-nvidia, gpu-amd) are orthogonal to functional profiles
    - Services may belong to multiple profiles
 
-## Nginx Configuration Organization
+3. **Rootless Docker Considerations**:
+   - The system is running in rootless Docker mode
+   - This impacts permission management and container access
+   - Helper scripts must account for rootless constraints
+   - Sudo commands in scripts may cause permission issues
 
-During the implementation of Phase 1, we encountered issues with nginx failing to start due to references to upstream services that weren't running. This section documents the approach for organizing nginx configuration files to ensure proper service independence and maintainability.
+## Network Configuration
 
-### Current State of Nginx Configuration
+The system operates across three distinct network types that must be considered for proper service communication. See [Network Configuration Summary](../../01-analysis/00-tracking/00-initial/00-review/01-pcm-network.md) for detailed documentation.
 
-- Nginx configuration files are stored in `/home/groot/nginx/`
-- All site configurations were initially placed in `/home/groot/nginx/sites-enabled/`
-- To allow nginx to start independently, problematic configuration files were moved to a temporary directory
+### Network Types
 
-### Best Practices for Nginx Configuration
+1. **Secure Private Network (External)**:
+   - Server and clients on same secure network (10.1.10.0/24)
+   - Server IP: 10.1.10.111
+   - Primary access method for clients
 
-The standard nginx configuration structure follows this pattern:
+2. **Local Server Network**:
+   - Server's internal network interfaces
+   - Host file contains SAN entries for service discovery
 
-1. **Main Configuration Directory Structure**:
-   - `nginx.conf` - Main configuration file
-   - `sites-available/` - All site configurations are stored here
-   - `sites-enabled/` - Symbolic links to configurations in sites-available that should be active
-   - `conf.d/` - Additional configuration snippets
+3. **Docker Networks**:
+   - Primary shared network: `hosted-n8n_lab` (external)
+   - Project-specific networks: `core_default`, `n8n_default`, etc.
+   - Cross-project communication relies on the shared network
 
-2. **Sites-Available vs. Sites-Enabled Pattern**:
-   - **sites-available**: Contains all site configuration files
-   - **sites-enabled**: Contains symbolic links to the configurations in sites-available that should be active
+### SAN Configuration Impact
 
-This separation allows maintenance of all configurations in one place while only activating the ones needed.
+The server's host file contains Subject Alternative Name (SAN) entries that are critical for cross-service communication:
 
-### Implementation Plan for Nginx Configuration
-
-To align with best practices, the following steps will be implemented:
-
-1. **Create a proper sites-available directory**:
-```bash
-mkdir -p /home/groot/nginx/sites-available
 ```
-**Status: COMPLETED** - Directory created successfully
-
-2. **Move all configuration files from temp to sites-available**:
-```bash
-cp /home/groot/nginx/temp/* /home/groot/nginx/sites-available/
-cp /home/groot/nginx/sites-enabled/*.conf /home/groot/nginx/sites-available/
+# Service Cross-Communication 
+10.1.10.111 postgres
+10.1.10.111 n8n
+10.1.10.111 mcp-memory
+10.1.10.111 mcp-seqthinking
+10.1.10.111 qdrant
+10.1.10.111 ollama
 ```
-**Status: COMPLETED** - All configuration files have been copied to sites-available
 
-3. **Keep only core configurations active in sites-enabled**:
-   - `00-http-redirect.conf`
-   - `default.conf`
-   - `supabase.conf`
-**Status: COMPLETED** - Only core configurations remain in sites-enabled
+These entries help bridge the gap between different project namespaces by providing consistent hostname resolution.
 
-4. **Service-Specific Configuration Management**:
-   - When starting a service, create a symbolic link from sites-available to sites-enabled
-   - When stopping a service, remove the symbolic link
-**Status: COMPLETED** - Implemented in service start/stop scripts
+### Network-Aware Nginx Configuration
 
-5. **Update service start scripts**:
-```bash
-# Example addition to start-n8n.sh
-# After starting n8n services
-if [ $? -eq 0 ]; then
-  echo "Enabling nginx configuration for n8n..."
-  ln -sf /home/groot/nginx/sites-available/n8n.conf /home/groot/nginx/sites-enabled/n8n.conf
-  docker restart nginx-proxy
-fi
+To make nginx truly agnostic to other services, its configuration must leverage both project-aware hostnames and SAN entries in the host file:
+
+```nginx
+# Example improved upstream configuration
+upstream n8n_backend {
+    # Try project-namespaced name first
+    server n8n-n8n-1:5678 max_fails=3 fail_timeout=5s;
+    # Fallback to hostname defined in host file
+    server n8n:5678 backup;
+    # Final fallback for maintenance page
+    server 127.0.0.1:81 backup;
+}
 ```
-**Status: COMPLETED** - Implemented in start-n8n.sh and start-ai.sh scripts
 
-6. **Update service stop scripts**:
-```bash
-# Example addition to stop scripts
-echo "Disabling nginx configuration for n8n..."
-rm -f /home/groot/nginx/sites-enabled/n8n.conf
-docker restart nginx-proxy
-```
-**Status: COMPLETED** - Implemented in down-n8n.sh, down-ai.sh, and down-all.sh scripts
-
-### Benefits of This Approach
-
-1. **Compliance with Standard Practices**: Follows industry-standard nginx configuration organization
-2. **Improved Maintainability**: Clear separation between available and enabled configurations
-3. **Service Independence**: Ensures nginx only tries to proxy to services that are actually running
-4. **Granular Control**: Allows for precise control over which configurations are active
-5. **Reduced Errors**: Prevents nginx from failing due to missing upstream services
-6. **Documentation**: Provides clear documentation for compliance and audit purposes
-
-This approach aligns with the architectural principle of core infrastructure independence and ensures that nginx can start and operate independently of application services.
-
-### Implementation Summary
-
-The nginx configuration organization has been successfully implemented with the following accomplishments:
-
-1. **Directory Structure**: Created a proper sites-available directory to store all configuration files
-2. **Configuration Management**: Moved all configuration files to sites-available while keeping only core configurations in sites-enabled
-3. **Service Integration**: Updated service start scripts (start-n8n.sh, start-ai.sh) to enable service-specific nginx configurations
-4. **Service Cleanup**: Created service stop scripts (down-n8n.sh, down-ai.sh) to disable service-specific nginx configurations
-5. **Global Management**: Updated down-all.sh to handle removing all service-specific nginx configurations
-6. **Documentation**: Updated this migration plan to reflect the changes and provide guidance for future maintenance
-
-The implementation ensures that nginx can start independently of other services and that service-specific configurations are only enabled when the corresponding services are running. This approach significantly improves system resilience and maintainability.
+This approach provides multiple fallback mechanisms for service resolution.
 
 ## Migration Goals
 
@@ -266,6 +236,9 @@ The implementation ensures that nginx can start independently of other services 
 4. Ensure all services function properly in the new configuration
 5. Provide simple helper scripts for common operations
 6. Document the new approach thoroughly
+7. **New Goal**: Make nginx completely independent of application services
+8. **New Goal**: Address permission management in rootless Docker environment
+9. **New Goal**: Ensure proper network connectivity across three network types with correct SAN configuration
 
 ## Implementation Timeline
 
@@ -275,7 +248,8 @@ The implementation ensures that nginx can start independently of other services 
 | Testing | Phased testing of all components | 1-2 days |
 | Implementation | Final implementation | 0.5 day |
 | Documentation | Update documentation | 0.5 day |
-| **Total** | | **2-3 days** |
+| **Nginx Fixes** | Fix nginx configuration issues | 1 day |
+| **Total** | | **3-4 days** |
 
 ## Migration Plan
 
@@ -298,22 +272,23 @@ docker compose -f docker-compose.profile.yml -p core --profile core up -d postgr
 # Start nginx independently
 docker compose -f docker-compose.profile.yml -p core --profile core up -d nginx
 ```
-**Status: COMPLETED** - Core infrastructure successfully deployed
+**Status: COMPLETED** - Core infrastructure deployment attempted, but nginx is in restart loop
 
 #### 1.3. Verification Checklist for Core Infrastructure
 - [x] Confirm postgres is running: `docker ps | grep postgres`
 - [x] Verify postgres is healthy: `docker exec -it core-postgres-1 pg_isready`
-- [x] Confirm nginx is running: `docker ps | grep nginx`
-- [x] Verify nginx configuration: `docker exec -it nginx-proxy nginx -t`
-- [x] Check nginx can serve basic responses
+- [ ] Confirm nginx is running stably: `docker ps | grep nginx`
+- [ ] Verify nginx configuration: `docker exec -it nginx-proxy nginx -t`
+- [ ] Check nginx can serve basic responses
 
 #### 1.4. Deploy N8N Services
 ```bash
 docker compose -f docker-compose.profile.yml -p n8n --profile n8n --profile gpu-nvidia up -d
 ```
+**Status: PARTIALLY COMPLETED** - N8N services started but in unhealthy state
 
 #### 1.5. Verification Checklist for N8N Services
-- [ ] Confirm n8n containers are running: `docker ps | grep n8n`
+- [x] Confirm n8n containers are running: `docker ps | grep n8n`
 - [ ] Verify n8n can connect to postgres
 - [ ] Check n8n is accessible through nginx: `curl -I http://localhost:8080/n8n/`
 
@@ -321,6 +296,7 @@ docker compose -f docker-compose.profile.yml -p n8n --profile n8n --profile gpu-
 ```bash
 docker compose -f docker-compose.profile.yml -p mcp --profile mcp --profile gpu-nvidia up -d
 ```
+**Status: NOT STARTED** - Pending resolution of core infrastructure issues
 
 #### 1.7. Verification Checklist for MCP Services
 - [ ] Confirm containers are running: `docker ps | grep mcp`
@@ -331,6 +307,7 @@ docker compose -f docker-compose.profile.yml -p mcp --profile mcp --profile gpu-
 ```bash
 docker compose -f docker-compose.profile.yml -p ai --profile ai --profile gpu-nvidia up -d
 ```
+**Status: NOT STARTED** - Pending resolution of core infrastructure issues
 
 #### 1.9. Verification Checklist for AI Services
 - [ ] Confirm containers are running: `docker ps | grep ai`
@@ -341,10 +318,97 @@ docker compose -f docker-compose.profile.yml -p ai --profile ai --profile gpu-nv
 ```bash
 docker compose -f docker-compose.profile.yml -p utility --profile utility --profile gpu-nvidia up -d
 ```
+**Status: NOT STARTED** - Pending resolution of core infrastructure issues
 
 #### 1.11. Verification Checklist for Utility Services
 - [ ] Confirm containers are running: `docker ps | grep utility`
 - [ ] Check crawl4ai service logs for errors
+
+### Phase a: Resolve Current Issues (NEW)
+
+Before proceeding with the remaining phases, we need to address the current issues discovered during initial testing:
+
+#### a.1. Fix Nginx Restart Loop
+```bash
+# Fix nginx configuration to make it truly independent
+# Steps:
+# 1. Examine current nginx logs to identify the precise error
+docker logs core-nginx-1
+# 2. Modify nginx configuration files to handle missing services gracefully
+```
+**Status: PLANNED** - Critical priority before continuing
+
+#### a.2. Update Nginx Configuration Templates
+```bash
+# Create improved templates for service-specific configurations
+# Example for n8n.conf:
+cat > /home/groot/nginx/sites-available/n8n.conf <<EOF
+upstream n8n_backend {
+    # Try project-namespaced name first
+    server n8n-n8n-1:5678 max_fails=3 fail_timeout=5s;
+    # Fallback to hostname defined in host file
+    server n8n:5678 backup;
+    # Final fallback for maintenance page
+    server 127.0.0.1:81 backup;
+}
+
+server {
+    listen 80;
+    server_name n8n.internal.example.com;
+    
+    # Enable error interception
+    proxy_intercept_errors on;
+    
+    # Handle service unavailable with custom page
+    error_page 502 503 504 = @maintenance;
+    
+    location / {
+        proxy_pass http://n8n_backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    
+    location @maintenance {
+        root /usr/share/nginx/html;
+        try_files /maintenance.html =502;
+    }
+}
+EOF
+```
+**Status: PLANNED** - To be implemented for each service
+
+#### a.3. Address Helper Script Issues for Rootless Environment
+```bash
+# Modify helper scripts to avoid sudo commands
+# Example modification for start-n8n.sh:
+if [ $? -eq 0 ]; then
+  echo "Enabling nginx configuration for n8n..."
+  # Use permissions that don't require sudo
+  ln -sf /home/groot/nginx/sites-available/n8n.conf /home/groot/nginx/sites-enabled/n8n.conf
+  docker restart core-nginx-1
+fi
+```
+**Status: PLANNED** - To be implemented
+
+#### a.4. Complete MCP Configuration Separation
+```bash
+# Separate mcp-seqthinking configuration from mcp.conf
+# Create dedicated configuration files for each MCP service
+```
+**Status: PLANNED** - To be implemented
+
+#### a.5. Verify SAN Configuration in Host File
+```bash
+# Ensure host file has proper SAN entries for all services
+cat /etc/hosts | grep -E '(postgres|n8n|mcp|qdrant|ollama)'
+
+# Verify DNS resolution works from nginx container
+docker exec -it core-nginx-1 getent hosts postgres
+docker exec -it core-nginx-1 getent hosts n8n
+```
+**Status: PLANNED** - To be implemented
 
 ### Phase 2: Cross-Service Communication Verification
 
@@ -367,6 +431,11 @@ docker compose -f docker-compose.profile.yml -p utility --profile utility --prof
 - [ ] Verify that external clients can access services through nginx
 - [ ] Test authentication mechanisms still work
 - [ ] Verify SSL/TLS if configured
+
+#### 2.5. Verify Network Resolution Across Project Namespaces
+- [ ] Test hostname resolution from containers in different projects
+- [ ] Verify that SAN entries in the host file are working correctly
+- [ ] Confirm services can be accessed by both project-prefixed names and service names
 
 ### Phase 3: GPU Resource Verification
 
@@ -438,23 +507,107 @@ mv docker-compose.profile.yml docker-compose.yml
 - [ ] Provide examples of common operations
 - [ ] Address any questions or concerns
 
+## Current Issues and Resolutions
+
+Based on our review and initial testing, the following issues have been identified and require resolution before proceeding:
+
+### 1. Nginx Restart Loop
+
+**Issue**: Nginx container is repeatedly restarting, likely due to dependencies on unavailable services.
+
+**Root Cause**: 
+- Legacy upstream directives that expect services to be available
+- Improper error handling when services are unavailable
+- Historical tight coupling with n8n and other application services
+
+**Resolution Plan**:
+- Redesign upstream directives with proper fallback mechanisms
+- Implement effective error handling and maintenance pages
+- Make nginx configuration truly agnostic to service availability
+- Test nginx startup with minimal configuration
+
+### 2. Rootless Docker Environment Issues
+
+**Issue**: Script commands using sudo may cause permission problems in rootless Docker.
+
+**Root Cause**:
+- Docker is running in rootless mode
+- Helper scripts use sudo for managing symbolic links
+- Rootless containers have limited permissions
+
+**Resolution Plan**:
+- Review permissions of nginx configuration directories
+- Modify scripts to avoid sudo when possible
+- Implement alternative approaches for configuration management
+- Test all scripts in the rootless environment
+
+### 3. MCP Configuration Separation
+
+**Issue**: MCP services' nginx configuration is not fully separated.
+
+**Root Cause**:
+- `mcp.conf` was originally designed for both MCP services
+- Only mcp-memory has been separated so far
+
+**Resolution Plan**:
+- Complete the separation of mcp-seqthinking configuration
+- Create dedicated configuration files for each service
+- Test each service with its own configuration
+- Update scripts to handle the separate configurations
+
+### 4. Service Communication Across Projects
+
+**Issue**: Services in different project namespaces may have trouble communicating.
+
+**Root Cause**:
+- Container names include project prefixes (e.g., core-postgres-1)
+- Environment variables still reference original hostnames
+- Current nginx configuration doesn't account for project-prefixed container names
+
+**Resolution Plan**:
+- Verify service discovery across project namespaces
+- Test cross-project communication
+- Update environment variables if needed
+- Consider using a more robust service discovery approach
+- Leverage SAN entries in host file to provide consistent hostname resolution
+- Update nginx upstream directives to include both project-prefixed and service names
+
+### 5. SAN Configuration for Service Discovery
+
+**Issue**: Cross-service communication relies on proper SAN configuration in the host file.
+
+**Root Cause**:
+- Split services across project namespaces changes DNS resolution
+- Original configuration assumed all services in same namespace
+
+**Resolution Plan**:
+- Verify current SAN entries in the host file
+- Ensure all required service names are properly mapped
+- Test hostname resolution from different containers
+- Update nginx configuration to use both project-aware names and SAN entries
+
 ## Go/No-Go Decision Points
 
 Each phase includes critical decision points:
 
-1. **After Phase 1:** 
+1. **After Phase a (NEW):** 
+   - Nginx must be stable and running independently of application services
+   - Helper scripts must work properly in the rootless environment
+   - If these critical issues cannot be resolved, roll back and reconsider approach
+
+2. **After Phase 1:** 
    - All services must start successfully in their respective project namespaces
    - If any service fails to start properly, roll back and investigate
 
-2. **After Phase 2:** 
+3. **After Phase 2:** 
    - All cross-service communication must work flawlessly
    - If any communication issues are detected, roll back and investigate
 
-3. **After Phase 3:** 
+4. **After Phase 3:** 
    - GPU resources must be properly allocated and utilized
    - If GPU issues are detected, roll back and investigate
 
-4. **After Phase 4:** 
+5. **After Phase 4:** 
    - All end-to-end workflows must function as expected
    - Performance must be equal or better than the original configuration
    - If any functional or performance issues are detected, roll back and investigate
@@ -468,25 +621,38 @@ Each phase includes critical decision points:
 | Container name conflicts | Low | Medium | Use unique container names; use project namespaces |
 | Data loss | Low | High | No data volumes will be affected by this change; backups are still recommended |
 | Performance degradation | Low | Medium | Compare performance metrics; rollback if significant degradation |
+| **Nginx configuration failures** | **High** | **High** | **Redesign configuration to be service-agnostic; implement robust fallback mechanisms** |
+| **Rootless Docker permission issues** | **Medium** | **Medium** | **Adjust scripts to work without sudo; modify permissions on configuration directories** |
+| **Hostname resolution failures** | **High** | **High** | **Verify SAN configuration; implement multiple resolution methods in nginx** |
 
 ## Post-Migration Tasks
 
 1. **Documentation Updates**
    - Update all documentation to reflect the new configuration
    - Create new troubleshooting guides as needed
+   - **Add section on nginx configuration best practices**
 
 2. **Monitoring Setup**
    - Ensure monitoring tools are aware of the new project structure
    - Update dashboards if necessary
+   - **Add specific monitoring for nginx to detect configuration issues**
 
 3. **Automation Updates**
    - Update any CI/CD pipelines that interact with the environment
    - Update maintenance scripts
+   - **Implement improved automation for nginx configuration management**
 
 4. **Training**
    - Provide team training on the new helper scripts
    - Document common operations
+   - **Include specific training on nginx configuration management**
 
 5. **Performance Optimization**
    - Analyze performance data and optimize as needed
-   - Consider further refinement of profiles based on usage patterns 
+   - Consider further refinement of profiles based on usage patterns
+   - **Review nginx performance with the new configuration**
+
+6. **Rootless Docker Best Practices**
+   - Document lessons learned from running in rootless mode
+   - Create best practices for future development
+   - **Implement consistent permission management approach** 

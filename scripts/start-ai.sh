@@ -26,7 +26,7 @@ if [ $? -eq 0 ]; then
   sudo ln -sf /home/groot/nginx/sites-available/ollama.conf /home/groot/nginx/sites-enabled/ollama.conf
   sudo ln -sf /home/groot/nginx/sites-available/qdrant.conf /home/groot/nginx/sites-enabled/qdrant.conf
   # Restart nginx to apply the configuration
-  docker restart nginx-proxy
+  docker restart core-nginx
   echo "Nginx configuration for AI services enabled and nginx restarted."
 else
   echo "Failed to start AI services. Nginx configuration not enabled."

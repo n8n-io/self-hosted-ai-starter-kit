@@ -52,16 +52,16 @@ x-init-ollama: &init-ollama
     - "sleep 3; ollama pull llama3.2"
 
 services:
-  nginx:
+  core-nginx:
     image: nginx:alpine
-    container_name: nginx-proxy
+    container_name: core-nginx
     networks: ['lab']
     restart: unless-stopped
     ports:
       - "8080:80"
       - "8443:443"
     volumes:
-      - /home/groot/nginx:/etc/nginx:ro
+      - /home/groot/nginx:/home/groot/nginx:ro
       - /home/groot/logs/nginx:/var/log/nginx
     profiles: ["core", "mcp", "n8n", "ai", "cpu", "gpu-nvidia", "gpu-amd"]
     healthcheck:
@@ -108,10 +108,13 @@ services:
     hostname: n8n
     container_name: n8n
     restart: unless-stopped
+    ports:
+      - 5678:5678
     volumes:
       - n8n_storage:/home/node/.n8n
       - ./n8n/backup:/backup
-      - ./shared:/data/shared
+      - ./n8n/data/shared:/data/shared
+      - /home/groot/logs/n8n:/var/log/n8n
     depends_on:
       postgres:
         condition: service_healthy
@@ -119,7 +122,7 @@ services:
         condition: service_completed_successfully
     profiles: ["n8n", "cpu", "gpu-nvidia", "gpu-amd"]
     healthcheck:
-      test: ["CMD", "wget", "--spider", "http://localhost:5678/healthz"]
+      test: ["CMD", "wget", "--spider", "http://127.0.0.1:5678/"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -225,7 +228,7 @@ services:
     networks: ['lab']
     restart: unless-stopped
     ports:
-      - "8081:8080"
+      - "8082:8080"
     volumes:
       - ./mcp/logs:/logs
       - ./mcp/memory/data:/data
@@ -248,7 +251,7 @@ services:
     networks: ['lab']
     restart: unless-stopped
     ports:
-      - "8082:8080"
+      - "8083:8080"
     volumes:
       - ./mcp/logs:/logs
       - ./mcp/seqthinking/data:/data

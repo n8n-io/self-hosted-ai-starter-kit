@@ -14,7 +14,7 @@ if [ $? -eq 0 ]; then
   # Remove symbolic link for n8n.conf in sites-enabled
   sudo rm -f /home/groot/nginx/sites-enabled/n8n.conf
   # Restart nginx to apply the configuration
-  docker restart nginx-proxy
+  docker restart core-nginx
   echo "Nginx configuration for n8n disabled and nginx restarted."
 else
   echo "Failed to stop N8N services. Nginx configuration not disabled."

@@ -16,7 +16,7 @@ echo "Removing all service-specific nginx configurations..."
 # Keep only core configurations in sites-enabled
 sudo find /home/groot/nginx/sites-enabled/ -type f -not -name "00-http-redirect.conf" -not -name "default.conf" -not -name "supabase.conf" -exec rm -f {} \;
 # Restart nginx to apply the configuration
-docker restart nginx-proxy
+docker restart core-nginx
 echo "All service-specific nginx configurations removed and nginx restarted."
 
 echo "All services stopped successfully." 
