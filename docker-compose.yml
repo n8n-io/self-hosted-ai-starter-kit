@@ -1,15 +1,50 @@
+version: "3.9"
+
 volumes:
   n8n_storage:
+    driver: local
+    driver_opts:
+      type: "nfs"
+      o: "addr=${EFS_DNS},nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2"
+      device: ":/n8n_storage"
   postgres_storage:
+    driver: local
+    driver_opts:
+      type: "nfs"
+      o: "addr=${EFS_DNS},nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2"
+      device: ":/postgres_storage"
   ollama_storage:
+    driver: local
+    driver_opts:
+      type: "nfs"
+      o: "addr=${EFS_DNS},nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2"
+      device: ":/ollama_storage"
   qdrant_storage:
+    driver: local
+    driver_opts:
+      type: "nfs"
+      o: "addr=${EFS_DNS},nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2"
+      device: ":/qdrant_storage"
 
 networks:
   demo:
+    driver: bridge
+    x-aws-vpc:
+      subnets:
+        - "subnet-47ff1a49"
+        - "subnet-00dd2e4d"
+        - "subnet-4ea3d470"
+        - "subnet-ea1937c4"
+        - "subnet-10edc14c"
+        - "subnet-a87556cf"
+
+      security_groups:
+        - "sg-008b5803844bc148d"
 
 x-n8n: &service-n8n
   image: n8nio/n8n:latest
-  networks: ['demo']
+  networks: 
+    - demo
   environment:
     - DB_TYPE=postgresdb
     - DB_POSTGRESDB_HOST=postgres
@@ -17,47 +52,48 @@ x-n8n: &service-n8n
     - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
     - N8N_DIAGNOSTICS_ENABLED=false
     - N8N_PERSONALIZATION_ENABLED=false
-    - N8N_ENCRYPTION_KEY
-    - N8N_USER_MANAGEMENT_JWT_SECRET
+    - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+    - N8N_USER_MANAGEMENT_JWT_SECRET=${N8N_USER_MANAGEMENT_JWT_SECRET}
     - OLLAMA_HOST=ollama:11434
 
 x-ollama: &service-ollama
   image: ollama/ollama:latest
   container_name: ollama
-  networks: ['demo']
+  networks: 
+    - demo
   restart: unless-stopped
   ports:
-    - 11434:11434
+    - "11434:11434"
   volumes:
     - ollama_storage:/root/.ollama
 
 x-init-ollama: &init-ollama
   image: ollama/ollama:latest
-  networks: ['demo']
+  networks: 
+    - demo
   container_name: ollama-pull-llama
   volumes:
     - ollama_storage:/root/.ollama
   entrypoint: /bin/sh
   environment:
     - OLLAMA_HOST=ollama:11434
-  command:
-    - "-c"
-    - "sleep 3; ollama pull llama3.2"
+  command: ["-c", "sleep 3; ollama pull llama3.2"]
 
 services:
   postgres:
     image: postgres:16-alpine
     hostname: postgres
-    networks: ['demo']
+    networks: 
+      - demo
     restart: unless-stopped
     environment:
-      - POSTGRES_USER
-      - POSTGRES_PASSWORD
-      - POSTGRES_DB
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
     volumes:
       - postgres_storage:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      test: ["CMD-SHELL", "pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -67,9 +103,7 @@ services:
     hostname: n8n-import
     container_name: n8n-import
     entrypoint: /bin/sh
-    command:
-      - "-c"
-      - "n8n import:credentials --separate --input=/backup/credentials && n8n import:workflow --separate --input=/backup/workflows"
+    command: ["-c", "n8n import:credentials --separate --input=/backup/credentials && n8n import:workflow --separate --input=/backup/workflows"]
     volumes:
       - ./n8n/backup:/backup
     depends_on:
@@ -82,7 +116,7 @@ services:
     container_name: n8n
     restart: unless-stopped
     ports:
-      - 5678:5678
+      - "5678:5678"
     volumes:
       - n8n_storage:/home/node/.n8n
       - ./n8n/backup:/backup
@@ -94,13 +128,14 @@ services:
         condition: service_completed_successfully
 
   qdrant:
-    image: qdrant/qdrant
+    image: qdrant/qdrant:latest
     hostname: qdrant
     container_name: qdrant
-    networks: ['demo']
+    networks: 
+      - demo
     restart: unless-stopped
     ports:
-      - 6333:6333
+      - "6333:6333"
     volumes:
       - qdrant_storage:/qdrant/storage
 
@@ -140,8 +175,8 @@ services:
       - ollama-gpu
 
   ollama-pull-llama-gpu-amd:
-    profiles: [gpu-amd]
+    profiles: ["gpu-amd"]
     <<: *init-ollama
     image: ollama/ollama:rocm
     depends_on:
-     - ollama-gpu-amd
+      - ollama-gpu-amd

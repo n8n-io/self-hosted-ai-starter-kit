@@ -1,0 +1,12 @@
+# Ignore environment variables
+.env
+.DS_Store
+.vscode
+.yml
+.yaml
+.json
+.md
+.txt
+.sh
+.bash
+.zsh
