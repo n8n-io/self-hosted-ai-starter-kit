@@ -37,7 +37,6 @@ networks:
         - "subnet-ea1937c4"
         - "subnet-10edc14c"
         - "subnet-a87556cf"
-
       security_groups:
         - "sg-008b5803844bc148d"
 
