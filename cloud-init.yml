@@ -41,8 +41,7 @@ runcmd:
       sleep $waitTime;
     done
   - 'mkdir -p /mnt/efs/fs1/postgres_storage /mnt/efs/fs1/n8n_storage /mnt/efs/fs1/ollama_storage /mnt/efs/fs1/qdrant_storage'
-  - 'umount /mnt/efs/fs1'
-  
+   
   # 6. Clone the AI Starter Kit repository
   - 'cd /home/ec2-user && git clone https://github.com/michael-pittman/001-starter-kit.git ai-starter-kit'
   
@@ -94,8 +93,8 @@ runcmd:
       /usr/local/bin/docker-compose --profile cpu up -d
     fi
   
-  # 9. Print success message with public IP
-  - ["sh", "-c", "echo '===============================================' && echo 'AI Starter Kit deployment complete!' && echo 'Access n8n at: https://$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4):5678/' && echo '==============================================='"]
+  # 9. Print success message with correct public IP
+  - ["sh", "-c", "PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4); echo '==============================================='; echo \"AI Starter Kit deployment complete! Access n8n at: https://$PUBLIC_IP:5678/\"; echo '==============================================='"]
   
   # 10. Spot Instance Termination Handling
   - |
