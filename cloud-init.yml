@@ -58,8 +58,41 @@ runcmd:
   - 'echo "N8N_SSL_CERT=/files/certs/n8n-selfsigned.crt" >> /home/ec2-user/ai-starter-kit/.env'
   - 'echo "EFS_DNS=${file_system_id_1}.efs.us-east-1.amazonaws.com" >> /home/ec2-user/ai-starter-kit/.env'
   
-  # 8. Launch Docker Compose stack (gpu-nvidia profile for GPU instance)
-  - 'cd /home/ec2-user/ai-starter-kit && /usr/local/bin/docker-compose --profile gpu-nvidia up -d'
+  # 7.5. Copy cert files to the expected location
+  - 'mkdir -p /home/ec2-user/ai-starter-kit/n8n/certs'
+  - 'cp /home/ec2-user/certs/n8n-selfsigned.* /home/ec2-user/ai-starter-kit/n8n/certs/'
+
+  # 7.6. Verify EFS will be accessible to Docker
+  - |
+    # Test EFS mount accessibility
+    echo "Verifying EFS mount accessibility..."
+    mount "${file_system_id_1}.efs.us-east-1.amazonaws.com:/" "${efs_mount_point_1}"
+    if [ $? -ne 0 ]; then
+      echo "ERROR: Failed to mount EFS, Docker volumes may not work properly!"
+      exit 1
+    fi
+    # Create test file to verify write access
+    touch "${efs_mount_point_1}/efs-test-file"
+    if [ $? -ne 0 ]; then
+      echo "ERROR: Cannot write to EFS mount, Docker volumes may not work properly!"
+      umount "${efs_mount_point_1}"
+      exit 1
+    else
+      echo "EFS mount verified successfully"
+      rm "${efs_mount_point_1}/efs-test-file"
+      umount "${efs_mount_point_1}"
+    fi
+  
+  # 8. Launch Docker Compose stack (auto-select profile based on instance type)
+  - |
+    cd /home/ec2-user/ai-starter-kit
+    if nvidia-smi &>/dev/null; then
+      echo "GPU detected - using gpu-nvidia profile"
+      /usr/local/bin/docker-compose --profile gpu-nvidia up -d
+    else
+      echo "No GPU detected - using cpu profile"
+      /usr/local/bin/docker-compose --profile cpu up -d
+    fi
   
   # 9. Print success message with public IP
   - ["sh", "-c", "echo '===============================================' && echo 'AI Starter Kit deployment complete!' && echo 'Access n8n at: https://$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4):5678/' && echo '==============================================='"]

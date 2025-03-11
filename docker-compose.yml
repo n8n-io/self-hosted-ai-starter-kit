@@ -115,6 +115,7 @@ services:
       - n8n_storage:/home/node/.n8n
       - ./n8n/backup:/backup
       - ./shared:/data/shared
+      - ./n8n/certs:/files/certs
     depends_on:
       postgres:
         condition: service_healthy
