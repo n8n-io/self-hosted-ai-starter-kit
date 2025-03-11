@@ -31,12 +31,7 @@ networks:
     driver: bridge
     x-aws-vpc:
       subnets:
-        - "subnet-47ff1a49"
         - "subnet-00dd2e4d"
-        - "subnet-4ea3d470"
-        - "subnet-ea1937c4"
-        - "subnet-10edc14c"
-        - "subnet-a87556cf"
       security_groups:
         - "sg-008b5803844bc148d"
 
