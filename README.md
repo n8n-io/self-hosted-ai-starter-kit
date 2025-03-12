@@ -66,6 +66,9 @@ Once the instance is running:
 
 ## Troubleshooting
 
+### Logs
+- sudo tail -f /var/log/cloud-init-output.log
+
 ### EFS Mounting Issues
 - Check that the security groups allow NFS traffic (port 2049)
 - Verify the instance has permissions to mount the EFS
