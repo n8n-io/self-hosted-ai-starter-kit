@@ -97,7 +97,7 @@ if lspci | grep -qi "NVIDIA"; then
 fi
 
 # 8. Start Docker Compose to launch all containers
-docker compose -f /opt/myapp/docker-compose.yml --env-file /opt/myapp/.env up -d
+docker compose /opt/myapp/docker-compose.yml --env-file /opt/myapp/.env up -d
 
 # 9. Print success message with public IP (fallback to local if not available)
 PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
