@@ -5,17 +5,16 @@ set -euo pipefail  # Exit on error, unset var usage, and pipe failures
 REPO_URL="https://github.com/michael-pittman/001-starter-kit.git"
 APP_DIR="/opt/001-starter-kit"
 EFS_MOUNT_POINT="/mnt/efs"
-EFS_PARAM_NAME="/FileSystemId"   # SSM Parameter name storing the EFS ID (example)
+EFS_PARAM_NAME="/aibuildkit/efs-id"   # SSM Parameter name storing the EFS ID (example)
 # If storing multiple app config params in SSM, you can list them below:
-PARAM_NAMES=("/myapp/APP_ENV" "/myapp/API_KEY" "/myapp/WEBHOOK_SECRET")  # example parameter keys
+PARAM_NAMES=("/aibuildkit/WEBHOOK_URL" "/aibuildkit/POSTGRES_DB" "/aibuildkit/POSTGRES_USER" "/aibuildkit/N8N_USER_MANAGEMENT_JWT_SECRET" "/aibuildkit/N8N_ENCRYPTION_KEY" "/aibuildkit/POSTGRES_PASSWORD")  # example parameter keys
 
 # 1. Update system and install necessary packages
 yum update -y
-yum install -y docker git amazon-efs-utils awscli
+yum install -y amazon-efs-utils nfs-utils docker git awscli
 
 # Start and enable Docker service
-systemctl start docker
-systemctl enable docker
+systemctl enable docker && systemctl start docker
 usermod -aG docker ec2-user  # allow ec2-user to run Docker without sudo (optional)
 
 # 2. Install Docker Compose (latest version)
