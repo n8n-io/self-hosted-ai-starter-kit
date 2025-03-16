@@ -1,3 +1,9 @@
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="==BOUNDARY=="
+
+--==BOUNDARY==
+Content-Type: text/x-shellscript; charset="us-ascii"
+
 #!/bin/bash
 set -e
 
@@ -14,9 +20,9 @@ mount -t efs ${EFS_ID}:/ /mnt/efs || { echo "EFS mount failed"; exit 1; }
 mkdir -p /mnt/efs/n8n /mnt/efs/postgres /mnt/efs/ollama /mnt/efs/qdrant
 
 # 4. Set appropriate permissions for each directory to avoid permission issues
-# Assuming 'postgres' user inside container has uid/gid 999:999&#8203;:contentReference[oaicite:1]{index=1}&#8203;:contentReference[oaicite:2]{index=2}, and 'node' user for n8n is 1000:1000
+# Assuming 'postgres' user inside container has uid/gid 999:999, and 'node' user for n8n is 1000:1000
 chown -R 1000:1000 /mnt/efs/n8n       # n8n container runs as non-root user (uid 1000)
-chown -R 999:999 /mnt/efs/postgres   # Postgres container default user (uid 999)&#8203;:contentReference[oaicite:3]{index=3}&#8203;:contentReference[oaicite:4]{index=4}
+chown -R 999:999 /mnt/efs/postgres   # Postgres container default user (uid 999)
 chown -R 0:0   /mnt/efs/ollama       # Ollama runs as root by default in official image
 chown -R 0:0   /mnt/efs/qdrant       # Assume Qdrant runs as root (adjust if needed)
 
@@ -32,7 +38,6 @@ DB_PASSWORD=$(aws ssm get-parameter --with-decryption --name "/aibuildkit/POSTGR
 ENCRYPTION_KEY=$(aws ssm get-parameter --with-decryption --name "/aibuildkit/N8N_ENCRYPTION_KEY" --query Parameter.Value --output text)
 N8N_USER_MANAGEMENT_JWT_SECRET=$(aws ssm get-parameter --with-decryption --name "/aibuildkit/N8N_USER_MANAGEMENT_JWT_SECRET" --query Parameter.Value --output text)
 
-
 # Write to .env file
 cat > /opt/myapp/.env <<EOF
 # .env file for docker-compose
@@ -44,7 +49,8 @@ DB_POSTGRESDB_USER=n8n_user
 DB_POSTGRESDB_PASSWORD=${DB_PASSWORD}
 # Additional n8n configs
 N8N_ENCRYPTION_KEY=${ENCRYPTION_KEY}
-WEBHOOK_URL=https://n8n.geuse.io/   
+WEBHOOK_URL=https://n8n.geuse.io/
+N8N_USER_MANAGEMENT_JWT_SECRET=${N8N_USER_MANAGEMENT_JWT_SECRET}
 EOF
 
 # 6. Detect GPU and install NVIDIA components if present
@@ -65,3 +71,4 @@ fi
 
 # 7. Start Docker Compose to launch all containers
 docker compose -f /opt/myapp/docker-compose.yml --env-file /opt/myapp/.env up -d
+--==BOUNDARY==--
