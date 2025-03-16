@@ -33,7 +33,7 @@ networks:
       subnets:
         - "subnet-00dd2e4d"
       security_groups:
-        - "sg-008b5803844bc148d"
+        - "sg-6da25332"
 
 x-n8n: &service-n8n
   image: n8nio/n8n:latest
