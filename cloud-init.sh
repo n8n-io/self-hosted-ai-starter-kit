@@ -17,9 +17,9 @@ systemctl enable docker && systemctl start docker
 usermod -aG docker ec2-user
 
 # 2. Mount EFS file system
-EFS_ID="$(aws ssm get-parameter --name "/myapp/efs-id" --query Parameter.Value --output text 2>/dev/null || true)"
+EFS_ID="$(aws ssm get-parameter --name "/aikitbuild/efs-id" --query Parameter.Value --output text 2>/dev/null || true)"
 if [ -z "$EFS_ID" ]; then
-    echo "ERROR: SSM parameter /myapp/efs-id not found. Please ensure it exists."
+    echo "ERROR: SSM parameter /aikitbuild/efs-id not found. Please ensure it exists."
     exit 1
 fi
 
