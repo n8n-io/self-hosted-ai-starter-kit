@@ -1,48 +1,54 @@
 #!/bin/bash
 set -e
 
-# 1. Update packages and install required software
-yum update -y
-yum install -y docker amazon-efs-utils jq git awscli
+# 1. Install updates and Docker
+apt-get update && apt-get install -y docker.io docker-compose-plugin amazon-efs-utils jq
 
-# Install docker-compose (download binary)
-curl -L "https://github.com/docker/compose/releases/download/v2.17.2/docker-compose-linux-x86_64" -o /usr/local/bin/docker-compose
-chmod +x /usr/local/bin/docker-compose
+# 2. Mount EFS file system (assuming EFS ID is stored in an SSM parameter)
+EFS_ID="$(aws ssm get-parameter --name "/myapp/efs-id" --query Parameter.Value --output text 2>/dev/null || true)"
+if [ -z "$EFS_ID" ]; then
+    echo "ERROR: SSM parameter /myapp/efs-id not found. Please ensure it exists."
+    exit 1
+fi
 
-# Enable and start Docker
-systemctl enable docker && systemctl start docker
-usermod -aG docker ec2-user
-
-# 2. Mount EFS file system (retrieve EFS ID from SSM and mount)
-EFS_ID="$(aws ssm get-parameter --name "/myapp/efs-id" --query Parameter.Value --output text)"
 mkdir -p /mnt/efs
-# Use amazon-efs-utils to mount with TLS; adjust options as needed.
+# Use EFS mount helper for mounting with TLS
 mount -t efs ${EFS_ID}:/ /mnt/efs || { echo "EFS mount failed"; exit 1; }
 
 # 3. Create dedicated directories on EFS for each service
 mkdir -p /mnt/efs/n8n /mnt/efs/postgres /mnt/efs/ollama /mnt/efs/qdrant
 
 # 4. Set appropriate permissions for each directory
-# - n8n container runs as non-root (uid 1000)
-# - Postgres container typically uses uid 999
-# - Ollama and Qdrant run as root
+# 'n8n' container runs as non-root (uid 1000), Postgres as uid 999, Ollama and Qdrant as root.
 chown -R 1000:1000 /mnt/efs/n8n
 chown -R 999:999 /mnt/efs/postgres
 chown -R 0:0 /mnt/efs/ollama
 chown -R 0:0 /mnt/efs/qdrant
 chmod -R 770 /mnt/efs/n8n /mnt/efs/postgres /mnt/efs/ollama /mnt/efs/qdrant
 
-# 5. Retrieve secrets from AWS SSM and populate .env file
+# 5. Retrieve secrets from AWS SSM and populate .env
 echo "Fetching secrets from SSM Parameter Store..."
 AWS_DEFAULT_REGION="$(curl -s http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r .region)"
 export AWS_DEFAULT_REGION
 
-# Fetch secrets; ensure the parameters exist and your IAM role permits these actions.
-DB_PASSWORD=$(aws ssm get-parameter --with-decryption --name "/aibuildkit/POSTGRES_PASSWORD" --query Parameter.Value --output text)
-ENCRYPTION_KEY=$(aws ssm get-parameter --with-decryption --name "/aibuildkit/N8N_ENCRYPTION_KEY" --query Parameter.Value --output text)
-N8N_USER_MANAGEMENT_JWT_SECRET=$(aws ssm get-parameter --with-decryption --name "/aibuildkit/N8N_USER_MANAGEMENT_JWT_SECRET" --query Parameter.Value --output text)
+DB_PASSWORD="$(aws ssm get-parameter --with-decryption --name "/aibuildkit/POSTGRES_PASSWORD" --query Parameter.Value --output text 2>/dev/null || true)"
+if [ -z "$DB_PASSWORD" ]; then
+    echo "ERROR: SSM parameter /aibuildkit/POSTGRES_PASSWORD not found."
+    exit 1
+fi
 
-# Write the .env file (assumed to be stored in /opt/myapp directory)
+ENCRYPTION_KEY="$(aws ssm get-parameter --with-decryption --name "/aibuildkit/N8N_ENCRYPTION_KEY" --query Parameter.Value --output text 2>/dev/null || true)"
+if [ -z "$ENCRYPTION_KEY" ]; then
+    echo "ERROR: SSM parameter /aibuildkit/N8N_ENCRYPTION_KEY not found."
+    exit 1
+fi
+
+N8N_USER_MANAGEMENT_JWT_SECRET="$(aws ssm get-parameter --with-decryption --name "/aibuildkit/N8N_USER_MANAGEMENT_JWT_SECRET" --query Parameter.Value --output text 2>/dev/null || true)"
+if [ -z "$N8N_USER_MANAGEMENT_JWT_SECRET" ]; then
+    echo "ERROR: SSM parameter /aibuildkit/N8N_USER_MANAGEMENT_JWT_SECRET not found."
+    exit 1
+fi
+
 mkdir -p /opt/myapp
 cat > /opt/myapp/.env <<EOF
 # .env file for docker-compose
@@ -57,25 +63,23 @@ WEBHOOK_URL=https://n8n.geuse.io/
 N8N_USER_MANAGEMENT_JWT_SECRET=${N8N_USER_MANAGEMENT_JWT_SECRET}
 EOF
 
-# 6. Detect GPU and conditionally install NVIDIA drivers and toolkit
+# 6. Detect GPU and install NVIDIA components if present
 if lspci | grep -qi "NVIDIA"; then
-    echo "NVIDIA GPU detected, installing drivers and container toolkit..."
+    echo "NVIDIA GPU detected, installing drivers and toolkit..."
     distribution=$(awk -F= '/^ID=/{print $2}' /etc/os-release)
     if [[ "$distribution" =~ ^\"?ubuntu\"?$ ]]; then
         apt-get install -y nvidia-driver-525 nvidia-container-toolkit
     else
-        # For Amazon Linux 2
         amazon-linux-extras install -y kernel-nvidia
         yum install -y nvidia-driver nvidia-container-toolkit
     fi
-    # Append a GPU flag to the .env file
     echo "ENABLE_CUDA=1" >> /opt/myapp/.env
 fi
 
 # 7. Start Docker Compose to launch all containers
 docker compose -f /opt/myapp/docker-compose.yml --env-file /opt/myapp/.env up -d
 
-# 8. Print success message with public IP (fallback to private IP if needed)
+# 8. Print success message with public IP (fallback to private IP if not set)
 PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
 if [ -z "$PUBLIC_IP" ]; then
     PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
