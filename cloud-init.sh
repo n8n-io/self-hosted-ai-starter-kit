@@ -5,7 +5,7 @@ set -e
 apt-get update && apt-get install -y docker.io docker-compose-plugin amazon-efs-utils jq
 
 # 2. Mount EFS file system (assuming EFS ID is stored in an SSM parameter)
-EFS_ID="$(aws ssm get-parameter --name "/myapp/efs-id" --query Parameter.Value --output text 2>/dev/null || true)"
+EFS_ID="$(aws ssm get-parameter --name "/aibuildkit/efs-id" --query Parameter.Value --output text 2>/dev/null || true)"
 if [ -z "$EFS_ID" ]; then
     echo "ERROR: SSM parameter /myapp/efs-id not found. Please ensure it exists."
     exit 1
