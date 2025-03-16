@@ -1,25 +1,44 @@
 #!/bin/bash
 set -e
 
-# 1. Install updates and Docker
-apt-get update && apt-get install -y docker.io docker-compose-plugin amazon-efs-utils jq
+# 1. Install updates and required packages using yum
+yum update -y
+yum install -y docker amazon-efs-utils jq git awscli
 
-# 2. Mount EFS file system (assuming EFS ID is stored in an SSM parameter)
-EFS_ID="$(aws ssm get-parameter --name "/aibuildkit/efs-id" --query Parameter.Value --output text 2>/dev/null || true)"
+# Install docker-compose plugin (if not already present)
+# (Amazon Linux 2 may come with docker-compose-plugin; if not, install via yum or download binary)
+if ! command -v docker-compose &>/dev/null; then
+    curl -L "https://github.com/docker/compose/releases/download/v2.17.2/docker-compose-linux-x86_64" -o /usr/local/bin/docker-compose
+    chmod +x /usr/local/bin/docker-compose
+fi
+
+# Enable and start Docker
+systemctl enable docker && systemctl start docker
+usermod -aG docker ec2-user
+
+# 2. Mount EFS file system
+EFS_ID="$(aws ssm get-parameter --name "/myapp/efs-id" --query Parameter.Value --output text 2>/dev/null || true)"
 if [ -z "$EFS_ID" ]; then
     echo "ERROR: SSM parameter /myapp/efs-id not found. Please ensure it exists."
     exit 1
 fi
 
 mkdir -p /mnt/efs
-# Use EFS mount helper for mounting with TLS
-mount -t efs ${EFS_ID}:/ /mnt/efs || { echo "EFS mount failed"; exit 1; }
+# Check if the EFS mount helper exists
+if [ -x "/sbin/mount.efs" ]; then
+    echo "Using mount.efs helper..."
+    mount -t efs ${EFS_ID}:/ /mnt/efs || { echo "EFS mount failed using efs helper"; exit 1; }
+else
+    echo "mount.efs helper not found; falling back to nfs4..."
+    REGION="$(curl -s http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r .region)"
+    mount -t nfs4 -o nfsvers=4.1 ${EFS_ID}.efs.${REGION}.amazonaws.com:/ /mnt/efs || { echo "EFS mount failed using nfs4"; exit 1; }
+fi
 
 # 3. Create dedicated directories on EFS for each service
 mkdir -p /mnt/efs/n8n /mnt/efs/postgres /mnt/efs/ollama /mnt/efs/qdrant
 
 # 4. Set appropriate permissions for each directory
-# 'n8n' container runs as non-root (uid 1000), Postgres as uid 999, Ollama and Qdrant as root.
+# n8n container (uid 1000), Postgres (uid 999), Ollama and Qdrant (root)
 chown -R 1000:1000 /mnt/efs/n8n
 chown -R 999:999 /mnt/efs/postgres
 chown -R 0:0 /mnt/efs/ollama
@@ -79,7 +98,7 @@ fi
 # 7. Start Docker Compose to launch all containers
 docker compose -f /opt/myapp/docker-compose.yml --env-file /opt/myapp/.env up -d
 
-# 8. Print success message with public IP (fallback to private IP if not set)
+# 8. Print success message with public IP (fallback to private IP if needed)
 PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
 if [ -z "$PUBLIC_IP" ]; then
     PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
