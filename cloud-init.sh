@@ -16,13 +16,22 @@ PARAM_NAMES=(
   "/aibuildkit/POSTGRES_PASSWORD"
 )
 
-# 1. Update system and install required packages using yum
-yum update -y
-yum install -y docker amazon-efs-utils nfs-utils jq git awscli
+# 1. Update system and install required packages using apt
+apt-get update
+apt-get install -y \
+    docker.io \
+    amazon-efs-utils \
+    nfs-common \
+    jq \
+    git \
+    awscli \
+    curl \
+    gnupg \
+    lsb-release
 
 # Start and enable Docker service
 systemctl enable docker && systemctl start docker
-usermod -aG docker ec2-user  # allow ec2-user to run Docker without sudo
+usermod -aG docker ubuntu  # allow ubuntu user to run Docker without sudo
 
 # 2. Install Docker Compose (latest version)
 curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" \
@@ -83,13 +92,13 @@ chmod -R 770 /mnt/efs/n8n /mnt/efs/postgres /mnt/efs/ollama /mnt/efs/qdrant
 # Check for NVIDIA GPU
 if lspci | grep -i nvidia > /dev/null; then
     echo "NVIDIA GPU detected. Installing NVIDIA drivers and container toolkit..."
-    # Install NVIDIA drivers
-    yum install -y nvidia-driver-latest-dkms
-    # Install NVIDIA Container Toolkit
+    # Add NVIDIA repository
     distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
-    curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
-    curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | sudo tee /etc/yum.repos.d/nvidia-docker.list
-    yum install -y nvidia-container-toolkit
+    curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | apt-key add -
+    curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | tee /etc/apt/sources.list.d/nvidia-docker.list
+    apt-get update
+    # Install NVIDIA drivers and container toolkit
+    apt-get install -y nvidia-driver-535 nvidia-container-toolkit
     systemctl restart docker
     # Test NVIDIA GPU access
     docker run --rm --gpus all nvidia/cuda:11.0-base nvidia-smi
@@ -97,9 +106,9 @@ if lspci | grep -i nvidia > /dev/null; then
 elif lspci | grep -i amd > /dev/null; then
     echo "AMD GPU detected. Setting up AMD GPU support..."
     # Install AMD drivers and ROCm
-    yum install -y rocm-dkms
+    apt-get install -y rocm-dkms
     # Add current user to video group
-    usermod -aG video ec2-user
+    usermod -aG video ubuntu
     # Create necessary device files if they don't exist
     mkdir -p /dev/dri
     mknod -m 666 /dev/dri/renderD128 c 226 128 || true
