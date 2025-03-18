@@ -54,12 +54,21 @@ if [[ -n "$EFS_ID" ]]; then
     mount -a || { echo "ERROR: EFS mount failed" >&2; exit 1; }
     if mountpoint -q "$EFS_MOUNT_POINT"; then
         echo "EFS mounted at $EFS_MOUNT_POINT"
+        # Get EFS DNS name and add it to .env file
+        EFS_DNS="${EFS_ID}.efs.${AWS_DEFAULT_REGION}.amazonaws.com"
+        echo "EFS_DNS=${EFS_DNS}" >> "$APP_DIR/.env"
+        echo "EFS_DNS=${EFS_DNS}" >> /etc/environment
+        source /etc/environment
     else
         echo "ERROR: EFS not mounted at $EFS_MOUNT_POINT" >&2
         exit 1
     fi
 else
     echo "WARNING: No EFS ID provided. Skipping EFS mount."
+    # Set a default local path for development/testing
+    echo "EFS_DNS=localhost" >> "$APP_DIR/.env"
+    echo "EFS_DNS=localhost" >> /etc/environment
+    source /etc/environment
 fi
 
 # 7. Allocate subdirectories on EFS for each service and set permissions
@@ -98,6 +107,8 @@ fi
 
 # 9. Launch the Docker Compose application
 cd "$APP_DIR"
+# Export EFS_DNS for docker-compose
+export EFS_DNS=$(grep EFS_DNS "$APP_DIR/.env" | cut -d '=' -f2)
 # Using the legacy docker-compose command; it automatically loads docker-compose.yml and .env from APP_DIR
 docker-compose up -d
 

@@ -6,25 +6,25 @@ volumes:
     driver_opts:
       type: "nfs"
       o: "addr=${EFS_DNS},nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2"
-      device: ":/n8n_storage"
+      device: ":/n8n"
   postgres_storage:
     driver: local
     driver_opts:
       type: "nfs"
       o: "addr=${EFS_DNS},nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2"
-      device: ":/postgres_storage"
+      device: ":/postgres"
   ollama_storage:
     driver: local
     driver_opts:
       type: "nfs"
       o: "addr=${EFS_DNS},nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2"
-      device: ":/ollama_storage"
+      device: ":/ollama"
   qdrant_storage:
     driver: local
     driver_opts:
       type: "nfs"
       o: "addr=${EFS_DNS},nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2"
-      device: ":/qdrant_storage"
+      device: ":/qdrant"
 
 networks:
   demo:
