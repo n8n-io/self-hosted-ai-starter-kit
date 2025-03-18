@@ -70,6 +70,32 @@ chown -R 0:0     /mnt/efs/ollama       # Ollama runs as root
 chown -R 0:0     /mnt/efs/qdrant       # Qdrant runs as root (adjust if needed)
 chmod -R 770 /mnt/efs/n8n /mnt/efs/postgres /mnt/efs/ollama /mnt/efs/qdrant
 
+# 8. Set up GPU support for Ollama
+# Check for NVIDIA GPU
+if lspci | grep -i nvidia > /dev/null; then
+    echo "NVIDIA GPU detected. Installing NVIDIA drivers and container toolkit..."
+    # Install NVIDIA drivers
+    yum install -y nvidia-driver-latest-dkms
+    # Install NVIDIA Container Toolkit
+    distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+    curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
+    curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | sudo tee /etc/yum.repos.d/nvidia-docker.list
+    yum install -y nvidia-container-toolkit
+    systemctl restart docker
+    # Test NVIDIA GPU access
+    docker run --rm --gpus all nvidia/cuda:11.0-base nvidia-smi
+    echo "NVIDIA GPU setup complete"
+elif lspci | grep -i amd > /dev/null; then
+    echo "AMD GPU detected. Setting up AMD GPU support..."
+    # Install AMD drivers and ROCm
+    yum install -y rocm-dkms
+    # Add current user to video group
+    usermod -aG video ec2-user
+    echo "AMD GPU setup complete"
+else
+    echo "No GPU detected. Ollama will run on CPU."
+fi
+
 # 9. Launch the Docker Compose application
 cd "$APP_DIR"
 # Using the legacy docker-compose command; it automatically loads docker-compose.yml and .env from APP_DIR
