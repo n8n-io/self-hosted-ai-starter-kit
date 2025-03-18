@@ -1,0 +1,3 @@
+n8n.example.io {
+    reverse_proxy n8n:5678
+}
