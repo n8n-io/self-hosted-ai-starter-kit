@@ -100,9 +100,16 @@ elif lspci | grep -i amd > /dev/null; then
     yum install -y rocm-dkms
     # Add current user to video group
     usermod -aG video ec2-user
+    # Create necessary device files if they don't exist
+    mkdir -p /dev/dri
+    mknod -m 666 /dev/dri/renderD128 c 226 128 || true
+    mknod -m 666 /dev/kfd c 10 235 || true
     echo "AMD GPU setup complete"
 else
     echo "No GPU detected. Ollama will run on CPU."
+    # Remove GPU-specific device mounts from docker-compose.yml
+    sed -i '/devices:/,/\/dev\/kfd/d' "$APP_DIR/docker-compose.yml"
+    sed -i '/deploy:/,/capabilities: \[gpu\]/d' "$APP_DIR/docker-compose.yml"
 fi
 
 # 9. Launch the Docker Compose application

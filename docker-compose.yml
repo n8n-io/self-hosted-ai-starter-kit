@@ -130,8 +130,8 @@ services:
               count: all
               capabilities: [gpu]
     devices:
-      - "/dev/kfd"
-      - "/dev/dri"
+      - "/dev/dri:/dev/dri"
+      - "/dev/kfd:/dev/kfd"
 
   ollama-init:
     image: ollama/ollama:latest
