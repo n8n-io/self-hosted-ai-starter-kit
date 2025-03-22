@@ -144,7 +144,7 @@ services:
     entrypoint:
       - "/bin/sh"
       - "-c"
-      - "/bin/ollama serve & pid=$!; ollama pull deepseek-r1:1.5b; ollama run deepseek-r1:1.5b; wait $pid"
+      - "/bin/ollama serve & pid=$!; ollama pull deepseek-r1:1.5b; ollama run deepseek-r1:1.5b; ollama pull mxbai-embed-large; wait $pid"
     environment:
       - OLLAMA_HOST=ollama:11434
     command: ["-c", "sleep 3; ollama pull llama2"]
