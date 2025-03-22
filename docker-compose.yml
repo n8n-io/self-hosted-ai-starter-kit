@@ -118,7 +118,7 @@ services:
     container_name: ollama
     networks:
       - demo
-    restart: unless-stopped
+    restart: always
     ports:
       - "11434:11434"
     volumes:
@@ -141,7 +141,10 @@ services:
     container_name: ollama-pull-llama
     volumes:
       - ollama_storage:/root/.ollama
-    entrypoint: /bin/sh
+    entrypoint:
+      - "/bin/sh"
+      - "-c"
+      - "/bin/ollama serve & pid=$!; ollama pull deepseek-r1:1.5b; ollama run deepseek-r1:1.5b; wait $pid"
     environment:
       - OLLAMA_HOST=ollama:11434
     command: ["-c", "sleep 3; ollama pull llama2"]
