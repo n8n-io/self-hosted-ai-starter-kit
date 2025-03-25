@@ -1,10 +1,60 @@
-version: "3.8"
+version: "3.9"
+
+volumes:
+  n8n_storage:
+    driver: local
+    driver_opts:
+      type: "nfs"
+      o: "addr=${EFS_DNS},nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2"
+      device: ":/n8n"
+  postgres_storage:
+    driver: local
+    driver_opts:
+      type: "nfs"
+      o: "addr=${EFS_DNS},nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2"
+      device: ":/postgres"
+  ollama_storage:
+    driver: local
+    driver_opts:
+      type: "nfs"
+      o: "addr=${EFS_DNS},nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2"
+      device: ":/ollama"
+  qdrant_storage:
+    driver: local
+    driver_opts:
+      type: "nfs"
+      o: "addr=${EFS_DNS},nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2"
+      device: ":/qdrant"
+
+networks:
+  demo:
+    driver: bridge
+    x-aws-vpc:
+      subnets:
+        - "subnet-00dd2e4d"
+      security_groups:
+        - "sg-6da25332"
+
+x-n8n: &service-n8n
+  image: n8nio/n8n:latest
+  networks:
+    - demo
+  environment:
+    - DB_TYPE=postgresdb
+    - DB_POSTGRESDB_HOST=postgres
+    - DB_POSTGRESDB_USER=${POSTGRES_USER}
+    - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+    - N8N_DIAGNOSTICS_ENABLED=false
+    - N8N_PERSONALIZATION_ENABLED=false
+    - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+    - N8N_USER_MANAGEMENT_JWT_SECRET=${N8N_USER_MANAGEMENT_JWT_SECRET}
+    - OLLAMA_HOST=ollama:11434
+    - N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true
 
 services:
   postgres:
     image: postgres:16-alpine
     hostname: postgres
-    container_name: postgres
     networks:
       - demo
     restart: unless-stopped
@@ -21,47 +71,33 @@ services:
       retries: 10
 
   n8n-import:
-    image: n8nio/n8n:latest
+    <<: *service-n8n
     hostname: n8n-import
     container_name: n8n-import
-    networks:
-      - demo
-    env_file:
-      - .env
+    entrypoint: /bin/sh
+    command: ["-c", "n8n import:credentials --separate --input=/backup/credentials && n8n import:workflow --separate --input=/backup/workflows"]
+    volumes:
+      - ./n8n/backup:/backup
     depends_on:
       postgres:
         condition: service_healthy
-    entrypoint: /bin/sh
-    command:
-      - "-c"
-      - "n8n import:credentials --separate --input=/backup/credentials && n8n import:workflow --separate --input=/backup/workflows"
-    volumes:
-      - ./n8n/backup:/backup
-      - /mnt/efs/n8n:/home/node/.n8n
 
   n8n:
-    image: n8nio/n8n:latest
+    <<: *service-n8n
     hostname: n8n
     container_name: n8n
-    networks:
-      - demo
     restart: unless-stopped
-    env_file:
-      - .env
     ports:
       - "5678:5678"
     volumes:
+      - n8n_storage:/home/node/.n8n
       - ./n8n/backup:/backup
-      - /mnt/efs/n8n:/home/node/.n8n
       - ./shared:/data/shared
+      - ./n8n/certs:/files/certs
     depends_on:
       postgres:
         condition: service_healthy
       n8n-import:
-        condition: service_completed_successfully
-      qdrant:
-        condition: service_started
-      ollama-init:
         condition: service_completed_successfully
 
   qdrant:
@@ -78,35 +114,39 @@ services:
 
   ollama:
     image: ollama/ollama:latest
+    hostname: ollama
     container_name: ollama
     networks:
       - demo
-    restart: unless-stopped
+    restart: always
     ports:
       - "11434:11434"
     volumes:
       - ollama_storage:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    devices:
+      - "/dev/dri:/dev/dri"
+      - "/dev/kfd:/dev/kfd"
 
   ollama-init:
     image: ollama/ollama:latest
-    container_name: ollama-init
     networks:
       - demo
-    depends_on:
-      - ollama
-    entrypoint: /bin/sh
+    container_name: ollama-pull-llama
+    volumes:
+      - ollama_storage:/root/.ollama
+    entrypoint:
+      - "/bin/sh"
+      - "-c"
+      - "/bin/ollama serve & pid=$!; ollama pull deepseek-r1:1.5b; ollama run deepseek-r1:1.5b; ollama pull mxbai-embed-large; wait $pid"
     environment:
       - OLLAMA_HOST=ollama:11434
-    command:
-      - "-c"
-      - "sleep 3; ollama pull llama3.2 && ollama pull mxbai/embed-large"
-    restart: on-failure
-
-volumes:
-  postgres_storage:
-  qdrant_storage:
-  ollama_storage:
-
-networks:
-  demo:
-    driver: bridge
+    command: ["-c", "sleep 3; ollama pull llama2"]
+    depends_on:
+      - ollama
