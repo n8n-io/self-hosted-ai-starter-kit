@@ -104,6 +104,10 @@ Additionally, after you see "Editor is now accessible via: <http://localhost:567
 1. Head to <http://localhost:5678/home/credentials>
 2. Click on "Local Ollama service"
 3. Change the base URL to "http://host.docker.internal:11434/"
+4. In order to use the pre-packaged postgres container, you need to specify the internal container IP address of postgres when you create a credential for it. Run the following command to get it. It will typically be `172.18.0.2`
+```
+docker inspect --format='{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' self-hosted-ai-starter-kit-postgres-1
+```
 
 #### For everyone else
 
