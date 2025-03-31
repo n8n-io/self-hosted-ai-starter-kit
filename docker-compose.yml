@@ -20,6 +20,8 @@ x-n8n: &service-n8n
     - N8N_ENCRYPTION_KEY
     - N8N_USER_MANAGEMENT_JWT_SECRET
     - OLLAMA_HOST=ollama:11434
+  env_file:
+    - .env
 
 x-ollama: &service-ollama
   image: ollama/ollama:latest
