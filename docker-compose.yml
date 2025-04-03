@@ -50,6 +50,11 @@ x-n8n: &service-n8n
     - N8N_USER_MANAGEMENT_JWT_SECRET=${N8N_USER_MANAGEMENT_JWT_SECRET}
     - OLLAMA_HOST=ollama:11434
     - N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true
+    - N8N_HOST=n8n.geuse.io
+    - N8N_PROTOCOL=https
+    - WEBHOOK_URL=https://n8n.geuse.io/
+    - N8N_DEFAULT_BINARY_DATA_MODE=filesystem
+
 
 services:
   postgres:
