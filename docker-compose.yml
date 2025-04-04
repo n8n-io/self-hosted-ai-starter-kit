@@ -54,6 +54,8 @@ x-n8n: &service-n8n
     - N8N_PROTOCOL=https
     - WEBHOOK_URL=https://n8n.geuse.io/
     - N8N_DEFAULT_BINARY_DATA_MODE=filesystem
+    - N8N_CORS_ENABLE=true
+    - N8N_CORS_ALLOWED_ORIGINS=https://www.geuse.io
 
 
 services:
