@@ -56,6 +56,7 @@ x-n8n: &service-n8n
     - N8N_DEFAULT_BINARY_DATA_MODE=filesystem
     - N8N_CORS_ENABLE=true
     - N8N_CORS_ALLOWED_ORIGINS=https://www.geuse.io
+    - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
 
 
 services:
@@ -151,7 +152,7 @@ services:
     entrypoint:
       - "/bin/sh"
       - "-c"
-      - "/bin/ollama serve & pid=$!; ollama pull deepseek-r1:1.5b; ollama run deepseek-r1:1.5b; ollama pull mxbai-embed-large; wait $pid"
+      - "/bin/ollama serve & pid=$!; ollama pull mxbai-embed-large:latest; ollama run deepseek-r1:1.5b; ollama pull gemma3:latest; wait $pid"
     environment:
       - OLLAMA_HOST=ollama:11434
     command: ["-c", "sleep 3; ollama pull llama2"]

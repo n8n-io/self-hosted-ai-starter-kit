@@ -14,6 +14,11 @@ PARAM_NAMES=(
   "/aibuildkit/N8N_USER_MANAGEMENT_JWT_SECRET"
   "/aibuildkit/N8N_ENCRYPTION_KEY"
   "/aibuildkit/POSTGRES_PASSWORD"
+  "/aibuildkit/ollama_api_key"
+  "/aibuildkit/N8N_CORS_ALLOWED_ORIGINS"
+  "/aibuildkit/N8N_CORS_ENABLE"
+  "/aibuildkit/N8N_HOST"
+  "/aibuildkit/N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE"
 )
 
 # 1. Update system and install required packages using yum
