@@ -35,8 +35,7 @@ networks:
         - "sg-6da25332"
 
 x-n8n: &service-n8n
-  image: n8nio/n8n:latest
-  user: "${UID:-1000}:${GID:-1000}"  # Matches host UID/GID
+  image: n8nio/n8n:1.86.0
   networks:
     - demo
   environment:
