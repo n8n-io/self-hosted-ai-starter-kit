@@ -29,7 +29,7 @@ x-ollama: &service-ollama
   networks: ['demo']
   restart: unless-stopped
   ports:
-    - 11434:11434
+    - 5432:5432
   volumes:
     - ollama_storage:/root/.ollama
 
