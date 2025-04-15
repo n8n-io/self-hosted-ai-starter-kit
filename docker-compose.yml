@@ -35,7 +35,7 @@ networks:
         - "sg-6da25332"
 
 x-n8n: &service-n8n
-  image: n8nio/n8n:1.86.0
+  image: n8nio/n8n
   networks:
     - demo
   environment:
