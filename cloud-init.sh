@@ -122,7 +122,7 @@ cd "$APP_DIR"
 # Export EFS_DNS for docker-compose
 export EFS_DNS=$(grep EFS_DNS "$APP_DIR/.env" | cut -d '=' -f2)
 # Using the legacy docker-compose command; it automatically loads docker-compose.yml and .env from APP_DIR
-docker compose up -d --force-recreate
+docker compose up -d --force-recreate --pull always
 
 # 10. Print success message with public IP (fallback to local IP if not available)
 PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4 || true)
