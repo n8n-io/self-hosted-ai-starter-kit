@@ -1,0 +1,47 @@
+{
+  "name": "Assign Task",
+  "nodes": [
+    { "id": "trig", "name": "Execute WF Trigger", "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "parameters": { "workflowInputs": { "values": [ { "name": "task_id" } ] } },
+      "position": [-240, -60] },
+    { "id": "sel", "name": "Postgres – Select", "type": "n8n-nodes-base.postgres",
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM tasks WHERE id={{$json.task_id}}"
+      },
+      "credentials": { "postgres": { "id": "POSTGRES_MAIN", "name": "Postgres (app)" } },
+      "position": [-20, -60] },
+    { "id": "choose", "name": "Code – Pick Agent", "type": "n8n-nodes-base.code",
+      "parameters": { "jsCode":
+"// simplistic capability match against global staticData registry\nconst registry=$getWorkflowStaticData('global');\nconst task=items[0].json[0];\nlet best=Object.values(registry).find(r=>r.capabilities.includes(task.agent_hint));\nif(!best) throw new Error('No agent found');\nreturn [{json:{workflowId:best.workflowId,task}}];" },
+      "position": [200, -60] },
+    { "id": "exec", "name": "Execute Sub-workflow (Agent)", "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {
+        "workflowId": "={{ $json.workflowId }}",
+        "inputDataMode": "defineBelow",
+        "inputDataUi": { "values": [ { "name": "task", "value": "={{ $json.task }}" } ] }
+      },
+      "position": [440, -60] },
+    { "id": "upd", "name": "Postgres – Update", "type": "n8n-nodes-base.postgres",
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE tasks SET status='done',artifact_url='{{ $json.artifact_url }}' WHERE id={{$json.task.id}}"
+      },
+      "credentials": { "postgres": { "id": "POSTGRES_MAIN", "name": "Postgres (app)" } },
+      "position": [660, -60] },
+    { "id": "mem", "name": "Postgres Chat Memory", "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1, "position": [200, 100],
+      "parameters": { "sessionKey": "{{$headers['x-session-id']||$executionId}}", "tableName": "chat_memory", "contextWindow": 5 },
+      "credentials": { "postgres": { "id": "POSTGRES_CHAT_MEMORY", "name": "Postgres (chat-memory)" } } },
+    { "id": "note", "name": "Sticky Note", "type": "n8n-nodes-base.stickyNote",
+      "position": [440, 100],
+      "parameters": { "content": "Agent registry lives in `$getWorkflowStaticData('global')`.\nPopulate it once per agent:\nregistry[agentId] = {capabilities:['analytics'],workflowId:'<UUID>'}" } }
+  ],
+  "connections": {
+    "Execute WF Trigger": { "main": [[{ "node": "Postgres – Select", "type": "main", "index": 0 }]] },
+    "Postgres – Select": { "main": [[{ "node": "Code – Pick Agent", "type": "main", "index": 0 }]] },
+    "Code – Pick Agent": { "main": [[{ "node": "Execute Sub-workflow (Agent)", "type": "main", "index": 0 }]] },
+    "Execute Sub-workflow (Agent)": { "main": [[{ "node": "Postgres – Update", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

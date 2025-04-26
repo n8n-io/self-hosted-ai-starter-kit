@@ -1,0 +1,21 @@
+{
+  "name": "Next Task",
+  "nodes": [
+    { "id": "trig", "name": "Execute WF Trigger", "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "parameters": {}, "position": [-120, -20] },
+    { "id": "sql", "name": "Postgres – Next Task Query", "type": "n8n-nodes-base.postgres",
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM tasks WHERE status IN ('pending','in-progress')\nAND (dependencies IS NULL OR dependencies <@ (SELECT array_agg(id) FROM tasks WHERE status='done'))\nORDER BY priority DESC,id LIMIT 1"
+      },
+      "credentials": { "postgres": { "id": "POSTGRES_MAIN", "name": "Postgres (app)" } },
+      "position": [120, -20] },
+    { "id": "note", "name": "Sticky Note", "type": "n8n-nodes-base.stickyNote",
+      "parameters": { "content": "Returns one row → HNIC streams it back to user." },
+      "position": [120, 100] }
+  ],
+  "connections": {
+    "Execute WF Trigger": { "main": [[{ "node": "Postgres – Next Task Query", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

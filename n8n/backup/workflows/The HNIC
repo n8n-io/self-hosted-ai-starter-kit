@@ -1,0 +1,144 @@
+{
+    "name": "HNIC Orchestrator",
+    "nodes": [
+      {
+        "id": "chat_trigger",
+        "name": "When chat message received",
+        "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+        "typeVersion": 1,
+        "position": [-200, -200],
+        "webhookId": "hnic_webhook"
+      },
+      {
+        "id": "pg_mem",
+        "name": "Postgres Chat Memory",
+        "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+        "typeVersion": 1,
+        "position": [120, -60],
+        "parameters": {
+          "sessionKey": "{{$headers[\"x-session-id\"] || $executionId}}",
+          "tableName": "chat_memory",
+          "contextWindow": 10
+        },
+        "credentials": {
+          "postgres": {
+            "id": "POSTGRES_CHAT_MEMORY",
+            "name": "Postgres (chat-memory)"
+          }
+        }
+      },
+      {
+        "id": "openai_llm",
+        "name": "OpenAI Chat Model",
+        "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+        "typeVersion": 1,
+        "position": [120, -220],
+        "parameters": {
+          "model": {
+            "__rl": true,
+            "mode": "list",
+            "value": "gpt-4o"
+          },
+          "options": {
+            "temperature": 0.2
+          }
+        },
+        "credentials": {
+          "openAiApi": {
+            "id": "OPENAI_MAIN",
+            "name": "OpenAI"
+          }
+        }
+      },
+      {
+        "id": "hnic_agent",
+        "name": "AI Agent – HNIC",
+        "type": "@n8n/n8n-nodes-langchain.agent",
+        "typeVersion": 1,
+        "position": [360, -200],
+        "parameters": {
+          "options": {
+            "systemMessage": "=You are **The H N I C** – client-side orchestrator.\n• If no open tasks exist for the current session, call `plan_tasks` with {{$json.message}}.\n• For every *pending* task whose dependencies are met, call `assign_task` with its `id`.\n• Reply to the user with streaming status updates.\nAllowed commands: `tasks list`, `tasks next`, `tasks done <id>`."
+          }
+        }
+      },
+      {
+        "id": "tool_plan",
+        "name": "plan_tasks",
+        "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+        "typeVersion": 2,
+        "position": [600, -340],
+        "parameters": {
+          "name": "plan_tasks",
+          "workflowId": {
+            "__rl": true,
+            "mode": "list",
+            "value": "Plan Tasks"
+          },
+          "description": "Break a natural-language request into atomic tasks and store them."
+        }
+      },
+      {
+        "id": "tool_assign",
+        "name": "assign_task",
+        "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+        "typeVersion": 2,
+        "position": [600, -240],
+        "parameters": {
+          "name": "assign_task",
+          "workflowId": {
+            "__rl": true,
+            "mode": "list",
+            "value": "Assign Task"
+          },
+          "description": "Dispatch one task to the best remote agent and update its status."
+        }
+      },
+      {
+        "id": "tool_next",
+        "name": "next_task",
+        "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+        "typeVersion": 2,
+        "position": [600, -140],
+        "parameters": {
+          "name": "next_task",
+          "workflowId": {
+            "__rl": true,
+            "mode": "list",
+            "value": "Next Task"
+          },
+          "description": "Return the next actionable task for this session."
+        }
+      },
+      {
+        "id": "note",
+        "name": "Sticky Note",
+        "type": "n8n-nodes-base.stickyNote",
+        "position": [120, 40],
+        "parameters": {
+          "content": "⚠️  Set Postgres credentials named **Postgres (chat-memory)**.\n⚠️  Ensure ENV var `OPENAI_API_KEY` is present.\n⚠️  Each tool references a sub-workflow by *name*."
+        }
+      }
+    ],
+    "connections": {
+      "When chat message received": {
+        "main": [[{ "node": "AI Agent – HNIC", "type": "main", "index": 0 }]]
+      },
+      "OpenAI Chat Model": {
+        "ai_languageModel": [[{ "node": "AI Agent – HNIC", "type": "ai_languageModel", "index": 0 }]]
+      },
+      "Postgres Chat Memory": {
+        "ai_memory": [[{ "node": "AI Agent – HNIC", "type": "ai_memory", "index": 0 }]]
+      },
+      "plan_tasks": {
+        "ai_tool": [[{ "node": "AI Agent – HNIC", "type": "ai_tool", "index": 0 }]]
+      },
+      "assign_task": {
+        "ai_tool": [[{ "node": "AI Agent – HNIC", "type": "ai_tool", "index": 1 }]]
+      },
+      "next_task": {
+        "ai_tool": [[{ "node": "AI Agent – HNIC", "type": "ai_tool", "index": 2 }]]
+      }
+    },
+    "settings": { "executionOrder": "v1" }
+  }  
