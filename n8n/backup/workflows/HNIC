@@ -1,0 +1,243 @@
+{
+  "name": "the HNIC",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "7d926e6f-17c8-47ca-95ce-af3049a087da",
+      "name": "When chat message received",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1,
+      "position": [
+        460,
+        180
+      ],
+      "webhookId": "hnic_webhook"
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-2024-05-13",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "03ef073e-fc7d-458c-a43b-3f5d4f9a9a2e",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [
+        640,
+        400
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "hBtsQLQMLb4ichIf",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "⚠️  Set Postgres credentials named **Postgres (chat-memory)**.\n⚠️  Ensure ENV var `OPENAI_API_KEY` is present.\n⚠️  Each tool references a sub-workflow by *name*.",
+        "height": 120,
+        "width": 300
+      },
+      "id": "336188b7-6585-4f99-8b0f-c7468e193365",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -340,
+        320
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "You are **The H N I C** – client-side orchestrator.\n• If no open tasks exist for the current session, call `plan_tasks` with {{ $json.chatInput }}.\n• For every *pending* task whose dependencies are met, call `assign_task` with its `id`.\n• Reply to the user with streaming status updates.\nAllowed commands: `tasks list`, `tasks next`, `tasks done <id>`."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.8,
+      "position": [
+        680,
+        80
+      ],
+      "id": "83798b20-61c9-4f9d-9fa2-1a71f101a7b6",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "name": "plan_tasks",
+        "description": "Break prompt into atomic tasks and insert in DB",
+        "workflowId": {
+          "__rl": true,
+          "value": "MJb3NPJPoCJ8BFFF",
+          "mode": "list",
+          "cachedResultName": "Plan Tasks (sub-workflow)"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "query": "={\n  \"query\":\n}"
+          },
+          "matchingColumns": [
+            "query"
+          ],
+          "schema": [
+            {
+              "id": "query",
+              "displayName": "query",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "id": "a0f2a9ea-0a89-427b-a85f-839f76b5d8ec",
+      "name": "plan_tasks",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "position": [
+        980,
+        320
+      ],
+      "typeVersion": 2.1
+    },
+    {
+      "parameters": {
+        "tableName": "chat_memory"
+      },
+      "id": "4a172cfb-9dfa-4ae5-b0c3-f10341a32181",
+      "name": "Postgres Chat Memory1",
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "position": [
+        820,
+        380
+      ],
+      "typeVersion": 1.3,
+      "credentials": {
+        "postgres": {
+          "id": "HXeMGpW8hhaO9GDZ",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "name": "assign_task",
+        "description": "Dispatch one task to a remote agent",
+        "source": "parameter",
+        "workflowJson": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Workflow_JSON', ``, 'json') }}"
+      },
+      "id": "6a934b76-94b2-401f-a720-76428f09af64",
+      "name": "assign_task1",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "position": [
+        1080,
+        180
+      ],
+      "typeVersion": 2.1
+    },
+    {
+      "parameters": {
+        "name": "next_task",
+        "description": "Return next actionable task",
+        "source": "parameter",
+        "workflowJson": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Workflow_JSON', ``, 'json') }}"
+      },
+      "id": "695043a5-d58a-4c0c-b858-1bb877caf308",
+      "name": "next_task1",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "position": [
+        860,
+        -140
+      ],
+      "typeVersion": 2.1
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "plan_tasks": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "assign_task1": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "next_task1": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory1": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "d23417c4-1a09-4c91-b88c-efe8fa0829ed",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "9230b613623a2b3978d41da65a18a521220239c5995163bad93d97f84f3b4d50"
+  },
+  "id": "Nn2zMIP7YPEB4ur7",
+  "tags": []
+}
