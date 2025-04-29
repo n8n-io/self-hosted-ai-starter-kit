@@ -99,13 +99,24 @@
           "convertFieldsToString": false
         }
       },
-      "id": "a0f2a9ea-0a89-427b-a85f-839f76b5d8ec",
-      "name": "plan_tasks",
-      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
-      "position": [
-        980,
-        320
-      ],
+  {
+  "id": "tool_plan",
+  "name": "plan_tasks",
+  "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+  "position": [600,-300],
+  "parameters": {
+    "name": "plan_tasks",
+    "workflowId": { "__rl": true, "mode": "list", "value": "Plan Tasks (sub)" },
+    "description": "Break prompt into atomic tasks",
+    "source": "defineBelow",
+    "workflowInputs": {
+      "values": [
+        { "name": "prompt",     "value": "={{ $json.chatInput }}" },
+        { "name": "sessionId",  "value": "={{ $json.sessionId }}" }
+      ]
+    }
+  }
+}
       "typeVersion": 2.1
     },
     {
