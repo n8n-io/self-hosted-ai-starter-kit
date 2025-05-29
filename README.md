@@ -184,7 +184,7 @@ and nodes. If you run into an issue, go to [support](#support).
 ## 🛍️ More AI templates
 
 For more AI workflow ideas, visit the [**official n8n AI template
-gallery**](https://n8n.io/workflows/?categories=AI). From each workflow,
+gallery**](https://n8n.io/workflows/categories/ai/). From each workflow,
 select the **Use workflow** button to automatically import the workflow into
 your local n8n instance.
 
