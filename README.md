@@ -57,6 +57,11 @@ docker compose --profile gpu-nvidia up
 > [!NOTE]
 > If you have not used your Nvidia GPU with Docker before, please follow the
 > [Ollama Docker instructions](https://github.com/ollama/ollama/blob/main/docs/docker.md).
+> Or...
+> go here [nvidia dev](https://developer.nvidia.com/cuda/wsl)
+> - scroll down to Cuda Toolkit
+> - choose your OS. Eg: Windows, x86, v10, local
+> - download, run as admin, reboot.
 
 ### For AMD GPU users on Linux
 
