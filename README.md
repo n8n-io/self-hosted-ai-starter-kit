@@ -140,6 +140,40 @@ language model and Qdrant as your vector store.
 > combines robust components that work well together for proof-of-concept
 > projects. You can customize it to meet your specific needs
 
+## 🌍 Expose n8n publicly 
+
+Making your n8n instance accessible on the Internet can be achieved in different ways. Traefik or Caddy generate TLS 
+certificat with let's encrypt. If you don't have a public-facing server but still want to share your n8n instance from
+ a machine on a private network, Cloudflare Tunnel.
+
+### With Traefik
+
+```bash
+sed -i 's/n8n\.example\.com/n8n\.myowndomain\.com/g' .env
+sed -i '' 's/n8n\.example\.com/n8n\.myowndomain\.com/g' .env  # Mac compatible
+docker compose -f docker-compose.yml -f docker-compose.traefik.yml up
+```
+
+### With Caddy
+
+```bash
+sed -i 's/n8n\.example\.com/n8n\.myowndomain\.com/g' .env
+sed -i '' 's/n8n\.example\.com/n8n\.myowndomain\.com/g' .env  # Mac compatible
+docker compose -f docker-compose.yml -f docker-compose.caddy.yml up
+```
+
+### With Cloudflared
+
+First, create a Cloudflare account and add a domain to it. For detailed instructions, see the 
+[Cloudflare documentation](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/create-remote-tunnel/).
+
+Once you have your tunnel token, add it to your `.env` file.
+ 
+```bash
+# Set CLOUDFLARED_TUNNEL_TOKEN environement variable in .env
+docker compose -f docker-compose.yml -f docker-compose.cloudflared.yml up
+```
+
 ## Upgrading
 
 * ### For Nvidia GPU setups:

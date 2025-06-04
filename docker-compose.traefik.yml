@@ -1,0 +1,35 @@
+volumes:
+  traefik_data:
+
+services:
+  n8n:
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.n8n.rule=Host(`${WEBHOOK_URL}`)"
+      - "traefik.http.routers.n8n.entrypoints=websecure"
+      - "traefik.http.routers.n8n.tls.certresolver=myresolver"
+    environment:
+      - WEBHOOK_URL
+    env_file:
+      - .env
+      
+
+  traefik:
+    image: traefik:v3.4
+    container_name: traefik
+    restart: unless-stopped
+    networks: ['demo']
+    command:
+      - "--log.level=INFO"
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entryPoints.websecure.address=:443"
+      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "1443:443"
+      - "8080:8080"
+    volumes:
+      - traefik_data:/letsencrypt
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
