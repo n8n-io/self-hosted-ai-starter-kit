@@ -1,0 +1,3 @@
+{$WEBHOOK_URL} {
+    reverse_proxy n8n:5678
+}

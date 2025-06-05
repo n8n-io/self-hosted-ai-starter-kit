@@ -42,15 +42,17 @@ Engineering world, handles large amounts of data safely.
 ```bash
 git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
 cd self-hosted-ai-starter-kit
+cp .env.example .env # you should update secrets and passwords inside
 ```
 
 ### Running n8n using Docker Compose
 
 #### For Nvidia GPU users
 
-```
+```bash
 git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
 cd self-hosted-ai-starter-kit
+cp .env.example .env # you should update secrets and passwords inside
 docker compose --profile gpu-nvidia up
 ```
 
@@ -60,9 +62,10 @@ docker compose --profile gpu-nvidia up
 
 ### For AMD GPU users on Linux
 
-```
+```bash
 git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
 cd self-hosted-ai-starter-kit
+cp .env.example .env # you should update secrets and passwords inside
 docker compose --profile gpu-amd up
 ```
 
@@ -80,36 +83,30 @@ If you want to run Ollama on your mac, check the
 [Ollama homepage](https://ollama.com/)
 for installation instructions, and run the starter kit as follows:
 
-```
+```bash
 git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
 cd self-hosted-ai-starter-kit
+cp .env.example .env # you should update secrets and passwords inside
 docker compose up
 ```
 
 ##### For Mac users running OLLAMA locally
 
 If you're running OLLAMA locally on your Mac (not in Docker), you need to modify the OLLAMA_HOST environment variable
-in the n8n service configuration. Update the x-n8n section in your Docker Compose file as follows:
 
-```yaml
-x-n8n: &service-n8n
-  # ... other configurations ...
-  environment:
-    # ... other environment variables ...
-    - OLLAMA_HOST=host.docker.internal:11434
-```
+1. Set OLLAMA_HOST to `host.docker.internal:11434` in your .env file. 
+2. Additionally, after you see "Editor is now accessible via: <http://localhost:5678/>":
 
-Additionally, after you see "Editor is now accessible via: <http://localhost:5678/>":
-
-1. Head to <http://localhost:5678/home/credentials>
-2. Click on "Local Ollama service"
-3. Change the base URL to "http://host.docker.internal:11434/"
+    1. Head to <http://localhost:5678/home/credentials>
+    2. Click on "Local Ollama service"
+    3. Change the base URL to "http://host.docker.internal:11434/"
 
 #### For everyone else
 
-```
+```bash
 git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
 cd self-hosted-ai-starter-kit
+cp .env.example .env # you should update secrets and passwords inside
 docker compose --profile cpu up
 ```
 
@@ -143,6 +140,40 @@ language model and Qdrant as your vector store.
 > combines robust components that work well together for proof-of-concept
 > projects. You can customize it to meet your specific needs
 
+## 🌍 Expose n8n publicly 
+
+Making your n8n instance accessible on the Internet can be achieved in different ways. Traefik or Caddy generate TLS 
+certificat with let's encrypt. If you don't have a public-facing server but still want to share your n8n instance from
+ a machine on a private network, Cloudflare Tunnel.
+
+### With Traefik
+
+```bash
+sed -i 's/n8n\.example\.com/n8n\.myowndomain\.com/g' .env
+sed -i '' 's/n8n\.example\.com/n8n\.myowndomain\.com/g' .env  # Mac compatible
+docker compose -f docker-compose.yml -f docker-compose.traefik.yml up
+```
+
+### With Caddy
+
+```bash
+sed -i 's/n8n\.example\.com/n8n\.myowndomain\.com/g' .env
+sed -i '' 's/n8n\.example\.com/n8n\.myowndomain\.com/g' .env  # Mac compatible
+docker compose -f docker-compose.yml -f docker-compose.caddy.yml up
+```
+
+### With Cloudflared
+
+First, create a Cloudflare account and add a domain to it. For detailed instructions, see the 
+[Cloudflare documentation](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/create-remote-tunnel/).
+
+Once you have your tunnel token, add it to your `.env` file.
+ 
+```bash
+# Set CLOUDFLARED_TUNNEL_TOKEN environement variable in .env
+docker compose -f docker-compose.yml -f docker-compose.cloudflared.yml up
+```
+
 ## Upgrading
 
 * ### For Nvidia GPU setups:
@@ -154,7 +185,7 @@ docker compose create && docker compose --profile gpu-nvidia up
 
 * ### For Mac / Apple Silicon users
 
-```
+```bash
 docker compose pull
 docker compose create && docker compose up
 ```
