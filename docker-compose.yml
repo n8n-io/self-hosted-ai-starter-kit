@@ -22,6 +22,9 @@ x-n8n: &service-n8n
     - OLLAMA_HOST=ollama:11434
     - N8N_HOST=${N8N_HOST:-n8n:5678}
     - WEBHOOK_URL=${N8N_WEBHOOK_URL:-http://localhost:5678}
+    - N8N_RUNNERS_ENABLED=true
+    - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=false
+    - N8N_SECURE_COOKIES=false
   env_file:
     - .env
 
