@@ -58,6 +58,7 @@ docker compose --profile gpu-nvidia up
 > If you have not used your Nvidia GPU with Docker before, please follow the
 > [Ollama Docker instructions](https://github.com/ollama/ollama/blob/main/docs/docker.md).
 
+
 ### For AMD GPU users on Linux
 
 ```
@@ -113,6 +114,31 @@ cd self-hosted-ai-starter-kit
 docker compose --profile gpu-intel up
 ```
 
+> [!NOTE]
+> ## 🖥️ Running Ollama with Intel GPUs (Arc & iGPU)  
+> This section complements the official Ollama Docker guide [Ollama Docker instructions](https://github.com/ollama/ollama/blob/main/docs/docker.md) by adding **Intel GPU** instructions that match the style of the original CPU / NVIDIA / AMD how-tos.
+
+---
+
+### 0.  Host preparation (Ubuntu 22.04 / 24.04)
+
+```bash
+# 1️⃣  Update packages
+sudo apt update
+
+# 2️⃣  Install Intel media / OpenCL / Level-Zero runtimes
+sudo apt install -y \
+  intel-media-va-driver-non-free \   # VA-API driver (iHD)
+  intel-opencl-icd \                 # OpenCL runtime
+  intel-level-zero-gpu \             # oneAPI Level-Zero
+  libmfx1 vainfo clinfo              # misc tools
+
+# 3️⃣  Grant the current user access to the render & video groups
+sudo usermod -aG render,video $(whoami)
+
+# 4️⃣  Reboot so the i915 kernel module picks up the new firmware
+sudo reboot
+
 #### For everyone else
 
 ```
@@ -153,23 +179,46 @@ language model and Qdrant as your vector store.
 
 ## Upgrading
 
-* ### For Nvidia GPU setups:
+> Always run `docker compose build --pull` first.  
+> It rebuilds local images **and** pulls newer tags for every
+> service in the stack, regardless of profile.
+
+* ### For NVIDIA GPU setups:
 
 ```bash
+docker compose build --pull
 docker compose --profile gpu-nvidia pull
 docker compose create && docker compose --profile gpu-nvidia up
 ```
 
+* ### For AMD GPU setups:
+
+```bash
+docker compose build --pull
+docker compose --profile gpu-amd pull
+docker compose create && docker compose --profile gpu-amd up
+```
+
 * ### For Mac / Apple Silicon users
 
-```
+```bash
+docker compose build --pull
 docker compose pull
 docker compose create && docker compose up
+```
+
+* ### For Intel GPU users
+
+```bash
+docker compose build --pull --profile gpu-intel
+docker compose --profile gpu-intel pull
+docker compose create && docker compose --profile gpu-intel up
 ```
 
 * ### For Non-GPU setups:
 
 ```bash
+docker compose build --pull
 docker compose --profile cpu pull
 docker compose create && docker compose --profile cpu up
 ```
