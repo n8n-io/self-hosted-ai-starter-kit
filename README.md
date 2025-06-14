@@ -120,7 +120,7 @@ docker compose --profile gpu-intel up
 
 ---
 
-### 0.  Host preparation (Ubuntu 22.04 / 24.04)
+###  Host preparation (Ubuntu 22.04 / 24.04)
 
 ```bash
 # 1️⃣  Update packages
@@ -138,6 +138,7 @@ sudo usermod -aG render,video $(whoami)
 
 # 4️⃣  Reboot so the i915 kernel module picks up the new firmware
 sudo reboot
+```
 
 #### For everyone else
 
