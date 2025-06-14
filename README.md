@@ -40,7 +40,7 @@ Engineering world, handles large amounts of data safely.
 ### Cloning the Repository
 
 ```bash
-git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
+git clone https://github.com/pi0n00r/self-hosted-ai-starter-kit.git
 cd self-hosted-ai-starter-kit
 ```
 
@@ -49,7 +49,7 @@ cd self-hosted-ai-starter-kit
 #### For Nvidia GPU users
 
 ```
-git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
+git clone https://github.com/pi0n00r/self-hosted-ai-starter-kit.git
 cd self-hosted-ai-starter-kit
 docker compose --profile gpu-nvidia up
 ```
@@ -61,7 +61,7 @@ docker compose --profile gpu-nvidia up
 ### For AMD GPU users on Linux
 
 ```
-git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
+git clone https://github.com/pi0n00r/self-hosted-ai-starter-kit.git
 cd self-hosted-ai-starter-kit
 docker compose --profile gpu-amd up
 ```
@@ -81,7 +81,7 @@ If you want to run Ollama on your mac, check the
 for installation instructions, and run the starter kit as follows:
 
 ```
-git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
+git clone https://github.com/pi0n00r/self-hosted-ai-starter-kit.git
 cd self-hosted-ai-starter-kit
 docker compose up
 ```
@@ -105,10 +105,18 @@ Additionally, after you see "Editor is now accessible via: <http://localhost:567
 2. Click on "Local Ollama service"
 3. Change the base URL to "http://host.docker.internal:11434/"
 
+#### For Intel GPU users
+
+```
+git clone https://github.com/pi0n00r/self-hosted-ai-starter-kit.git
+cd self-hosted-ai-starter-kit
+docker compose --profile gpu-intel up
+```
+
 #### For everyone else
 
 ```
-git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
+git clone https://github.com/pi0n00r/self-hosted-ai-starter-kit.git
 cd self-hosted-ai-starter-kit
 docker compose --profile cpu up
 ```
