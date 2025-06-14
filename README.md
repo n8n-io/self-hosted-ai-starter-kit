@@ -244,3 +244,11 @@ can:
   pro, the community and our team are ready to support with any challenges.
 - **Propose Ideas**: Have an idea for a feature or improvement? Let us know!
   We’re always eager to hear what you’d like to see next.
+
+## Upstream
+
+To keep your fork in sync with the original repo, add the upstream remote and fetch its changes:
+
+```bash
+git remote add upstream https://github.com/n8n-io/self-hosted-ai-starter-kit.git
+git fetch upstream
