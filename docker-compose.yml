@@ -24,7 +24,7 @@ x-n8n: &service-n8n
     - WEBHOOK_URL=${N8N_WEBHOOK_URL:-http://localhost:5678}
     - N8N_RUNNERS_ENABLED=true
     - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=false
-    - N8N_SECURE_COOKIES=false
+    - N8N_SECURE_COOKIE=false
   env_file:
     - .env
 
