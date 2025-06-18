@@ -1,0 +1,92 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+README.md
+*.md
+docs/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+
+# Dependency directories
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment files
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Docker
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# Backup files
+*.bak
+*.backup
+*.tmp
+
+# Cache directories
+.cache/
+.tmp/
+tmp/
+
+# Build artifacts
+dist/
+build/
+*.tar.gz
+*.zip
+
+# AWS
+.aws/
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# Cloud-init
+cloud-init.sh
+
+# N8N specific
+n8n/backup/
+n8n/certs/
+
+# Shared data
+shared/
+
+# EFS mount points
+/mnt/efs/ 

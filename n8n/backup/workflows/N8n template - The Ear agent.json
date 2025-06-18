@@ -1,0 +1,201 @@
+{
+  "meta": {
+    "instanceId": "ear-agent",
+    "templateCredsSetupCompleted": true
+  },
+  "nodes": [
+    {
+      "id": "a2a_trigger",
+      "name": "A2A Protocol Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "position": [-180, -380],
+      "webhookId": "ear-agent-webhook",
+      "parameters": {
+        "options": {
+          "responseMode": "lastNode",
+          "responseData": "allData"
+        }
+      },
+      "typeVersion": 1.1
+    },
+    {
+      "id": "ear_agent",
+      "name": "The Ear Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [20, -380],
+      "parameters": {
+        "options": {
+          "agentType": "a2a",
+          "capabilities": ["current_events", "trend_analysis"],
+          "systemPrompt": "You are The Ear, a current events analyst agent. Your role is to:\n1. Monitor and analyze current events and trends\n2. Identify relevant news and developments\n3. Provide context and analysis of events\n4. Track sentiment and public reaction\n5. Identify potential impacts and implications\n\nUse your tools to gather and analyze information from various sources."
+        }
+      },
+      "typeVersion": 1.8
+    },
+    {
+      "id": "news_api",
+      "name": "News API Tool",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "position": [220, -380],
+      "parameters": {
+        "name": "news_api",
+        "workflowId": "news-api-workflow",
+        "description": "Fetch current news articles and analyze trends",
+        "workflowInputs": {
+          "value": {},
+          "schema": [
+            {
+              "name": "query",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "timeframe",
+              "type": "string",
+              "required": false
+            }
+          ]
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "trend_analysis",
+      "name": "Trend Analysis Tool",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "position": [420, -380],
+      "parameters": {
+        "name": "trend_analysis",
+        "workflowId": "trend-analysis-workflow",
+        "description": "Analyze trends and patterns in news data",
+        "workflowInputs": {
+          "value": {},
+          "schema": [
+            {
+              "name": "data",
+              "type": "array",
+              "required": true
+            },
+            {
+              "name": "timeframe",
+              "type": "string",
+              "required": false
+            }
+          ]
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "postgres_memory",
+      "name": "Postgres Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgres",
+      "position": [620, -380],
+      "parameters": {
+        "options": {
+          "connectionString": "={{ $env.POSTGRES_CONNECTION_STRING }}",
+          "tableName": "ear_agent_memory",
+          "sessionId": "={{ $workflow.id }}"
+        }
+      },
+      "typeVersion": 1.3
+    },
+    {
+      "id": "openai_model",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "position": [820, -380],
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4"
+        },
+        "options": {
+          "temperature": 0.7,
+          "maxTokens": 4000
+        }
+      },
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-credentials",
+          "name": "OpenAI API"
+        }
+      },
+      "typeVersion": 1.2
+    }
+  ],
+  "connections": {
+    "A2A Protocol Trigger": {
+      "main": [
+        [
+          {
+            "node": "The Ear Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "The Ear Agent": {
+      "main": [
+        [
+          {
+            "node": "News API Tool",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "ai_tool": [
+        [
+          {
+            "node": "News API Tool",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Trend Analysis Tool",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "News API Tool": {
+      "main": [
+        [
+          {
+            "node": "Trend Analysis Tool",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trend Analysis Tool": {
+      "main": [
+        [
+          {
+            "node": "Postgres Memory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Memory": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Chat Model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+} 

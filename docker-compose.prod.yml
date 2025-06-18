@@ -1,0 +1,103 @@
+version: '3.8'
+
+# Production overrides
+# Use with: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  postgres:
+    environment:
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements", "-c", "max_connections=200", "-c", "shared_buffers=512MB", "-c", "effective_cache_size=2GB", "-c", "work_mem=4MB", "-c", "maintenance_work_mem=64MB"]
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    restart: always
+
+  n8n:
+    environment:
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_LOG_LEVEL=warn
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - N8N_USER_MANAGEMENT_JWT_SECRET=${N8N_USER_MANAGEMENT_JWT_SECRET}
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5678/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  qdrant:
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  ollama:
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_ORIGINS=*
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+          cpus: '4.0'
+        reservations:
+          memory: 2G
+          cpus: '1.0'
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  ollama-init:
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    entrypoint:
+      - "/bin/sh"
+      - "-c"
+      - |
+        /bin/ollama serve &
+        sleep 15
+        echo "Production mode: Downloading models..."
+        ollama pull mxbai-embed-large:latest || echo "Failed to pull mxbai-embed-large"
+        ollama pull deepseek-r1:1.5b || echo "Failed to pull deepseek-r1"
+        ollama pull gemma3:latest || echo "Failed to pull gemma3"
+        ollama pull llama2 || echo "Failed to pull llama2"
+        echo "Model initialization complete"
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 3
+        delay: 30s 

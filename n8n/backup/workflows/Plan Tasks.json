@@ -1,45 +1,73 @@
 {
-  "name": "Plan Tasks",
+  "name": "Plan Tasks (sub)",
   "nodes": [
-    { "id": "trig", "name": "Execute WF Trigger", "type": "n8n-nodes-base.executeWorkflowTrigger",
-      "position": [-200, -60],
-      "parameters": { "inputSource": "passthrough", "workflowInputs": { "values": [ { "name": "prompt" } ] } } },
-    { "id": "mem", "name": "Postgres Chat Memory", "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
-      "typeVersion": 1, "position": [0, 140],
-      "parameters": { "sessionKey": "{{$headers['x-session-id'] || $executionId}}", "tableName": "chat_memory", "contextWindow": 5 },
-      "credentials": { "postgres": { "id": "POSTGRES_CHAT_MEMORY", "name": "Postgres (chat-memory)" } } },
-    { "id": "llm", "name": "Basic LLM Chain", "type": "@n8n/n8n-nodes-langchain.chainLlm",
-      "typeVersion": 1, "position": [0, -60],
+    {
+      "id": "trig",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [-220,-40],
       "parameters": {
-        "prompt": "=You are a senior planner. Break the USER_PROMPT below into 3-10 atomic tasks. Output only valid JSON:\n{\n\"tasks\": [ {\"title\":\"…\",\"description\":\"…\",\"priority\":\"high|medium|low\",\"dependencies\":[],\"agent_hint\":\"research|analytics|scraper\"} ]\n}\nUSER_PROMPT: {{$json.prompt}}"
-      } },
-    { "id": "llm_model", "name": "OpenAI Chat Model", "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
-      "typeVersion": 1, "position": [-200, -200],
+        "inputSource": "passthrough",
+        "workflowInputs": { "values": [ { "name": "prompt", "required": true } ] }
+      }
+    },
+    {
+      "id": "chain",
+      "name": "Basic LLM Chain",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "position": [0,-40],
+      "parameters": {
+        "prompt": "=You are a senior planner. Break the USER_PROMPT into 3-10 atomic tasks and output ONLY valid JSON:\n{\"tasks\":[{\"title\":\"…\",\"description\":\"…\",\"priority\":\"high|medium|low\",\"dependencies\":[],\"agent_hint\":\"research|analytics|scraper\"}]}\nUSER_PROMPT: {{$json.prompt}}"
+      }
+    },
+    {
+      "id": "model",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "position": [-220,-180],
       "parameters": { "model": { "__rl": true, "mode": "list", "value": "gpt-4o-mini" } },
-      "credentials": { "openAiApi": { "id": "OPENAI_MAIN", "name": "OpenAI" } } },
-    { "id": "parse", "name": "Code – Parse & Split", "type": "n8n-nodes-base.code",
-      "typeVersion": 2, "position": [220, -60],
+      "credentials": { "openAiApi": { "id": "OPENAI_MAIN", "name": "OpenAI" } }
+    },
+    {
+      "id": "mem",
+      "name": "Postgres Chat Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "position": [0,140],
+      "parameters": {
+        "sessionKey": "={{$headers['x-session-id'] || $executionId}}",
+        "tableName": "chat_memory",
+        "contextWindow": 5
+      },
+      "credentials": { "postgres": { "id": "PG", "name": "Postgres" } }
+    },
+    {
+      "id": "parse",
+      "name": "Code – Parse to rows",
+      "type": "n8n-nodes-base.code",
+      "position": [240,-40],
       "parameters": { "jsCode":
-"// Expect one item with JSON string in $json.text\nconst tasks = JSON.parse(items[0].json.text).tasks;\nreturn tasks.map(t => ({json: t}));" } },
-    { "id": "insert", "name": "Postgres – Insert", "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2, "position": [440, -60],
+"const tasks = JSON.parse(items[0].json.text).tasks;\nreturn tasks.map(t=>({json:t}));" }
+    },
+    {
+      "id": "insert",
+      "name": "Postgres – Insert",
+      "type": "n8n-nodes-base.postgres",
+      "position": [480,-40],
       "parameters": {
         "operation": "insert",
         "table": "tasks",
         "columns": "title,description,priority,dependencies,agent_hint",
-        "values": "={{ $json.title }},{{$json.description}},{{$json.priority}},{{$json.dependencies}},{{$json.agent_hint}}"
+        "values": "={{$json.title}},{{$json.description}},{{$json.priority}},{{$json.dependencies}},{{$json.agent_hint}}"
       },
-      "credentials": { "postgres": { "id": "POSTGRES_MAIN", "name": "Postgres (app)" } } },
-    { "id": "note", "name": "Sticky Note", "type": "n8n-nodes-base.stickyNote",
-      "position": [220, 120],
-      "parameters": { "content": "Creates rows in **tasks**. Table auto-created by first run if you add a simple `CREATE TABLE` startup migration." } }
+      "credentials": { "postgres": { "id": "PG", "name": "Postgres" } }
+    }
   ],
   "connections": {
-    "Execute WF Trigger": { "main": [[{ "node": "Basic LLM Chain", "type": "main", "index": 0 }]] },
-    "OpenAI Chat Model": { "ai_languageModel": [[{ "node": "Basic LLM Chain", "type": "ai_languageModel", "index": 0 }]] },
-    "Postgres Chat Memory": { "ai_memory": [[{ "node": "Basic LLM Chain", "type": "ai_memory", "index": 0 }]] },
-    "Basic LLM Chain": { "main": [[{ "node": "Code – Parse & Split", "type": "main", "index": 0 }]] },
-    "Code – Parse & Split": { "main": [[{ "node": "Postgres – Insert", "type": "main", "index": 0 }]] }
+    "Execute Workflow Trigger": { "main": [[{ "node": "Basic LLM Chain","type": "main","index": 0 }]] },
+    "OpenAI Chat Model":        { "ai_languageModel": [[{ "node": "Basic LLM Chain","type": "ai_languageModel","index": 0 }]] },
+    "Postgres Chat Memory":     { "ai_memory": [[{ "node": "Basic LLM Chain","type": "ai_memory","index": 0 }]] },
+    "Basic LLM Chain":          { "main": [[{ "node": "Code – Parse to rows","type": "main","index": 0 }]] },
+    "Code – Parse to rows":     { "main": [[{ "node": "Postgres – Insert","type": "main","index": 0 }]] }
   },
   "settings": { "executionOrder": "v1" }
 }

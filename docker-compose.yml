@@ -1,3 +1,4 @@
+version: '3.8'
 
 volumes:
   n8n_storage:
@@ -28,6 +29,9 @@ volumes:
 networks:
   demo:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
     x-aws-vpc:
       subnets:
         - "subnet-00dd2e4d"
@@ -35,7 +39,13 @@ networks:
         - "sg-6da25332"
 
 x-n8n: &service-n8n
-  image: n8nio/n8n:1.86.0
+  build:
+    context: .
+    dockerfile: Dockerfile.n8n
+    cache_from:
+      - n8nio/n8n:latest
+    args:
+      BUILDKIT_INLINE_CACHE: 1
   networks:
     - demo
   environment:
@@ -56,11 +66,30 @@ x-n8n: &service-n8n
     - N8N_CORS_ENABLE=true
     - N8N_CORS_ALLOWED_ORIGINS=https://www.geuse.io
     - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
-
+  deploy:
+    resources:
+      limits:
+        memory: 2G
+        cpus: '1.0'
+      reservations:
+        memory: 512M
+        cpus: '0.5'
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:5678/healthz"]
+    interval: 30s
+    timeout: 10s
+    retries: 3
+    start_period: 40s
 
 services:
   postgres:
-    image: postgres:16-alpine
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
+      cache_from:
+        - postgres:latest
+      args:
+        BUILDKIT_INLINE_CACHE: 1
     hostname: postgres
     networks:
       - demo
@@ -69,13 +98,24 @@ services:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
     volumes:
       - postgres_storage:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements", "-c", "max_connections=100"]
 
   n8n-import:
     <<: *service-n8n
@@ -84,10 +124,14 @@ services:
     entrypoint: /bin/sh
     command: ["-c", "n8n import:credentials --separate --input=/backup/credentials && n8n import:workflow --separate --input=/backup/workflows"]
     volumes:
-      - ./n8n/backup:/backup
+      - ./n8n/backup:/backup:ro
     depends_on:
       postgres:
         condition: service_healthy
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 3
 
   n8n:
     <<: *service-n8n
@@ -98,17 +142,29 @@ services:
       - "5678:5678"
     volumes:
       - n8n_storage:/home/node/.n8n
-      - ./n8n/backup:/backup
+      - ./n8n/backup:/backup:ro
       - ./shared:/data/shared
-      - ./n8n/certs:/files/certs
+      - ./n8n/certs:/files/certs:ro
     depends_on:
       postgres:
         condition: service_healthy
       n8n-import:
         condition: service_completed_successfully
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
 
   qdrant:
-    image: qdrant/qdrant:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.qdrant
+      cache_from:
+        - qdrant/qdrant:latest
+      args:
+        BUILDKIT_INLINE_CACHE: 1
     hostname: qdrant
     container_name: qdrant
     networks:
@@ -118,9 +174,29 @@ services:
       - "6333:6333"
     volumes:
       - qdrant_storage:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
 
   ollama:
-    image: ollama/ollama:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.ollama
+      cache_from:
+        - ollama/ollama:latest
+      args:
+        BUILDKIT_INLINE_CACHE: 1
     hostname: ollama
     container_name: ollama
     networks:
@@ -130,9 +206,20 @@ services:
       - "11434:11434"
     volumes:
       - ollama_storage:/root/.ollama
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     deploy:
       resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
         reservations:
+          memory: 1G
+          cpus: '0.5'
           devices:
             - driver: nvidia
               count: all
@@ -140,9 +227,18 @@ services:
     devices:
       - "/dev/dri:/dev/dri"
       - "/dev/kfd:/dev/kfd"
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_ORIGINS=*
 
   ollama-init:
-    image: ollama/ollama:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.ollama
+      cache_from:
+        - ollama/ollama:latest
+      args:
+        BUILDKIT_INLINE_CACHE: 1
     networks:
       - demo
     container_name: ollama-pull-llama
@@ -151,9 +247,19 @@ services:
     entrypoint:
       - "/bin/sh"
       - "-c"
-      - "/bin/ollama serve & pid=$!; ollama pull mxbai-embed-large:latest; ollama run deepseek-r1:1.5b; ollama pull gemma3:latest; wait $pid"
+      - |
+        /bin/ollama serve &
+        sleep 10
+        ollama pull mxbai-embed-large:latest || true
+        ollama pull deepseek-r1:1.5b || true
+        ollama pull gemma3:latest || true
+        ollama pull llama2 || true
+        echo "Model initialization complete"
     environment:
-      - OLLAMA_HOST=ollama:11434
-    command: ["-c", "sleep 3; ollama pull llama2"]
+      - OLLAMA_HOST=0.0.0.0
     depends_on:
       - ollama
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 2

@@ -1,0 +1,9 @@
+FROM postgres:latest as base
+
+# Install curl in a separate layer for better caching
+RUN apk add --no-cache curl ca-certificates && \
+    rm -rf /var/cache/apk/* /tmp/* /var/tmp/*
+
+# Final stage
+FROM base
+# Any additional customizations can go here 

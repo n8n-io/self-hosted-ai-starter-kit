@@ -1,0 +1,238 @@
+{
+  "name": "Unified AI Agent Orchestrator Workflow",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [ -400, 300 ],
+      "notes": "Start the workflow (replace with Webhook or other trigger as needed)."
+    },
+    {
+      "id": "2",
+      "name": "Agent Skillset Registry",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [ -150, 300 ],
+      "parameters": {
+        "content": "### Agent Skillset Metadata\\n```\n{\n  \"SearchAgent\": {\n    \"description\": \"Searches the web for information based on a query\",\n    \"inputs\": \"query (string)\",\n    \"outputs\": \"search_results (list of text snippets or URLs)\"\n  },\n  \"SentimentAgent\": {\n    \"description\": \"Analyzes sentiment of a given text input\",\n    \"inputs\": \"text (string)\",\n    \"outputs\": \"sentiment_analysis (summary of tone)\"\n  },\n  \"HistoricalAgent\": {\n    \"description\": \"Provides historical context related to the query topic\",\n    \"inputs\": \"topic (string)\",\n    \"outputs\": \"historical_info (text summary of relevant history)\"\n  },\n  \"WritingAgent\": {\n    \"description\": \"Synthesizes a final answer using all collected info\",\n    \"inputs\": \"context (from memory) and user query\",\n    \"outputs\": \"final_answer (string)\"\n  }\n}\n```"
+      }
+    },
+    {
+      "id": "3",
+      "name": "Plan Tasks (LLM)",
+      "type": "@n8n/n8n-nodes-langchain.chatPrompt",
+      "typeVersion": 1,
+      "position": [ 100, 300 ],
+      "parameters": {
+        "prompt": "You are a planning agent. The user query is: \"{{$json[\"query\"]}}\". Available agents and their capabilities are: {{$node[\"Agent Skillset Registry\"].parameter.content}}. \nDetermine which agents should be invoked and in what order to address the query. Provide a JSON array of tasks, where each task has an 'agent' (from the available agents) and a 'task' description. Only include agents that are relevant.",
+        "temperature": 0.3,
+        "maxTokens": 500
+      },
+      "credentials": {
+        "openAiApi": { "id": "your-openai-cred-id", "name": "OpenAI API" }
+      }
+    },
+    {
+      "id": "4",
+      "name": "Parse Plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [ 300, 300 ],
+      "parameters": {
+        "language": "javascript",
+        "functionCode": "const planText = $json[\"text\"] || $json[\"response\"] || \"\";\nlet tasks;\ntry {\n    tasks = JSON.parse(planText);\n} catch(err) {\n    tasks = [];\n    // If parsing fails, define a default plan\n    tasks = [\n      { agent: \"SearchAgent\", task: `Search for information on ${$json[\"query\"]}` },\n      { agent: \"WritingAgent\", task: \"Compose final answer\" }\n    ];\n}\nreturn [{ json: { tasks } }];"
+      }
+    },
+    {
+      "id": "5",
+      "name": "Plan Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [ 300, 150 ],
+      "parameters": {
+        "content": "The plan (list of tasks) is now determined. We will iterate through each task and call the appropriate agent workflow."
+      }
+    },
+    {
+      "id": "6",
+      "name": "Tasks Loop",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 1,
+      "position": [ 500, 300 ],
+      "parameters": {
+        "fieldToSplit": "tasks",
+        "batchSize": 1
+      }
+    },
+    {
+      "id": "7",
+      "name": "Route to Agent",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [ 700, 300 ],
+      "parameters": {
+        "field": "={{ $json[\"agent\"] }}",
+        "switchCases": {
+          "SearchAgent": 1,
+          "SentimentAgent": 2,
+          "HistoricalAgent": 3,
+          "WritingAgent": 4
+        }
+      }
+    },
+    {
+      "id": "8",
+      "name": "Exec SearchAgent",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [ 900, 100 ],
+      "parameters": {
+        "workflowId": "SearchAgentWorkflowID",  // placeholder ID
+        "inputValues": {
+          "query": "={{ $item(0).$node[\"Trigger\"].json[\"query\"] || $item(0).$node[\"Trigger\"].json[\"text\"] }}"
+        }
+      }
+    },
+    {
+      "id": "9",
+      "name": "Exec SentimentAgent",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [ 900, 200 ],
+      "parameters": {
+        "workflowId": "SentimentAgentWorkflowID",
+        "inputValues": {
+          "text": "={{ $item(0).$node[\"Trigger\"].json[\"text\"] || $item(0).$node[\"Trigger\"].json[\"query\"] }}"
+        }
+      }
+    },
+    {
+      "id": "10",
+      "name": "Exec HistoricalAgent",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [ 900, 300 ],
+      "parameters": {
+        "workflowId": "HistoricalAgentWorkflowID",
+        "inputValues": {
+          "topic": "={{ $item(0).$node[\"Trigger\"].json[\"query\"] }}"
+        }
+      }
+    },
+    {
+      "id": "11",
+      "name": "Exec WritingAgent",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [ 900, 400 ],
+      "parameters": {
+        "workflowId": "WritingAgentWorkflowID",
+        "inputValues": {
+          "query": "={{ $item(0).$node[\"Trigger\"].json[\"query\"] }}"
+        }
+      }
+    },
+    {
+      "id": "12",
+      "name": "Agent Loop Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [ 710, 450 ],
+      "parameters": {
+        "content": "Above, a Switch node routes to the correct sub-workflow based on the current task's agent name. Each Execute Workflow node calls the respective agent and waits for completion.\nAll agents share the same Postgres Chat Memory (via a common session key) to store outputs."
+      }
+    },
+    {
+      "id": "13",
+      "name": "Shared Memory (Postgres)",
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1,
+      "position": [ 1100, 300 ],
+      "parameters": {
+        "operation": "load",
+        "tableName": "chat_memory",
+        "sessionKey": "={{$workflow.id}}-{{$node[\"Trigger\"].runIndex}}"
+      },
+      "credentials": {
+        "postgres": { "id": "your-postgres-cred-id", "name": "Postgres DB" }
+      }
+    },
+    {
+      "id": "14",
+      "name": "Finalize Answer (LLM)",
+      "type": "@n8n/n8n-nodes-langchain.chatPrompt",
+      "typeVersion": 1,
+      "position": [ 1300, 300 ],
+      "parameters": {
+        "prompt": "You are a writing agent. Below is the conversation context and knowledge gathered:\n{{$json[\"history\"]}}\nUsing all the information available, write a final answer to address the user's query in a clear and concise manner.",
+        "temperature": 0.7,
+        "maxTokens": 1000
+      },
+      "credentials": {
+        "openAiApi": { "id": "your-openai-cred-id", "name": "OpenAI API" }
+      }
+    },
+    {
+      "id": "15",
+      "name": "Return Response",
+      "type": "n8n-nodes-base.return",
+      "typeVersion": 1,
+      "position": [ 1500, 300 ],
+      "parameters": {
+        "responseData": "={{ $json[\"text\"] || $json[\"response\"] }}"
+      }
+    },
+    {
+      "id": "16",
+      "name": "Final Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [ 1300, 420 ],
+      "parameters": {
+        "content": "The WritingAgent (Finalize Answer) reads all memory and uses an LLM to compose the final answer, which is then returned to the user."
+      }
+    }
+  ],
+  "connections": {
+    "Trigger": {
+      "main": [ [ { "node": "Plan Tasks (LLM)", "type": "main" } ] ]
+    },
+    "Plan Tasks (LLM)": {
+      "main": [ [ { "node": "Parse Plan", "type": "main" } ] ]
+    },
+    "Parse Plan": {
+      "main": [ [ { "node": "Tasks Loop", "type": "main" } ] ]
+    },
+    "Tasks Loop": {
+      "main": [ [ { "node": "Route to Agent", "type": "main" } ] ]
+    },
+    "Route to Agent": {
+      "main": [
+        [ { "node": "Exec SearchAgent", "type": "main" } ],
+        [ { "node": "Exec SentimentAgent", "type": "main" } ],
+        [ { "node": "Exec HistoricalAgent", "type": "main" } ],
+        [ { "node": "Exec WritingAgent", "type": "main" } ]
+      ]
+    },
+    "Exec SearchAgent": {
+      "main": [ [ { "node": "Shared Memory (Postgres)", "type": "main" } ] ]
+    },
+    "Exec SentimentAgent": {
+      "main": [ [ { "node": "Shared Memory (Postgres)", "type": "main" } ] ]
+    },
+    "Exec HistoricalAgent": {
+      "main": [ [ { "node": "Shared Memory (Postgres)", "type": "main" } ] ]
+    },
+    "Exec WritingAgent": {
+      "main": [ [ { "node": "Shared Memory (Postgres)", "type": "main" } ] ]
+    },
+    "Shared Memory (Postgres)": {
+      "main": [ [ { "node": "Finalize Answer (LLM)", "type": "main" } ] ]
+    },
+    "Finalize Answer (LLM)": {
+      "main": [ [ { "node": "Return Response", "type": "main" } ] ]
+    }
+  }
+}

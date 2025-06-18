@@ -1,0 +1,243 @@
+{
+    "name": "AI Agent Workforce Orchestrator",
+    "nodes": [
+      {
+        "parameters": {
+          "options": {}
+        },
+        "id": "31731211-1301-4e56-aaf2-fcf5198214e4",
+        "name": "When chat message received",
+        "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+        "position": [
+          1360,
+          140
+        ],
+        "webhookId": "agent-workforce-webhook",
+        "typeVersion": 1.1
+      },
+      {
+        "parameters": {
+          "options": {
+            "systemMessage": "You are the HNIC (Head Nerd In Charge), the central coordinator of an AI agent workforce. Your role is to:\n\n1. Task Analysis & Decomposition:\n   - Analyze user requests and break them down into specific tasks\n   - Identify dependencies between tasks\n   - Determine task priorities and sequencing\n\n2. Agent Coordination:\n   - Match tasks to appropriate agents based on capabilities\n   - Manage inter-agent communication using A2A protocol\n   - Monitor task progress and handle dependencies\n\n3. Decision Making:\n   - Synthesize inputs from specialized agents\n   - Resolve conflicts between agent outputs\n   - Make final decisions on task completion\n\n4. Quality Control:\n   - Verify agent outputs meet requirements\n   - Ensure consistency across agent responses\n   - Maintain context and coherence in final output\n\n5. User Interface:\n   - Present clear, organized responses to users\n   - Provide progress updates on complex tasks\n   - Handle user feedback and task adjustments\n\nAvailable Agents:\n- The Ear: Current events and trend analysis\n- The Pen: Writing and PR expertise\n- The BAG: Financial and legal advisory\n- The Voice: Sentiment analysis\n- The Archivist: Historical correlation analysis\n\nUse the A2A protocol for agent communication and maintain context through the Postgres memory system."
+          }
+        },
+        "id": "e63333fb-14d9-46b3-9b48-b75a2f91054b",
+        "name": "HNIC Agent",
+        "type": "@n8n/n8n-nodes-langchain.agent",
+        "position": [
+          1480,
+          -80
+        ],
+        "typeVersion": 1.8
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "agents",
+                "name": "agents",
+                "type": "array",
+                "value": [
+                  {
+                    "id": "ear",
+                    "name": "The Ear",
+                    "capabilities": [
+                      "current_events",
+                      "trend_analysis"
+                    ],
+                    "endpoint": "ear_agent_workflow",
+                    "systemPrompt": "You are The Ear, a current events analyst agent. Your role is to:\n1. Monitor and analyze current events and trends\n2. Identify relevant news and developments\n3. Provide context and analysis of events\n4. Track sentiment and public reaction\n5. Identify potential impacts and implications\n\nUse your tools to gather and analyze information from various sources."
+                  },
+                  {
+                    "id": "pen",
+                    "name": "The Pen",
+                    "capabilities": [
+                      "writing",
+                      "pr"
+                    ],
+                    "endpoint": "pen_agent_workflow",
+                    "systemPrompt": "You are The Pen, a writing and PR specialist agent. Your role is to:\n1. Create clear, engaging written content\n2. Develop PR strategies and messaging\n3. Ensure tone and style consistency\n4. Adapt content for different audiences\n5. Maintain brand voice and guidelines"
+                  },
+                  {
+                    "id": "bag",
+                    "name": "The BAG",
+                    "capabilities": [
+                      "financial",
+                      "legal"
+                    ],
+                    "endpoint": "bag_agent_workflow",
+                    "systemPrompt": "You are The BAG (Business And Governance), a financial and legal advisor agent. Your role is to:\n1. Analyze financial implications and risks\n2. Provide legal context and compliance guidance\n3. Evaluate business impact and opportunities\n4. Identify potential legal or financial concerns\n5. Suggest risk mitigation strategies"
+                  },
+                  {
+                    "id": "voice",
+                    "name": "The Voice",
+                    "capabilities": [
+                      "sentiment_analysis"
+                    ],
+                    "endpoint": "voice_agent_workflow",
+                    "systemPrompt": "You are The Voice, a sentiment analysis specialist agent. Your role is to:\n1. Analyze emotional tone and sentiment\n2. Identify key emotional triggers\n3. Track sentiment trends and patterns\n4. Provide sentiment context and insights\n5. Suggest emotional impact mitigation"
+                  },
+                  {
+                    "id": "archivist",
+                    "name": "The Archivist",
+                    "capabilities": [
+                      "historical_analysis"
+                    ],
+                    "endpoint": "archivist_agent_workflow",
+                    "systemPrompt": "You are The Archivist, a historical correlation analyst agent. Your role is to:\n1. Identify historical patterns and precedents\n2. Provide historical context and insights\n3. Analyze long-term trends and cycles\n4. Connect current events to historical events\n5. Identify potential historical implications"
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "c4329061-1a26-403b-ad12-6b6e22a5b7e8",
+        "name": "Agent Registry",
+        "type": "n8n-nodes-base.set",
+        "position": [
+          1760,
+          140
+        ],
+        "typeVersion": 3.4
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "tasks",
+                "name": "tasks",
+                "type": "array",
+                "value": "={{ [] }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "0c6a3ad6-3c9d-4840-8bac-fcd1a46f351b",
+        "name": "Task Queue",
+        "type": "n8n-nodes-base.set",
+        "position": [
+          1960,
+          140
+        ],
+        "typeVersion": 3.4
+      },
+      {
+        "parameters": {
+          "model": {
+            "__rl": true,
+            "mode": "list",
+            "value": "gpt-4"
+          },
+          "options": {
+            "maxTokens": 4000,
+            "temperature": 0.7
+          }
+        },
+        "id": "c989cddd-f00f-41db-b57f-ade7871c5c6a",
+        "name": "OpenAI Chat Model",
+        "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+        "position": [
+          1480,
+          320
+        ],
+        "typeVersion": 1.2,
+        "credentials": {
+          "openAiApi": {
+            "id": "hBtsQLQMLb4ichIf",
+            "name": "OpenAi account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "options": {
+            "sessionId": "={{ $workflow.id }}",
+            "memoryKey": "chat_history"
+          }
+        },
+        "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+        "typeVersion": 1.3,
+        "position": [
+          1600,
+          320
+        ],
+        "id": "f79f4e5c-7123-4fcc-bcc6-a268e4c5b471",
+        "name": "Postgres Chat Memory",
+        "credentials": {
+          "postgres": {
+            "id": "HXeMGpW8hhaO9GDZ",
+            "name": "Postgres account"
+          }
+        }
+      }
+    ],
+    "pinData": {},
+    "connections": {
+      "When chat message received": {
+        "main": [
+          [
+            {
+              "node": "HNIC Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HNIC Agent": {
+        "main": [
+          [
+            {
+              "node": "Agent Registry",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ],
+        "ai_languageModel": [
+          [
+            {
+              "node": "OpenAI Chat Model",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ],
+        "ai_memory": [
+          [
+            {
+              "node": "Postgres Chat Memory",
+              "type": "ai_memory",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Agent Registry": {
+        "main": [
+          [
+            {
+              "node": "Task Queue",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "active": false,
+    "settings": {
+      "executionOrder": "v1"
+    },
+    "versionId": "4952c503-5b38-4cf9-ba35-47671aecf6bf",
+    "meta": {
+      "templateCredsSetupCompleted": true,
+      "instanceId": "9230b613623a2b3978d41da65a18a521220239c5995163bad93d97f84f3b4d50"
+    },
+    "id": "3tJeqHk1ScXmaDjz",
+    "tags": []
+  }
