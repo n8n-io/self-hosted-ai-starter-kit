@@ -117,6 +117,8 @@ services:
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
     container_name: open-webui
+    networks:
+      - demo    
     volumes:
       - open-webui:/app/backend/data
     depends_on:
