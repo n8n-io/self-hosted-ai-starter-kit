@@ -1,4 +1,10 @@
 # Self-hosted AI starter kit
+<p align="center">
+  <img src="https://img.shields.io/badge/Intel_GPU-Ready-blue" alt="Intel GPU Ready" />
+  <img src="https://img.shields.io/badge/NVIDIA_Supported-green" alt="NVIDIA Supported" />
+  <img src="https://img.shields.io/badge/AMD_Supported-orange" alt="AMD Supported" />
+  <img src="https://img.shields.io/badge/CPU_Only-Available-lightgrey" alt="CPU Only" />
+</p>
 
 **Self-hosted AI Starter Kit** is an open-source Docker Compose template designed to swiftly initialize a comprehensive local AI and low-code development environment.
 
@@ -66,7 +72,6 @@ git clone https://github.com/pi0n00r/self-hosted-ai-starter-kit.git
 cd self-hosted-ai-starter-kit
 docker compose --profile gpu-amd up
 ```
-
 
 
 #### For Mac / Apple Silicon users
@@ -197,6 +202,21 @@ language model and Qdrant as your vector store.
 > workflows. While it’s not fully optimized for production environments, it
 > combines robust components that work well together for proof-of-concept
 > projects. You can customize it to meet your specific needs
+
+
+---
+
+## 🚧 Experimental Release: Intel GPU Support
+
+> **Note:** Intel GPU support is available as an *experimental feature* in this branch (`compose-intel-gpu-and-build`).  
+> It's been tested on Ubuntu 22.04+ with Arc and Gen8+ iGPUs, using VAAPI and Intel OpenCL runtimes.  
+> Bug reports and contributions welcome!
+
+Run it with:
+
+```bash
+docker compose --profile gpu-intel up
+
 
 ## Upgrading
 
