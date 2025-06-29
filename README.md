@@ -165,6 +165,18 @@ sudo usermod -aG render,video $(whoami)
 sudo reboot
 ```
 
+<details> <summary>🧩 Driver Troubleshooting: VAAPI Not Selecting iHD?</summary>
+
+If VAAPI defaults to the wrong driver (like i965), or vainfo gives errors like vaInitialize failed, you can force the correct Intel driver by setting this environment variable system-wide:
+
+bash
+echo 'LIBVA_DRIVER_NAME=iHD' | sudo tee -a /etc/environment
+Then reboot your system or restart the container.
+
+This ensures the Intel iHD driver is used for VAAPI, which is required for Gen8+ and Arc GPUs.
+
+</details>
+
 #### For everyone else
 
 ```
