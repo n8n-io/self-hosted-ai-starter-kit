@@ -67,6 +67,8 @@ cd self-hosted-ai-starter-kit
 docker compose --profile gpu-amd up
 ```
 
+
+
 #### For Mac / Apple Silicon users
 
 If you’re using a Mac with an M1 or newer processor, you can't expose your GPU
@@ -108,15 +110,33 @@ Additionally, after you see "Editor is now accessible via: <http://localhost:567
 
 #### For Intel GPU users
 
-```
+This project now includes dedicated support for Intel Gen8+ GPUs (including Arc and integrated graphics) via VAAPI and OpenCL (oneAPI runtime).
+
+bash
 git clone https://github.com/pi0n00r/self-hosted-ai-starter-kit.git
 cd self-hosted-ai-starter-kit
 docker compose --profile gpu-intel up
-```
+> [!NOTE] > ### 🖥️ Running Ollama with Intel GPUs (Arc & iGPU) > These steps complement the official Ollama Docker instructions by adding Intel-specific GPU support alongside the existing NVIDIA and AMD configurations.
 
-> [!NOTE]
-> ## 🖥️ Running Ollama with Intel GPUs (Arc & iGPU)  
-> This section complements the official Ollama Docker guide [Ollama Docker instructions](https://github.com/ollama/ollama/blob/main/docs/docker.md) by adding **Intel GPU** instructions that match the style of the original CPU / NVIDIA / AMD how-tos.
+Before launching, make sure your host (Ubuntu 22.04 / 24.04) is prepared for Intel GPU access:
+
+bash
+sudo apt update
+sudo apt install -y \
+  intel-media-va-driver-non-free \
+  intel-opencl-icd \
+  intel-level-zero-gpu \
+  libmfx1 vainfo clinfo
+
+sudo usermod -aG render,video $(whoami)
+sudo reboot
+Once containers are running, access the UI at: http://localhost:5678
+
+<details> <summary>✅ Intel GPU Validation Checklist</summary>
+
+Confirm access with vainfo and clinfo
+
+</details>
 
 ---
 
