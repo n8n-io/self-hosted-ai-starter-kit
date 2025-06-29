@@ -1,26 +1,28 @@
 FROM ubuntu:24.04
 
-# 1) Install only what you need, drop apt lists
+# 1) Install VAAPI + OpenCL ICD cleanly
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       curl \
       mesa-utils \
       libegl1-mesa \
       libgl1-mesa-dri \
-      intel-media-va-driver \
       vainfo \
+      clinfo \
+ && apt-get remove --purge -y i965-va-driver va-driver-all mesa-va-drivers || true \
+ && apt-get install --reinstall -y intel-media-va-driver-non-free intel-opencl-icd \
  && rm -rf /var/lib/apt/lists/*
 
-# 2) Tell EGL to run headless
-ENV EGL_PLATFORM=surfaceless
+# 2) Headless EGL
+ENV EGL_PLATFORM=surfaceless \
+    LIBVA_DRIVER_NAME=iHD
 
-# 3) Install Ollama CLI from GitHub
+# 3) Install Ollama CLI
 ENV OLLAMA_DIR=/usr/local/lib/ollama \
     OLLAMA_BIN=/usr/local/bin/ollama
 
 RUN export RELEASE=$(curl -fsSL https://api.github.com/repos/ollama/ollama/releases/latest \
-                   | grep '"tag_name"' \
-                   | awk -F '"' '{print $4}') \
+                   | grep '"tag_name"' | awk -F '"' '{print $4}') \
  && curl -fsSL "https://github.com/ollama/ollama/releases/download/${RELEASE}/ollama-linux-amd64.tgz" \
       -o /tmp/ollama.tgz \
  && mkdir -p ${OLLAMA_DIR} \
