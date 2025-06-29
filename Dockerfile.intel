@@ -32,3 +32,9 @@ RUN export RELEASE=$(curl -fsSL https://api.github.com/repos/ollama/ollama/relea
 
 EXPOSE 11434
 CMD ["ollama"]
+
+RUN if dpkg -l | grep -E "i965-va-driver|va-driver-all|mesa-va-drivers"; then \
+      echo "❌ Blocklisted drivers found!" && exit 1; \
+    else \
+      echo "✅ No banned VAAPI drivers detected."; \
+    fi
