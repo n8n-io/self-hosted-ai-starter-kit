@@ -3,7 +3,6 @@ volumes:
   postgres_storage:
   ollama_storage:
   qdrant_storage:
-  open-webui:
 
 networks:
   demo:
@@ -20,7 +19,8 @@ image: n8nio/n8n:latest
     - N8N_PERSONALIZATION_ENABLED=false
     - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
     - N8N_USER_MANAGEMENT_JWT_SECRET=${N8N_USER_MANAGEMENT_JWT_SECRET}
-    - OLLAMA_HOST=ollama:11434
+    - OLLAMA_HOST=${OLLAMA_HOST:-ollama:11434}
+
   env_file:
     - .env
 
@@ -110,25 +110,6 @@ services:
       - qdrant_storage:/qdrant/storage
     environment:
       - QDRANT__TELEMETRY_DISABLED=true
-      
-  open-webui:
-    image: ghcr.io/open-webui/open-webui:main
-    container_name: open-webui
-    networks: ['demo']    
-    volumes:
-      - open-webui:/app/backend/data
-    depends_on:
-      - ollama
-    ports:
-      - 3000:8080
-    env_file:
-      - .env
-    environment:
-      - 'OLLAMA_BASE_URL=http://ollama:11434'
-      - 'WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}'    
-    extra_hosts:
-      - host.docker.internal:host-gateway
-    restart: unless-stopped
     
   ollama-cpu:
     profiles: ["cpu"]
