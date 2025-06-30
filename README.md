@@ -147,7 +147,10 @@ Confirm access with vainfo and clinfo
 
 ### 🧰 Host preparation (Ubuntu 22.04 / 24.04)
 
-> _(host preparation is done automatically by the script since v0.2.0-experimental)_
+> _(Host preparation is done automatically by the script since `v0.2.0-experimental`)_
+
+<details>
+  <summary>Legacy steps (manual setup, pre v0.2.0)</summary>
 
 ```bash
 # 1️⃣  Update packages
@@ -165,7 +168,7 @@ sudo usermod -aG render,video $(whoami)
 
 # 4️⃣  Reboot so the i915 kernel module picks up the new firmware
 sudo reboot
-```
+</details>
 
 <details> <summary>🧩 Driver Troubleshooting: VAAPI Not Selecting iHD?</summary>
 
