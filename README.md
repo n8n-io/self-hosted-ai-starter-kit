@@ -145,7 +145,9 @@ Confirm access with vainfo and clinfo
 
 ---
 
-###  Host preparation (Ubuntu 22.04 / 24.04)
+### 🧰 Host preparation (Ubuntu 22.04 / 24.04)
+
+> _(host preparation is done automatically by the script since v0.2.0-experimental)_
 
 ```bash
 # 1️⃣  Update packages
