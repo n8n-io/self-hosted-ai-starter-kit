@@ -123,18 +123,12 @@ cd self-hosted-ai-starter-kit
 docker compose --profile gpu-intel up
 > [!NOTE] > ### 🖥️ Running Ollama with Intel GPUs (Arc & iGPU) > These steps complement the official Ollama Docker instructions by adding Intel-specific GPU support alongside the existing NVIDIA and AMD configurations.
 
-Before launching, make sure your host (Ubuntu 22.04 / 24.04) is prepared for Intel GPU access:
+> [!NOTE]
+> ### 🖥️ Running Ollama with Intel GPUs (Arc & iGPU)
+> Host preparation is now handled automatically by the setup script since `v0.2.0-experimental`.
+>
+> _Need the old manual instructions? [View legacy steps ↓](#legacy-steps-manual-setup-pre-v020)_
 
-bash
-sudo apt update
-sudo apt install -y \
-  intel-media-va-driver-non-free \
-  intel-opencl-icd \
-  intel-level-zero-gpu \
-  libmfx1 vainfo clinfo
-
-sudo usermod -aG render,video $(whoami)
-sudo reboot
 Once containers are running, access the UI at: http://localhost:5678
 
 <details> <summary>✅ Intel GPU Validation Checklist</summary>
