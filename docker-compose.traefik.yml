@@ -28,7 +28,7 @@ services:
       - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
       - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
     ports:
-      - "1443:443"
+      - "443:443"
       - "8080:8080"
     volumes:
       - traefik_data:/letsencrypt

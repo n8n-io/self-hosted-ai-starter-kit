@@ -15,7 +15,7 @@ services:
     networks: ['demo']
     ports:
       - 80:80
-      - 1443:443
+      - 443:443
     volumes:
       - ./docker/Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
