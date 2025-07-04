@@ -1,0 +1,283 @@
+# Volumes for persistent data storage
+# These volumes ensure that data persists across container restarts and updates
+volumes:
+    n8n_storage: {}
+    postgres_storage: {}
+    ollama_storage: {}
+    qdrant_storage: {}
+    openwebui_storage: {}  # Volume for Open Web UI to store application data
+    redis_valkey_storage: {}
+    searxng_storage: {}
+
+# Networks define the isolated virtual networks that containers communicate over
+networks:
+    demo: {}  # A shared network for all services to communicate with each other
+    searxng: {}
+
+# Define the base configuration for the n8n service (this is reused for multiple n8n services)
+x-n8n: &service-n8n
+    image: n8nio/n8n:${N8N_VERSION:-latest} # Version for n8n image, defined in the .env file. If not defined defaults to latest
+    networks: ['demo']  # Ensure n8n can communicate over the demo network
+    environment:
+        # Database configuration for n8n (PostgreSQL)
+        - DB_TYPE=postgresdb
+        - DB_POSTGRESDB_HOST=${POSTGRES_HOSTNAME:-postgres}   # Default to 'postgres' if not set
+        - DB_POSTGRESDB_USER=${POSTGRES_USER:-n8n_user}   # Default to 'n8n_user' if not set
+        - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD:-n8n_password}   # Default password if not set
+        - DB_POSTGRESDB_DATABASE=${POSTGRES_DB:-n8n_db}   # Default DB name if not set
+        
+        # Ollama service configuration
+        - OLLAMA_HOST=${OLLAMA_HOST:-ollama:11434}  # Ollama service address, default to ollama:11434 if not set
+        
+        # n8n specific settings
+        - N8N_DIAGNOSTICS_ENABLED=${N8N_DIAGNOSTICS_ENABLED:-false}  # Default to 'false' if not set
+        - N8N_PERSONALIZATION_ENABLED=${N8N_PERSONALIZATION_ENABLED:-false}  # Default to 'true' if not set
+        - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:-}  # Leave empty if not set
+        - N8N_USER_MANAGEMENT_JWT_SECRET=${N8N_USER_MANAGEMENT_JWT_SECRET:-}  # Leave empty if not set
+        - N8N_DEFAULT_BINARY_DATA_MODE=${N8N_DEFAULT_BINARY_DATA_MODE:-filesystem}  # Default to 'filesystem' if not set
+        
+        # n8n runners settings (enabling parallel execution)
+        - N8N_RUNNERS_ENABLED=${N8N_RUNNERS_ENABLED:-true}  # Default to 'true' if not set
+
+        - WEBHOOK_URL=${N8N_HOSTNAME:+https://}${N8N_HOSTNAME:-http://localhost:5678}
+    env_file:
+        - path: .env  # Load all environment variables from the .env file
+          required: true
+
+# Base configuration for Ollama service
+x-ollama: &service-ollama
+    image: ollama/ollama:${OLLAMA_VERSION:-latest} # Version for Ollama image, defined in the .env file. If not defined defaults to latest
+    container_name: ollama  # Name of the container for easier identification
+    networks: ['demo']  # Attach Ollama to the 'demo' network
+    restart: unless-stopped  # Restart the container unless explicitly stopped
+    ports:
+        - ${OLLAMA_PORT-11434}:11434  # Expose Ollama's API on port 11434
+    environment:
+        - OLLAMA_CONTEXT_LENGTH=${OLLAMA_CONTEXT_LENGTH}
+        - OLLAMA_FLASH_ATTENTION=${OLLAMA_FLASH_ATTENTION}
+        - OLLAMA_KV_CACHE_TYPE=${OLLAMA_KV_CACHE_TYPE}
+        - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS}
+    volumes:
+        - ollama_storage:/root/.ollama  # Persistent storage for Ollama data (e.g., models)
+    healthcheck:
+        test: ["CMD", "curl", "-f", "http://localhost:11434"]
+        interval: 10s
+        timeout: 5s
+        retries: 5
+
+
+# Ollama initialization job to pull models
+x-init-ollama: &init-ollama
+    image: ollama/ollama:${OLLAMA_VERSION:-latest}  # Use the same Ollama image for the initialization job
+    networks: ['demo']  # Attach to the same 'demo' network
+    container_name: ollama-pull-models  # Name the container for easy identification
+    volumes:
+        - ollama_storage:/root/.ollama  # Share the Ollama storage volume
+        - ./scripts/ollama_pull_models.sh:/scripts/ollama_pull_models.sh:ro
+    environment:
+        - OLLAMA_HOST=ollama:11434  # Ensure the initialization job knows the Ollama address
+    entrypoint: /bin/sh  # Use shell to execute custom commands
+    command:
+        - "-c"
+        - "./scripts/ollama_pull_models.sh"  # Pull the specific version of Ollama models (e.g., llama3.2) that are listed in that "scripts/ollama_pull_models.sh file"
+
+# Define services
+services:
+    # PostgreSQL service for n8n database backend
+    postgres:
+        image: postgres:${POSTGRES_VERSION:-latest}  # Version for Postgres image, defined in the .env file. If not defined defaults to latest
+        hostname: ${POSTGRES_HOSTNAME:-postgres}  # Set container hostname; Default to 'postgres' if not set
+        container_name: postgres  # Name the container for easy identification
+        networks: ['demo']  # Attach PostgreSQL to the demo network
+        restart: unless-stopped  # Restart PostgreSQL container unless explicitly stopped
+        ports:
+            - ${POSTGRES_PORT-5432}:5432  # Expose Postgres on port 5432
+        environment:
+            - POSTGRES_USER=${POSTGRES_USER}  # PostgreSQL username (from .env)
+            - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}  # PostgreSQL password (from .env)
+            - POSTGRES_DB=${POSTGRES_DB}  # Name of the PostgreSQL database (from .env)
+        volumes:
+            - postgres_storage:/var/lib/postgresql/data  # Store PostgreSQL data persistently
+        healthcheck:
+            test: ['CMD-SHELL', 'pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+            interval: 5s  # Check if PostgreSQL is ready every 5 seconds
+            timeout: 5s  # Wait up to 5 seconds for the health check
+            retries: 10  # Retry 10 times before considering the service unhealthy
+
+    # n8n-import service that imports demo data (credentials & workflows)
+    n8n-import:
+        <<: *service-n8n  # Reuse the base n8n configuration
+        hostname: ${N8N_HOSTNAME:-n8n}-import  # Set container hostname; Default to 'n8n-import' if not set
+        container_name: n8n-import  # Name the container for easy identification
+        environment:
+            - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=${N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS:-true}  # Default 'true' if not set
+        entrypoint: /bin/sh  # Use shell for custom command execution
+        command:
+            - "-c"
+            - "n8n import:credentials --separate --input=/demo-data/credentials && n8n import:workflow --separate --input=/demo-data/workflows"
+        volumes:
+            - ./n8n/demo-data:/demo-data  # Mount demo data to import
+        depends_on:
+            postgres:
+                condition: service_healthy
+
+    # Main n8n service
+    n8n:
+        <<: *service-n8n  # Reuse the base n8n configuration
+        hostname: ${N8N_HOSTNAME:-localhost} # Set container hostname; Default to 'localhost' if not set
+        container_name: n8n  # Name the container
+        restart: unless-stopped  # Restart unless stopped
+        ports:
+            - ${N8N_PORT-5678}:5678  # Expose n8n web interface on port 5678
+        volumes:
+            - n8n_storage:/home/node/.n8n  # Persist n8n data
+            - ./n8n/demo-data:/demo-data  # Mount demo data
+            - ./shared:/data/shared  # Shared data for n8n workflows
+        depends_on:
+            postgres:
+                condition: service_healthy  # Wait for PostgreSQL to be ready
+            n8n-import:
+                condition: service_completed_successfully  # Wait for data import to complete
+
+    # Qdrant service for vector search functionality
+    qdrant:
+        image: qdrant/qdrant:${QDRANT_VERSION:-latest}  # Version for Qdrant image, defined in the .env file. If not defined defaults to latest
+        hostname: ${QDRANT_HOSTNAME:-localhost} # Set container hostname; Default to 'localhost' if not set
+        container_name: qdrant  # Name the container
+        networks: ['demo']  # Attach to the demo network
+        restart: unless-stopped  # Restart unless stopped
+        ports:
+            - ${QDRANT_PORT_1-6333}:6333  # Expose Qdrant API on port 6333
+            - ${QDRANT_PORT_2-6334}:6334  # Expose GRPC API on port 6334
+        volumes:
+            - qdrant_storage:/qdrant/storage  # Persist Qdrant data
+
+    # Open Web UI service that depends on Ollama being started
+    open-webui:
+        image: ghcr.io/open-webui/open-webui:${OPEN_WEBUI_VERSION:-main}  # Version for Open-WebUI image, defined in the .env file. If not defined defaults to main
+        hostname: ${OPEN_WEBUI_HOSTNAME:-localhost} # Set container hostname; Default to 'localhost' if not set
+        container_name: open-webui  # Name of the container for easy identification
+        networks: ['demo']  # Attach to demo network
+        restart: unless-stopped  # Restart unless explicitly stopped
+        expose:
+            - 8080/tcp
+        ports:
+            - ${OPEN_WEBUI_PORT-8088}:8080  # Expose Open Web UI on a configurable port (default to 8088)
+        environment:
+            - 'OLLAMA_BASE_URL=http://ollama:11434'  # Set URL to connect to Ollama service
+            - 'WEBUI_SECRET_KEY=${OPEN_WEBUI_SECRET_KEY:-}'  # Optional secret key from .env
+        volumes:
+            - openwebui_storage:/app/backend/data  # Persist Open Web UI data
+        # depends_on:
+        #     # Ensure it waits for the ollama-cpu service (use 'ollama-gpu' or 'ollama-gpu-amd' if desired)
+        #     ollama-gpu:
+        #         condition: service_healthy
+        extra_hosts:
+            - "host.docker.internal:host-gateway"  # Allow host communication
+
+    # Redis service for In-memory database
+    redis:
+        image: docker.io/valkey/valkey:${REDIS_VERSION:-latest}  # Version for redis image, defined in the .env file. If not defined defaults to latest
+        hostname: ${REDIS_HOSTNAME:-localhost} # Set container hostname; Default to 'localhost' if not set
+        container_name: redis  # Name of the container for easy identification
+        networks: ['demo' , 'searxng']  # Attach to demo network
+        restart: unless-stopped  # Restart unless explicitly stopped
+        command: valkey-server --save 30 1 --loglevel warning
+        expose:
+            - 6379/tcp
+        ports:
+            - ${REDIS_PORT:-6379}:6379  # Expose Redis on a configurable port (default to 6379)
+        volumes:
+            - redis_valkey_storage:/data  # Persist Redis data
+        cap_drop:
+            - ALL
+        cap_add:
+            - SETGID
+            - SETUID
+            - DAC_OVERRIDE
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "1m"
+                max-file: "1"
+        healthcheck:
+            test: ["CMD", "redis-cli", "ping"]
+            interval: 3s
+            timeout: 10s
+            retries: 10
+
+    # SearXNG service for In-memory database
+    searxng:
+        image: docker.io/searxng/searxng:${SEARXNG_VERSION:-latest}  # Version for redis image, defined in the .env file. If not defined defaults to latest
+        hostname: ${SEARXNG_HOSTNAME:-localhost} # Set container hostname; Default to 'localhost' if not set
+        container_name: searxng  # Name of the container for easy identification
+        networks: ['demo', 'searxng']  # Attach to demo network
+        restart: unless-stopped  # Restart unless explicitly stopped
+        expose:
+            - 8080/tcp
+        ports:
+            - ${SEARXNG_PORT-8181}:8080  # Expose SearXNG on a configurable port (default to 8181)
+        environment:
+            - SEARXNG_BASE_URL=https://${SEARXNG_HOSTNAME:-localhost}/
+            - UWSGI_WORKERS=${SEARXNG_UWSGI_WORKERS:-4}
+            - UWSGI_THREADS=${SEARXNG_UWSGI_THREADS:-4}
+        volumes:
+            - ./searxng:/etc/searxng:rw
+            - searxng_storage:/var/cache/searxng:rw # Persist SearXNG data
+        cap_drop:
+            - ALL
+        cap_add:
+            - CHOWN
+            - SETGID
+            - SETUID
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "1m"
+                max-file: "1"
+
+    # Ollama services (CPU, GPU, and AMD GPU variants)
+    ollama-cpu:
+        profiles: ["cpu"]  # Use this service for CPU-based workloads
+        <<: *service-ollama  # Reuse the base Ollama configuration
+
+    ollama-gpu:
+        profiles: ["gpu-nvidia"]  # Use this service for GPU-based workloads (NVIDIA)
+        <<: *service-ollama  # Reuse the base Ollama configuration
+        deploy:
+            resources:
+                reservations:
+                    devices:
+                        - driver: nvidia  # Specify NVIDIA driver for GPU
+                          count: 1  # Allocate 1 GPU device
+                          capabilities: [gpu]  # Specify GPU capabilities
+
+    ollama-gpu-amd:
+        profiles: ["gpu-amd"]  # Use this service for AMD GPU-based workloads
+        <<: *service-ollama  # Reuse the base Ollama configuration
+        image: ollama/ollama:rocm 
+        devices:
+            - "/dev/kfd"  # Specify AMD GPU device
+            - "/dev/dri"  # Additional AMD GPU device
+
+    # Ollama initialization services (for different platforms)
+    ollama-pull-models-cpu:
+        profiles: ["cpu"]  # Only run this on CPU profile
+        <<: *init-ollama  # Reuse the Ollama initialization configuration
+        depends_on:
+            - ollama-cpu  # Wait for Ollama CPU service to be available
+
+    ollama-pull-models-gpu:
+        profiles: ["gpu-nvidia"]  # Only run this on GPU-NVIDIA profile
+        <<: *init-ollama  # Reuse the Ollama initialization configuration
+        depends_on:
+            - ollama-gpu  # Wait for Ollama GPU service to be available
+
+    ollama-pull-models-gpu-amd:
+        profiles: ["gpu-amd"]  # Only run this on GPU-AMD profile
+        <<: *init-ollama  # Reuse the Ollama initialization configuration
+        image: ollama/ollama:rocm
+        depends_on:
+            - ollama-gpu-amd  # Wait for Ollama GPU-AMD service to be available
+
+

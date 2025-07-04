@@ -1,0 +1,7 @@
+# This configuration file updates the default configuration file
+# See https://github.com/searxng/searxng/blob/master/searx/limiter.toml
+
+[botdetection.ip_limit]
+# activate advanced bot protection
+# enable this when running the instance for a public usage on the internet
+link_token = false
