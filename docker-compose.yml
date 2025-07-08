@@ -6,6 +6,7 @@ volumes:
 
 networks:
   demo:
+  
 x-n8n: &service-n8n
   image: n8nio/n8n:latest
   networks: ['demo']
@@ -19,7 +20,6 @@ x-n8n: &service-n8n
     - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
     - N8N_USER_MANAGEMENT_JWT_SECRET=${N8N_USER_MANAGEMENT_JWT_SECRET}
     - OLLAMA_HOST=${OLLAMA_HOST:-ollama:11434}
-
   env_file:
     - .env
 
