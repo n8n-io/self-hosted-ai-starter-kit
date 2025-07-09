@@ -1,0 +1,669 @@
+{
+  "name": "Enhanced HNIC Orchestrator",
+  "nodes": [
+    {
+      "id": "webhook_trigger",
+      "name": "Entry Point Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [100, 200],
+      "parameters": {
+        "path": "workforce/hnic",
+        "httpMethod": "POST",
+        "responseMode": "onReceived"
+      }
+    },
+    {
+      "id": "load_agent_registry",
+      "name": "Load Agent Registry",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [300, 200],
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "agent_registry",
+        "where": "status = 'active'",
+        "sort": "priority ASC"
+      },
+      "credentials": {
+        "postgres": {
+          "id": "postgres_main",
+          "name": "PostgreSQL Main"
+        }
+      }
+    },
+    {
+      "id": "check_agent_health",
+      "name": "Check Agent Health",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [500, 200],
+      "parameters": {
+        "functionCode": "// MEMBER AWARENESS & RESILIENCY: Check agent health status\nconst agents = items[0].json;\nconst healthyAgents = [];\nconst degradedAgents = [];\n\nfor (const agent of agents) {\n  const lastHeartbeat = new Date(agent.last_heartbeat);\n  const now = new Date();\n  const timeDiff = now - lastHeartbeat;\n  \n  if (timeDiff < 60000) { // 1 minute threshold\n    healthyAgents.push(agent);\n  } else if (timeDiff < 300000) { // 5 minute threshold\n    degradedAgents.push(agent);\n  }\n}\n\nreturn [{\n  json: {\n    healthy_agents: healthyAgents,\n    degraded_agents: degradedAgents,\n    total_capacity: healthyAgents.reduce((sum, agent) => sum + agent.max_capacity, 0)\n  }\n}];"
+      }
+    },
+    {
+      "id": "analyze_request",
+      "name": "Analyze Request & Plan",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.8,
+      "position": [700, 200],
+      "parameters": {
+        "options": {
+          "systemMessage": "You are the HNIC (Head Nerd In Charge) with supreme authority over the AI agent workforce. Your role is to analyze requests and create strategic execution plans.\n\nAVAILABLE AGENTS:\n{{$json.healthy_agents}}\n\nDEGRADED AGENTS:\n{{$json.degraded_agents}}\n\nTOTAL CAPACITY:\n{{$json.total_capacity}}\n\nAnalyze the incoming request and create a detailed execution plan that:\n1. Breaks down the request into atomic tasks\n2. Assigns tasks to appropriate agents based on their capabilities\n3. Establishes task dependencies and execution order\n4. Accounts for agent capacity and health status\n5. Includes fallback strategies for potential agent failures\n\nReturn your analysis as JSON:\n{\n  \"analysis\": {\n    \"request_type\": \"category\",\n    \"complexity\": \"high|medium|low\",\n    \"estimated_duration\": \"minutes\",\n    \"required_agents\": [\"agent_names\"]\n  },\n  \"execution_plan\": {\n    \"phases\": [\n      {\n        \"phase\": 1,\n        \"tasks\": [\n          {\n            \"task_id\": \"uuid\",\n            \"agent\": \"agent_name\",\n            \"action\": \"specific_action\",\n            \"priority\": \"high|medium|low\",\n            \"dependencies\": [],\n            \"fallback_agent\": \"backup_agent\",\n            \"timeout\": 300\n          }\n        ]\n      }\n    ]\n  }\n}"
+        }
+      }
+    },
+    {
+      "id": "openai_model",
+      "name": "OpenAI GPT-4",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [700, 350],
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4"
+        },
+        "options": {
+          "maxTokens": 2000,
+          "temperature": 0.3
+        }
+      },
+      "credentials": {
+        "openAiApi": {
+          "id": "openai_main",
+          "name": "OpenAI Main"
+        }
+      }
+    },
+    {
+      "id": "postgres_memory",
+      "name": "Postgres Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [700, 500],
+      "parameters": {
+        "options": {
+          "sessionId": "={{$workflow.id}}-{{$execution.id}}",
+          "memoryKey": "chat_history",
+          "contextWindow": 10
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "postgres_main",
+          "name": "PostgreSQL Main"
+        }
+      }
+    },
+    {
+      "id": "create_task_queue",
+      "name": "Create Task Queue",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [900, 200],
+      "parameters": {
+        "functionCode": "// MEMBER SOLIDARITY: Create coordinated task queue\nconst plan = JSON.parse(items[0].json.text || items[0].json.response);\nconst taskQueue = [];\nconst workflowId = $workflow.id;\nconst executionId = $execution.id;\n\nfor (const phase of plan.execution_plan.phases) {\n  for (const task of phase.tasks) {\n    taskQueue.push({\n      task_id: task.task_id,\n      workflow_id: workflowId,\n      execution_id: executionId,\n      agent: task.agent,\n      action: task.action,\n      priority: task.priority,\n      dependencies: JSON.stringify(task.dependencies || []),\n      fallback_agent: task.fallback_agent,\n      timeout: task.timeout,\n      status: 'pending',\n      created_at: new Date().toISOString(),\n      retry_count: 0\n    });\n  }\n}\n\nreturn taskQueue.map(task => ({json: task}));"
+      }
+    },
+    {
+      "id": "store_tasks",
+      "name": "Store Tasks in Queue",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1100, 200],
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "task_queue",
+        "columns": "task_id, workflow_id, execution_id, agent, action, priority, dependencies, fallback_agent, timeout, status, created_at, retry_count",
+        "values": "={{$json.task_id}}, {{$json.workflow_id}}, {{$json.execution_id}}, {{$json.agent}}, {{$json.action}}, {{$json.priority}}, {{$json.dependencies}}, {{$json.fallback_agent}}, {{$json.timeout}}, {{$json.status}}, {{$json.created_at}}, {{$json.retry_count}}"
+      },
+      "credentials": {
+        "postgres": {
+          "id": "postgres_main",
+          "name": "PostgreSQL Main"
+        }
+      }
+    },
+    {
+      "id": "execute_tasks",
+      "name": "Execute Task Distribution",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 1,
+      "position": [1300, 200],
+      "parameters": {
+        "fieldToSplit": "json",
+        "batchSize": 1
+      }
+    },
+    {
+      "id": "route_to_agent",
+      "name": "Route to Agent",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [1500, 200],
+      "parameters": {
+        "field": "={{$json.agent}}",
+        "switchCases": {
+          "ear": 1,
+          "archivist": 2,
+          "voice": 3,
+          "bag": 4,
+          "pen": 5,
+          "naiz": 6
+        }
+      }
+    },
+    {
+      "id": "call_ear",
+      "name": "Call The Ear",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [1700, 50],
+      "parameters": {
+        "url": "http://n8n.geuse.io/webhook/a2a/ear",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {
+          "fullResponse": true,
+          "timeout": "={{$json.timeout || 300}}"
+        },
+        "bodyParametersJson": "={\n  \"task_id\": \"{{$json.task_id}}\",\n  \"sender\": \"hnic\",\n  \"action\": \"{{$json.action}}\",\n  \"priority\": \"{{$json.priority}}\",\n  \"context\": {{$node[\"webhook_trigger\"].json}},\n  \"workflow_id\": \"{{$json.workflow_id}}\",\n  \"execution_id\": \"{{$json.execution_id}}\"\n}"
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "call_archivist",
+      "name": "Call The Archivist",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [1700, 150],
+      "parameters": {
+        "url": "http://n8n.geuse.io/webhook/a2a/archivist",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {
+          "fullResponse": true,
+          "timeout": "={{$json.timeout || 300}}"
+        },
+        "bodyParametersJson": "={\n  \"task_id\": \"{{$json.task_id}}\",\n  \"sender\": \"hnic\",\n  \"action\": \"{{$json.action}}\",\n  \"priority\": \"{{$json.priority}}\",\n  \"context\": {{$node[\"webhook_trigger\"].json}},\n  \"workflow_id\": \"{{$json.workflow_id}}\",\n  \"execution_id\": \"{{$json.execution_id}}\"\n}"
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "call_voice",
+      "name": "Call The Voice",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [1700, 250],
+      "parameters": {
+        "url": "http://n8n.geuse.io/webhook/a2a/voice",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {
+          "fullResponse": true,
+          "timeout": "={{$json.timeout || 300}}"
+        },
+        "bodyParametersJson": "={\n  \"task_id\": \"{{$json.task_id}}\",\n  \"sender\": \"hnic\",\n  \"action\": \"{{$json.action}}\",\n  \"priority\": \"{{$json.priority}}\",\n  \"context\": {{$node[\"webhook_trigger\"].json}},\n  \"workflow_id\": \"{{$json.workflow_id}}\",\n  \"execution_id\": \"{{$json.execution_id}}\"\n}"
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "call_bag",
+      "name": "Call The BAG",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [1700, 350],
+      "parameters": {
+        "url": "http://n8n.geuse.io/webhook/a2a/bag",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {
+          "fullResponse": true,
+          "timeout": "={{$json.timeout || 300}}"
+        },
+        "bodyParametersJson": "={\n  \"task_id\": \"{{$json.task_id}}\",\n  \"sender\": \"hnic\",\n  \"action\": \"{{$json.action}}\",\n  \"priority\": \"{{$json.priority}}\",\n  \"context\": {{$node[\"webhook_trigger\"].json}},\n  \"workflow_id\": \"{{$json.workflow_id}}\",\n  \"execution_id\": \"{{$json.execution_id}}\"\n}"
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "call_pen",
+      "name": "Call The Pen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [1700, 450],
+      "parameters": {
+        "url": "http://n8n.geuse.io/webhook/a2a/pen",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {
+          "fullResponse": true,
+          "timeout": "={{$json.timeout || 300}}"
+        },
+        "bodyParametersJson": "={\n  \"task_id\": \"{{$json.task_id}}\",\n  \"sender\": \"hnic\",\n  \"action\": \"{{$json.action}}\",\n  \"priority\": \"{{$json.priority}}\",\n  \"context\": {{$node[\"webhook_trigger\"].json}},\n  \"workflow_id\": \"{{$json.workflow_id}}\",\n  \"execution_id\": \"{{$json.execution_id}}\"\n}"
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "call_naiz",
+      "name": "Call The Naiz",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [1700, 550],
+      "parameters": {
+        "url": "http://n8n.geuse.io/webhook/a2a/naiz",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {
+          "fullResponse": true,
+          "timeout": "={{$json.timeout || 300}}"
+        },
+        "bodyParametersJson": "={\n  \"task_id\": \"{{$json.task_id}}\",\n  \"sender\": \"hnic\",\n  \"action\": \"{{$json.action}}\",\n  \"priority\": \"{{$json.priority}}\",\n  \"context\": {{$node[\"webhook_trigger\"].json}},\n  \"workflow_id\": \"{{$json.workflow_id}}\",\n  \"execution_id\": \"{{$json.execution_id}}\"\n}"
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "handle_errors",
+      "name": "Handle Agent Errors",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1900, 200],
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.error !== undefined || $json.statusCode >= 400}}",
+              "operation": "true"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "retry_with_fallback",
+      "name": "Retry with Fallback Agent",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2100, 100],
+      "parameters": {
+        "functionCode": "// MEMBER RESILIENCY: Implement fallback and retry logic\nconst task = $node[\"route_to_agent\"].json;\nconst error = items[0].json;\n\n// Update task status and retry count\nconst updatedTask = {\n  ...task,\n  status: 'failed',\n  retry_count: (task.retry_count || 0) + 1,\n  error_message: error.error || error.message || 'Unknown error',\n  failed_at: new Date().toISOString()\n};\n\n// Determine fallback strategy\nlet fallbackAction = null;\nif (task.fallback_agent && task.retry_count < 3) {\n  fallbackAction = {\n    action: 'retry_with_fallback',\n    agent: task.fallback_agent,\n    original_agent: task.agent,\n    retry_count: updatedTask.retry_count\n  };\n}\n\nreturn [{\n  json: {\n    ...updatedTask,\n    fallback_action: fallbackAction\n  }\n}];"
+      }
+    },
+    {
+      "id": "update_task_status",
+      "name": "Update Task Status",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [2100, 300],
+      "parameters": {
+        "operation": "update",
+        "schema": "public",
+        "table": "task_queue",
+        "where": "task_id = '{{$json.task_id}}'",
+        "updateFields": "status = '{{$json.status}}', completed_at = '{{$json.completed_at || null}}', error_message = '{{$json.error_message || null}}', retry_count = {{$json.retry_count || 0}}"
+      },
+      "credentials": {
+        "postgres": {
+          "id": "postgres_main",
+          "name": "PostgreSQL Main"
+        }
+      }
+    },
+    {
+      "id": "aggregate_results",
+      "name": "Aggregate Results",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2300, 200],
+      "parameters": {
+        "functionCode": "// MEMBER SOLIDARITY: Aggregate all agent results\nconst workflowId = $workflow.id;\nconst executionId = $execution.id;\n\n// Get all completed tasks for this execution\nconst completedTasks = items.filter(item => \n  item.json.workflow_id === workflowId && \n  item.json.execution_id === executionId && \n  item.json.status === 'completed'\n);\n\n// Aggregate results by agent\nconst aggregatedResults = {\n  execution_id: executionId,\n  workflow_id: workflowId,\n  total_tasks: items.length,\n  completed_tasks: completedTasks.length,\n  failed_tasks: items.filter(item => item.json.status === 'failed').length,\n  agents_used: [...new Set(items.map(item => item.json.agent))],\n  results: completedTasks.map(task => ({\n    agent: task.json.agent,\n    task_id: task.json.task_id,\n    action: task.json.action,\n    result: task.json.result,\n    duration: task.json.duration,\n    quality_score: task.json.quality_score\n  })),\n  timestamp: new Date().toISOString()\n};\n\nreturn [{ json: aggregatedResults }];"
+      }
+    },
+    {
+      "id": "synthesize_response",
+      "name": "Synthesize Final Response",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.8,
+      "position": [2500, 200],
+      "parameters": {
+        "options": {
+          "systemMessage": "You are the HNIC synthesizing the final response from all agent contributions. Your task is to:\n\n1. Analyze all agent results for consistency and completeness\n2. Identify any conflicts or gaps in the information\n3. Synthesize a coherent, comprehensive response\n4. Ensure the response meets the original user request\n5. Provide quality assessment and confidence levels\n\nAgent Results:\n{{$json.results}}\n\nOriginal Request:\n{{$node[\"webhook_trigger\"].json}}\n\nCreate a response that:\n- Addresses all aspects of the original request\n- Integrates insights from all relevant agents\n- Provides clear, actionable information\n- Includes confidence levels and limitations\n- Maintains professional tone and structure"
+        }
+      }
+    },
+    {
+      "id": "store_knowledge",
+      "name": "Store Knowledge in Qdrant",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [2700, 200],
+      "parameters": {
+        "url": "http://localhost:6333/collections/knowledge_base/points",
+        "method": "PUT",
+        "jsonParameters": true,
+        "bodyParametersJson": "={\n  \"points\": [\n    {\n      \"id\": \"{{$execution.id}}\",\n      \"vector\": {{$json.embedding}},\n      \"payload\": {\n        \"workflow_id\": \"{{$workflow.id}}\",\n        \"execution_id\": \"{{$execution.id}}\",\n        \"request\": {{$node[\"webhook_trigger\"].json}},\n        \"response\": {{$json.response}},\n        \"agents_used\": {{$json.agents_used}},\n        \"quality_score\": {{$json.quality_score}},\n        \"timestamp\": \"{{$json.timestamp}}\",\n        \"type\": \"workforce_execution\"\n      }\n    }\n  ]\n}"
+      }
+    },
+    {
+      "id": "return_response",
+      "name": "Return Final Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2900, 200],
+      "parameters": {
+        "options": {
+          "responseHeaders": {
+            "Content-Type": "application/json",
+            "X-Execution-Id": "={{$execution.id}}",
+            "X-Agents-Used": "={{$json.agents_used.join(', ')}}",
+            "X-Quality-Score": "={{$json.quality_score}}"
+          }
+        },
+        "responseBody": "={\n  \"response\": {{$json.response}},\n  \"metadata\": {\n    \"execution_id\": \"{{$execution.id}}\",\n    \"agents_used\": {{$json.agents_used}},\n    \"quality_score\": {{$json.quality_score}},\n    \"timestamp\": \"{{$json.timestamp}}\",\n    \"duration\": \"{{$json.duration}}\"\n  }\n}"
+      }
+    }
+  ],
+  "connections": {
+    "webhook_trigger": {
+      "main": [
+        [
+          {
+            "node": "load_agent_registry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "load_agent_registry": {
+      "main": [
+        [
+          {
+            "node": "check_agent_health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "check_agent_health": {
+      "main": [
+        [
+          {
+            "node": "analyze_request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "analyze_request": {
+      "main": [
+        [
+          {
+            "node": "create_task_queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "openai_model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "analyze_request",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "synthesize_response",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "postgres_memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "analyze_request",
+            "type": "ai_memory",
+            "index": 0
+          },
+          {
+            "node": "synthesize_response",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "create_task_queue": {
+      "main": [
+        [
+          {
+            "node": "store_tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "store_tasks": {
+      "main": [
+        [
+          {
+            "node": "execute_tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "execute_tasks": {
+      "main": [
+        [
+          {
+            "node": "route_to_agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "route_to_agent": {
+      "main": [
+        [
+          {
+            "node": "call_ear",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "call_archivist",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "call_voice",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "call_bag",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "call_pen",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "call_naiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "call_ear": {
+      "main": [
+        [
+          {
+            "node": "handle_errors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "call_archivist": {
+      "main": [
+        [
+          {
+            "node": "handle_errors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "call_voice": {
+      "main": [
+        [
+          {
+            "node": "handle_errors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "call_bag": {
+      "main": [
+        [
+          {
+            "node": "handle_errors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "call_pen": {
+      "main": [
+        [
+          {
+            "node": "handle_errors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "call_naiz": {
+      "main": [
+        [
+          {
+            "node": "handle_errors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "handle_errors": {
+      "main": [
+        [
+          {
+            "node": "retry_with_fallback",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "update_task_status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "retry_with_fallback": {
+      "main": [
+        [
+          {
+            "node": "update_task_status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "update_task_status": {
+      "main": [
+        [
+          {
+            "node": "aggregate_results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "aggregate_results": {
+      "main": [
+        [
+          {
+            "node": "synthesize_response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "synthesize_response": {
+      "main": [
+        [
+          {
+            "node": "store_knowledge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "store_knowledge": {
+      "main": [
+        [
+          {
+            "node": "return_response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+} 

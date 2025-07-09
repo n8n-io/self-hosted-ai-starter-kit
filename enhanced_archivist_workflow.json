@@ -1,0 +1,667 @@
+{
+  "name": "Enhanced Archivist Workflow",
+  "nodes": [
+    {
+      "id": "webhook_receiver",
+      "name": "A2A Webhook Receiver",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [100, 200],
+      "parameters": {
+        "path": "a2a/archivist",
+        "httpMethod": "POST",
+        "responseMode": "onReceived"
+      }
+    },
+    {
+      "id": "parse_request",
+      "name": "Parse A2A Request",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [300, 200],
+      "parameters": {
+        "functionCode": "// MEMBER AWARENESS: Parse incoming A2A message and validate\nconst incoming = items[0].json;\nconst requiredFields = ['task_id', 'sender', 'action'];\n\n// Validate required fields\nfor (const field of requiredFields) {\n  if (!incoming[field]) {\n    throw new Error(`Missing required field: ${field}`);\n  }\n}\n\n// Extract and structure the request\nconst parsedRequest = {\n  task_id: incoming.task_id,\n  sender: incoming.sender,\n  action: incoming.action,\n  priority: incoming.priority || 'medium',\n  context: incoming.context || {},\n  workflow_id: incoming.workflow_id,\n  execution_id: incoming.execution_id,\n  timestamp: new Date().toISOString(),\n  agent_id: 'archivist'\n};\n\nreturn [{ json: parsedRequest }];"
+      }
+    },
+    {
+      "id": "update_heartbeat",
+      "name": "Update Agent Heartbeat",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [500, 200],
+      "parameters": {
+        "operation": "update",
+        "schema": "public",
+        "table": "agent_registry",
+        "where": "agent_id = 'archivist'",
+        "updateFields": "last_heartbeat = NOW(), current_load = current_load + 1"
+      },
+      "credentials": {
+        "postgres": {
+          "id": "postgres_main",
+          "name": "PostgreSQL Main"
+        }
+      }
+    },
+    {
+      "id": "check_agent_capacity",
+      "name": "Check Agent Capacity",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [700, 200],
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "agent_registry",
+        "where": "agent_id = 'archivist'"
+      },
+      "credentials": {
+        "postgres": {
+          "id": "postgres_main",
+          "name": "PostgreSQL Main"
+        }
+      }
+    },
+    {
+      "id": "validate_capacity",
+      "name": "Validate Capacity",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [900, 200],
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.current_load }}",
+              "operation": "smallerEqualThan",
+              "value2": "={{ $json.max_capacity }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "reject_overload",
+      "name": "Reject - Over Capacity",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1100, 100],
+      "parameters": {
+        "functionCode": "// MEMBER RESILIENCY: Handle capacity overload\nconst request = $node['parse_request'].json;\n\n// Log the rejection\nconst rejection = {\n  task_id: request.task_id,\n  sender: request.sender,\n  agent_id: 'archivist',\n  status: 'rejected',\n  reason: 'over_capacity',\n  timestamp: new Date().toISOString(),\n  suggested_fallback: 'pen', // Suggest another agent for historical writing\n  retry_after: 300 // Suggest retry after 5 minutes\n};\n\nreturn [{ json: rejection }];"
+      }
+    },
+    {
+      "id": "log_task_start",
+      "name": "Log Task Start",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1100, 300],
+      "parameters": {
+        "operation": "update",
+        "schema": "public",
+        "table": "task_queue",
+        "where": "task_id = '{{$node[\"parse_request\"].json[\"task_id\"]}}'",
+        "updateFields": "status = 'in_progress', started_at = NOW()"
+      },
+      "credentials": {
+        "postgres": {
+          "id": "postgres_main",
+          "name": "PostgreSQL Main"
+        }
+      }
+    },
+    {
+      "id": "load_historical_context",
+      "name": "Load Historical Context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [1300, 300],
+      "parameters": {
+        "url": "http://localhost:6333/collections/historical_context/points/search",
+        "method": "POST",
+        "jsonParameters": true,
+        "bodyParametersJson": "={\n  \"vector\": {{$json.query_embedding}},\n  \"limit\": 10,\n  \"score_threshold\": 0.7,\n  \"with_payload\": true,\n  \"filter\": {\n    \"must\": [\n      {\n        \"key\": \"context_type\",\n        \"match\": {\n          \"value\": \"{{$node['parse_request'].json['context']['type'] || 'general'}}\"\n        }\n      },\n      {\n        \"key\": \"relevance_score\",\n        \"range\": {\n          \"gte\": 0.6\n        }\n      }\n    ]\n  }\n}"
+      }
+    },
+    {
+      "id": "analyze_historical_patterns",
+      "name": "Analyze Historical Patterns",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.8,
+      "position": [1500, 300],
+      "parameters": {
+        "options": {
+          "systemMessage": "You are The Archivist, a historical correlation analyst agent with authority level 3.\n\nYour specialized capabilities include:\n- Historical pattern recognition and analysis\n- Precedent identification and relevance assessment\n- Long-term trend analysis and projection\n- Historical event correlation and causation analysis\n- Institutional memory maintenance and retrieval\n- Historical context synthesis and presentation\n\nCURRENT TASK: {{$node['parse_request'].json['action']}}\nCONTEXT: {{$node['parse_request'].json['context']}}\nHISTORICAL DATA: {{$node['load_historical_context'].json}}\n\nFOLLOW THESE OPERATIONAL PRINCIPLES:\n\n1. MEMBER AWARENESS: Consider how your analysis supports other agents' work\n2. MEMBER AUTONOMY: Make independent decisions about historical relevance\n3. MEMBER SOLIDARITY: Share insights that benefit the collective workforce\n4. MEMBER EXPANDABILITY: Structure your analysis for future reference\n5. MEMBER RESILIENCY: Provide multiple perspectives and confidence levels\n\nANALYZE THE HISTORICAL CONTEXT AND PROVIDE:\n1. Relevant historical precedents\n2. Pattern recognition insights\n3. Trend analysis and projections\n4. Causal relationship identification\n5. Confidence assessment and limitations\n\nReturn your analysis in JSON format:\n{\n  \"analysis\": {\n    \"precedents\": [],\n    \"patterns\": [],\n    \"trends\": [],\n    \"correlations\": [],\n    \"confidence_score\": 0.0-1.0\n  },\n  \"insights\": {\n    \"key_findings\": [],\n    \"implications\": [],\n    \"recommendations\": []\n  },\n  \"quality_metrics\": {\n    \"source_reliability\": 0.0-1.0,\n    \"historical_accuracy\": 0.0-1.0,\n    \"relevance_score\": 0.0-1.0\n  }\n}"
+        }
+      }
+    },
+    {
+      "id": "openai_model",
+      "name": "OpenAI GPT-4",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [1500, 450],
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4"
+        },
+        "options": {
+          "maxTokens": 2000,
+          "temperature": 0.2
+        }
+      },
+      "credentials": {
+        "openAiApi": {
+          "id": "openai_main",
+          "name": "OpenAI Main"
+        }
+      }
+    },
+    {
+      "id": "postgres_memory",
+      "name": "Postgres Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [1500, 600],
+      "parameters": {
+        "options": {
+          "sessionId": "={{$node['parse_request'].json['execution_id']}}",
+          "memoryKey": "historical_context",
+          "contextWindow": 5
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "postgres_main",
+          "name": "PostgreSQL Main"
+        }
+      }
+    },
+    {
+      "id": "process_analysis",
+      "name": "Process Analysis Result",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1700, 300],
+      "parameters": {
+        "functionCode": "// MEMBER SOLIDARITY: Process analysis and prepare for sharing\nconst request = $node['parse_request'].json;\nconst analysis = JSON.parse(items[0].json.text || items[0].json.response);\n\n// Calculate overall quality score\nconst qualityScore = (\n  analysis.quality_metrics.source_reliability +\n  analysis.quality_metrics.historical_accuracy +\n  analysis.quality_metrics.relevance_score\n) / 3;\n\n// Prepare result for sharing\nconst result = {\n  task_id: request.task_id,\n  agent_id: 'archivist',\n  analysis: analysis.analysis,\n  insights: analysis.insights,\n  quality_score: qualityScore,\n  confidence_score: analysis.analysis.confidence_score,\n  timestamp: new Date().toISOString(),\n  duration: Date.now() - new Date(request.timestamp).getTime(),\n  artifacts: {\n    historical_precedents: analysis.analysis.precedents,\n    pattern_insights: analysis.analysis.patterns,\n    trend_analysis: analysis.analysis.trends,\n    correlation_findings: analysis.analysis.correlations\n  }\n};\n\nreturn [{ json: result }];"
+      }
+    },
+    {
+      "id": "store_knowledge",
+      "name": "Store Knowledge in Qdrant",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [1900, 300],
+      "parameters": {
+        "url": "http://localhost:6333/collections/knowledge_base/points",
+        "method": "PUT",
+        "jsonParameters": true,
+        "bodyParametersJson": "={\n  \"points\": [\n    {\n      \"id\": \"{{$json.task_id}}\",\n      \"vector\": {{$json.embedding}},\n      \"payload\": {\n        \"agent_id\": \"archivist\",\n        \"task_id\": \"{{$json.task_id}}\",\n        \"category\": \"historical_analysis\",\n        \"content\": {{$json.analysis}},\n        \"insights\": {{$json.insights}},\n        \"quality_score\": {{$json.quality_score}},\n        \"confidence_score\": {{$json.confidence_score}},\n        \"timestamp\": \"{{$json.timestamp}}\",\n        \"workflow_id\": \"{{$node['parse_request'].json['workflow_id']}}\",\n        \"execution_id\": \"{{$node['parse_request'].json['execution_id']}}\",\n        \"tags\": [\"historical\", \"analysis\", \"patterns\", \"trends\"]\n      }\n    }\n  ]\n}"
+      }
+    },
+    {
+      "id": "update_agent_learnings",
+      "name": "Update Agent Learnings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [2100, 300],
+      "parameters": {
+        "url": "http://localhost:6333/collections/agent_learnings/points",
+        "method": "PUT",
+        "jsonParameters": true,
+        "bodyParametersJson": "={\n  \"points\": [\n    {\n      \"id\": \"{{$json.task_id}}-learning\",\n      \"vector\": {{$json.learning_embedding}},\n      \"payload\": {\n        \"agent_id\": \"archivist\",\n        \"learning_type\": \"historical_analysis\",\n        \"success_rate\": {{$json.quality_score}},\n        \"context\": \"{{$node['parse_request'].json['action']}}\",\n        \"insights\": {{$json.insights}},\n        \"timestamp\": \"{{$json.timestamp}}\",\n        \"performance_metrics\": {\n          \"duration\": {{$json.duration}},\n          \"confidence\": {{$json.confidence_score}},\n          \"quality\": {{$json.quality_score}}\n        }\n      }\n    }\n  ]\n}"
+      }
+    },
+    {
+      "id": "check_collaboration_needs",
+      "name": "Check Collaboration Needs",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2300, 300],
+      "parameters": {
+        "functionCode": "// MEMBER SOLIDARITY: Determine if collaboration is needed\nconst request = $node['parse_request'].json;\nconst result = $node['process_analysis'].json;\n\n// Check if other agents should be involved\nconst collaborationNeeds = [];\n\n// Check if sentiment analysis is needed\nif (result.insights.key_findings.some(finding => \n  finding.includes('public') || finding.includes('sentiment') || finding.includes('opinion')\n)) {\n  collaborationNeeds.push({\n    agent: 'voice',\n    reason: 'sentiment_analysis_needed',\n    priority: 'medium'\n  });\n}\n\n// Check if financial analysis is needed\nif (result.insights.key_findings.some(finding => \n  finding.includes('financial') || finding.includes('economic') || finding.includes('market')\n)) {\n  collaborationNeeds.push({\n    agent: 'bag',\n    reason: 'financial_analysis_needed',\n    priority: 'high'\n  });\n}\n\n// Check if current events correlation is needed\nif (result.insights.key_findings.some(finding => \n  finding.includes('current') || finding.includes('recent') || finding.includes('trend')\n)) {\n  collaborationNeeds.push({\n    agent: 'ear',\n    reason: 'current_events_correlation_needed',\n    priority: 'medium'\n  });\n}\n\nreturn [{\n  json: {\n    ...result,\n    collaboration_needs: collaborationNeeds,\n    needs_collaboration: collaborationNeeds.length > 0\n  }\n}];"
+      }
+    },
+    {
+      "id": "route_collaboration",
+      "name": "Route Collaboration",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [2500, 300],
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.needs_collaboration }}",
+              "operation": "true"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "initiate_collaborations",
+      "name": "Initiate Collaborations",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 1,
+      "position": [2700, 200],
+      "parameters": {
+        "fieldToSplit": "collaboration_needs",
+        "batchSize": 1
+      }
+    },
+    {
+      "id": "call_collaborating_agent",
+      "name": "Call Collaborating Agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [2900, 200],
+      "parameters": {
+        "url": "=http://n8n.geuse.io/webhook/a2a/{{$json.agent}}",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {
+          "fullResponse": true,
+          "timeout": 30000
+        },
+        "bodyParametersJson": "={\n  \"task_id\": \"{{$node['parse_request'].json['task_id']}}-collab-{{$json.agent}}\",\n  \"sender\": \"archivist\",\n  \"action\": \"collaborative_analysis\",\n  \"priority\": \"{{$json.priority}}\",\n  \"context\": {\n    \"original_request\": {{$node['parse_request'].json}},\n    \"historical_analysis\": {{$node['process_analysis'].json}},\n    \"collaboration_reason\": \"{{$json.reason}}\"\n  },\n  \"workflow_id\": \"{{$node['parse_request'].json['workflow_id']}}\",\n  \"execution_id\": \"{{$node['parse_request'].json['execution_id']}}\"\n}",
+        "continueOnFail": true
+      }
+    },
+    {
+      "id": "update_task_completion",
+      "name": "Update Task Completion",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [2500, 400],
+      "parameters": {
+        "operation": "update",
+        "schema": "public",
+        "table": "task_queue",
+        "where": "task_id = '{{$node[\"parse_request\"].json[\"task_id\"]}}'",
+        "updateFields": "status = 'completed', completed_at = NOW(), result = '{{$json}}', quality_score = {{$json.quality_score}}, duration = {{$json.duration}}"
+      },
+      "credentials": {
+        "postgres": {
+          "id": "postgres_main",
+          "name": "PostgreSQL Main"
+        }
+      }
+    },
+    {
+      "id": "update_agent_stats",
+      "name": "Update Agent Statistics",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [2700, 400],
+      "parameters": {
+        "operation": "update",
+        "schema": "public",
+        "table": "agent_registry",
+        "where": "agent_id = 'archivist'",
+        "updateFields": "current_load = current_load - 1, total_requests = total_requests + 1, response_time_avg = (response_time_avg + {{$json.duration}}) / 2"
+      },
+      "credentials": {
+        "postgres": {
+          "id": "postgres_main",
+          "name": "PostgreSQL Main"
+        }
+      }
+    },
+    {
+      "id": "log_performance_metrics",
+      "name": "Log Performance Metrics",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [2900, 400],
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "agent_performance",
+        "columns": "agent_id, metric_type, metric_value, context",
+        "values": "archivist, response_time, {{$json.duration}}, '{\"task_id\": \"{{$json.task_id}}\", \"action\": \"{{$node['parse_request'].json['action']}}\"}'"
+      },
+      "credentials": {
+        "postgres": {
+          "id": "postgres_main",
+          "name": "PostgreSQL Main"
+        }
+      }
+    },
+    {
+      "id": "send_response",
+      "name": "Send A2A Response",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [3100, 400],
+      "parameters": {
+        "url": "=http://n8n.geuse.io/webhook/a2a/{{$node['parse_request'].json['sender']}}",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {
+          "fullResponse": true,
+          "timeout": 30000
+        },
+        "bodyParametersJson": "={\n  \"task_id\": \"{{$node['parse_request'].json['task_id']}}\",\n  \"sender\": \"archivist\",\n  \"message_type\": \"response\",\n  \"status\": \"completed\",\n  \"result\": {{$json}},\n  \"timestamp\": \"{{$json.timestamp}}\",\n  \"quality_score\": {{$json.quality_score}},\n  \"artifacts\": {{$json.artifacts}}\n}",
+        "continueOnFail": true
+      }
+    },
+    {
+      "id": "handle_errors",
+      "name": "Handle Errors",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1700, 100],
+      "parameters": {
+        "functionCode": "// MEMBER RESILIENCY: Handle errors and failures\nconst request = $node['parse_request'].json;\nconst error = items[0].json.error || items[0].json.message || 'Unknown error';\n\n// Log error\nconst errorLog = {\n  task_id: request.task_id,\n  agent_id: 'archivist',\n  error_type: 'processing_error',\n  error_message: error,\n  timestamp: new Date().toISOString(),\n  context: request.context,\n  severity: 'medium'\n};\n\n// Determine recovery strategy\nlet recoveryStrategy = 'retry';\nif (error.includes('capacity') || error.includes('overload')) {\n  recoveryStrategy = 'defer';\n} else if (error.includes('data') || error.includes('invalid')) {\n  recoveryStrategy = 'fallback';\n}\n\nreturn [{\n  json: {\n    ...errorLog,\n    recovery_strategy: recoveryStrategy,\n    suggested_fallback: 'pen', // Suggest The Pen for historical writing\n    retry_delay: 60000 // 1 minute delay\n  }\n}];"
+      }
+    },
+    {
+      "id": "log_error",
+      "name": "Log Error to Database",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1900, 100],
+      "parameters": {
+        "operation": "update",
+        "schema": "public",
+        "table": "task_queue",
+        "where": "task_id = '{{$json.task_id}}'",
+        "updateFields": "status = 'failed', failed_at = NOW(), error_message = '{{$json.error_message}}'"
+      },
+      "credentials": {
+        "postgres": {
+          "id": "postgres_main",
+          "name": "PostgreSQL Main"
+        }
+      }
+    },
+    {
+      "id": "store_error_pattern",
+      "name": "Store Error Pattern",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [2100, 100],
+      "parameters": {
+        "url": "http://localhost:6333/collections/error_patterns/points",
+        "method": "PUT",
+        "jsonParameters": true,
+        "bodyParametersJson": "={\n  \"points\": [\n    {\n      \"id\": \"{{$json.task_id}}-error\",\n      \"vector\": {{$json.error_embedding}},\n      \"payload\": {\n        \"agent_id\": \"archivist\",\n        \"error_type\": \"{{$json.error_type}}\",\n        \"error_message\": \"{{$json.error_message}}\",\n        \"context\": {{$json.context}},\n        \"severity\": \"{{$json.severity}}\",\n        \"recovery_strategy\": \"{{$json.recovery_strategy}}\",\n        \"timestamp\": \"{{$json.timestamp}}\",\n        \"frequency\": 1\n      }\n    }\n  ]\n}"
+      }
+    },
+    {
+      "id": "send_error_response",
+      "name": "Send Error Response",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [2300, 100],
+      "parameters": {
+        "url": "=http://n8n.geuse.io/webhook/a2a/{{$node['parse_request'].json['sender']}}",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {
+          "fullResponse": true,
+          "timeout": 30000
+        },
+        "bodyParametersJson": "={\n  \"task_id\": \"{{$node['parse_request'].json['task_id']}}\",\n  \"sender\": \"archivist\",\n  \"message_type\": \"error\",\n  \"status\": \"failed\",\n  \"error\": {{$json}},\n  \"timestamp\": \"{{$json.timestamp}}\",\n  \"recovery_suggestion\": {\n    \"strategy\": \"{{$json.recovery_strategy}}\",\n    \"fallback_agent\": \"{{$json.suggested_fallback}}\",\n    \"retry_delay\": {{$json.retry_delay}}\n  }\n}",
+        "continueOnFail": true
+      }
+    }
+  ],
+  "connections": {
+    "webhook_receiver": {
+      "main": [
+        [
+          {
+            "node": "parse_request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "parse_request": {
+      "main": [
+        [
+          {
+            "node": "update_heartbeat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "update_heartbeat": {
+      "main": [
+        [
+          {
+            "node": "check_agent_capacity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "check_agent_capacity": {
+      "main": [
+        [
+          {
+            "node": "validate_capacity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "validate_capacity": {
+      "main": [
+        [
+          {
+            "node": "reject_overload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "log_task_start",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "reject_overload": {
+      "main": [
+        [
+          {
+            "node": "send_error_response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "log_task_start": {
+      "main": [
+        [
+          {
+            "node": "load_historical_context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "load_historical_context": {
+      "main": [
+        [
+          {
+            "node": "analyze_historical_patterns",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "analyze_historical_patterns": {
+      "main": [
+        [
+          {
+            "node": "process_analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "openai_model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "analyze_historical_patterns",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "postgres_memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "analyze_historical_patterns",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "process_analysis": {
+      "main": [
+        [
+          {
+            "node": "store_knowledge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "store_knowledge": {
+      "main": [
+        [
+          {
+            "node": "update_agent_learnings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "update_agent_learnings": {
+      "main": [
+        [
+          {
+            "node": "check_collaboration_needs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "check_collaboration_needs": {
+      "main": [
+        [
+          {
+            "node": "route_collaboration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "route_collaboration": {
+      "main": [
+        [
+          {
+            "node": "initiate_collaborations",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "update_task_completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "initiate_collaborations": {
+      "main": [
+        [
+          {
+            "node": "call_collaborating_agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "call_collaborating_agent": {
+      "main": [
+        [
+          {
+            "node": "update_task_completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "update_task_completion": {
+      "main": [
+        [
+          {
+            "node": "update_agent_stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "update_agent_stats": {
+      "main": [
+        [
+          {
+            "node": "log_performance_metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "log_performance_metrics": {
+      "main": [
+        [
+          {
+            "node": "send_response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": {
+      "id": "handle_errors"
+    }
+  }
+} 
