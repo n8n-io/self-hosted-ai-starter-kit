@@ -255,6 +255,7 @@ done
 EOF
 chmod +x /usr/local/bin/spot-termination-check.sh
 nohup /usr/local/bin/spot-termination-check.sh >/var/log/spot-termination.log 2>&1 &
+<<<<<<< HEAD
 
 # 15. Set up log rotation for Docker
 log "Setting up log rotation..."
@@ -271,3 +272,5 @@ cat > /etc/logrotate.d/docker << EOF
 EOF
 
 log "Deployment completed successfully!"
+=======
+>>>>>>> cef86fbd0accf87199bfceabf9bb74ca3bc144f9

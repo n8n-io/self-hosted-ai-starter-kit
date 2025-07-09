@@ -39,6 +39,7 @@ networks:
         - "sg-6da25332"
 
 x-n8n: &service-n8n
+<<<<<<< HEAD
   build:
     context: .
     dockerfile: Dockerfile.n8n
@@ -46,6 +47,10 @@ x-n8n: &service-n8n
       - n8nio/n8n:latest
     args:
       BUILDKIT_INLINE_CACHE: 1
+=======
+  image: n8nio/n8n:latest
+  pull_policy: always
+>>>>>>> cef86fbd0accf87199bfceabf9bb74ca3bc144f9
   networks:
     - demo
   environment:

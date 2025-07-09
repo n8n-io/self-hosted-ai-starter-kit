@@ -1,88 +1,134 @@
 {
-  "createdAt": "2024-02-23T16:58:31.616Z",
-  "updatedAt": "2024-02-23T16:58:31.616Z",
-  "id": "srOnR8PAY3u4RSwb",
-  "name": "Demo workflow",
-  "active": false,
+  "name": "HNIC Orchestrator",
   "nodes": [
     {
-      "parameters": {},
-      "id": "74003dcd-2ac7-4caa-a1cd-adecc5143c07",
-      "name": "Chat Trigger",
+      "id": "note",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-400,-280],
+      "parameters": {
+        "width": 520,
+        "height": 180,
+        "content": "### Entry point\nReceives `{chatInput, sessionId}` → AI agent routes to\n• plan_tasks  (first prompt)\n• assign_task (per task)\n• next_task   (on command)\nStreams responses via Chat Trigger."
+      }
+    },
+    {
+      "id": "trigger_chat",
+      "name": "When chat message received",
       "type": "@n8n/n8n-nodes-langchain.chatTrigger",
       "typeVersion": 1,
-      "position": [
-        660,
-        340
-      ],
-      "webhookId": "cdb5c076-d458-4b9d-8398-f43bd25059b1"
+      "position": [-180,-180],
+      "webhookId": "hnic_webhook",
+      "parameters": {}
     },
     {
-      "parameters": {},
-      "id": "ce8c3da4-899c-4cc4-af73-8096c64eec64",
-      "name": "Basic LLM Chain",
-      "type": "@n8n/n8n-nodes-langchain.chainLlm",
-      "typeVersion": 1.3,
-      "position": [
-        880,
-        340
-      ]
-    },
-    {
-      "parameters": {
-        "model": "llama3.2:latest",
-        "options": {}
-      },
-      "id": "3dee878b-d748-4829-ac0a-cfd6705d31e5",
-      "name": "Ollama Chat Model",
-      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "id": "llm",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1,
-      "position": [
-        900,
-        560
-      ],
+      "position": [80,-260],
+      "parameters": {
+        "model": { "__rl": true, "mode": "list", "value": "gpt-4o" }
+      },
       "credentials": {
-        "ollamaApi": {
-          "id": "xHuYe0MDGOs9IpBW",
-          "name": "Local Ollama service",
-          "baseUrl": "http://ollama:11434"
+        "openAiApi": { "id": "OPENAI_MAIN", "name": "OpenAI" }
+      }
+    },
+    {
+      "id": "mem",
+      "name": "Postgres Chat Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1,
+      "position": [80,-100],
+      "parameters": {
+        "sessionKey": "= {{$json.sessionId || $executionId}}",
+        "tableName": "chat_memory",
+        "contextWindow": 10
+      },
+      "credentials": {
+        "postgres": { "id": "PG", "name": "Postgres" }
+      }
+    },
+    {
+      "id": "agent",
+      "name": "AI Agent – Tools Agent",
+      "type": "@n8n/n8n-nodes-langchain.agentTools",
+      "typeVersion": 1,
+      "position": [320,-180],
+      "parameters": {
+        "options": {
+          "systemMessage": "=You are **H N I C** – session orchestrator.\nIf no open tasks exist, call plan_tasks(prompt,sessionId).\nWhen deps met call assign_task(task_id,sessionId).\nCommands: tasks list | next | done <id>.\nStream status.",
+          "maxIterations": 8
         }
+      }
+    },
+    {
+      "id": "tool_plan",
+      "name": "plan_tasks",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 1,
+      "position": [600,-300],
+      "parameters": {
+        "name": "plan_tasks",
+        "workflowId": { "__rl": true, "mode": "list", "value": "Plan Tasks (sub)" },
+        "description": "Break prompt into atomic tasks",
+        "source": "defineBelow",
+        "workflowInputs": {
+          "values": [
+            { "name": "prompt",    "value": "={{ $json.chatInput }}" },
+            { "name": "sessionId", "value": "={{ $json.sessionId }}" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "tool_assign",
+      "name": "assign_task",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 1,
+      "position": [600,-200],
+      "parameters": {
+        "name": "assign_task",
+        "workflowId": { "__rl": true, "mode": "list", "value": "Assign Task (sub)" },
+        "description": "Dispatch task to remote agent",
+        "source": "database"
+      }
+    },
+    {
+      "id": "tool_next",
+      "name": "next_task",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 1,
+      "position": [600,-100],
+      "parameters": {
+        "name": "next_task",
+        "workflowId": { "__rl": true, "mode": "list", "value": "Next Task (sub)" },
+        "description": "Return next actionable task",
+        "source": "database"
       }
     }
   ],
   "connections": {
-    "Chat Trigger": {
-      "main": [
-        [
-          {
-            "node": "Basic LLM Chain",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+    "When chat message received": {
+      "main": [[{ "node": "AI Agent – Tools Agent","type": "main","index": 0 }]]
     },
-    "Ollama Chat Model": {
-      "ai_languageModel": [
-        [
-          {
-            "node": "Basic LLM Chain",
-            "type": "ai_languageModel",
-            "index": 0
-          }
-        ]
-      ]
+    "OpenAI Chat Model": {
+      "ai_languageModel": [[{ "node": "AI Agent – Tools Agent","type": "ai_languageModel","index": 0 }]]
+    },
+    "Postgres Chat Memory": {
+      "ai_memory": [[{ "node": "AI Agent – Tools Agent","type": "ai_memory","index": 0 }]]
+    },
+    "plan_tasks": {
+      "ai_tool": [[{ "node": "AI Agent – Tools Agent","type": "ai_tool","index": 0 }]]
+    },
+    "assign_task": {
+      "ai_tool": [[{ "node": "AI Agent – Tools Agent","type": "ai_tool","index": 1 }]]
+    },
+    "next_task": {
+      "ai_tool": [[{ "node": "AI Agent – Tools Agent","type": "ai_tool","index": 2 }]]
     }
   },
-  "settings": {
-    "executionOrder": "v1"
-  },
-  "staticData": null,
-  "meta": {
-    "templateCredsSetupCompleted": true
-  },
   "pinData": {},
-  "versionId": "4e2affe6-bb1c-4ddc-92f9-dde0b7656796",
-  "triggerCount": 0,
-  "tags": []
+  "settings": { "executionOrder": "v1" }
 }
