@@ -1,4 +1,5 @@
-version: '3.8'
+# Modern Docker Compose format (no version field required)
+# Uses the Compose Specification (latest)
 
 # Production overrides
 # Use with: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d

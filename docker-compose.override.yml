@@ -1,4 +1,5 @@
-version: '3.8'
+# Modern Docker Compose format (no version field required)
+# Uses the Compose Specification (latest)
 
 # Development and testing overrides
 # This file is automatically loaded by docker-compose when present

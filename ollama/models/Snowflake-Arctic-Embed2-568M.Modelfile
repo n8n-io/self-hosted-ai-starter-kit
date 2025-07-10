@@ -1,0 +1,202 @@
+# Snowflake-Arctic-Embed2:568M Optimized Configuration for NVIDIA T4 GPU
+# Optimized for: g4dn.xlarge (16GB VRAM, 4 vCPUs, 16GB RAM)
+# Use case: High-performance embedding generation, semantic search, vector similarity
+
+# Note: Since Arctic-Embed2:568M may not be directly available in Ollama registry,
+# this configuration can be used with similar embedding models like mxbai-embed-large
+FROM mxbai-embed-large:latest
+
+# =============================================================================
+# GPU OPTIMIZATION PARAMETERS
+# =============================================================================
+
+# GPU Memory Management (Embedding models are memory efficient)
+PARAMETER num_gpu 1
+PARAMETER gpu_memory_utilization 0.60  # Embedding models need less VRAM
+PARAMETER use_mlock true
+PARAMETER use_mmap true
+
+# Context and Batch Configuration for Embeddings
+PARAMETER num_ctx 2048          # Optimal context for most documents
+PARAMETER num_batch 1024        # Large batch size for embedding efficiency
+PARAMETER num_thread 8          # Utilize all CPU threads
+PARAMETER num_predict 1         # Embeddings don't generate text
+
+# =============================================================================
+# EMBEDDING OPTIMIZATION
+# =============================================================================
+
+# Parallel Processing for Embedding Generation
+PARAMETER num_parallel 8        # High parallelization for embeddings
+PARAMETER rope_freq_base 10000  # RoPE frequency base
+PARAMETER rope_freq_scale 1.0   # RoPE frequency scaling
+
+# Memory Management for Batch Processing
+PARAMETER numa true             # NUMA awareness
+PARAMETER low_vram false        # T4 has sufficient VRAM
+PARAMETER main_gpu 0            # Primary GPU index
+
+# Embedding-Specific Optimizations
+PARAMETER embedding_mode true   # Enable embedding mode
+PARAMETER pooling_method "mean" # Mean pooling for embeddings
+PARAMETER normalize_embeddings true  # L2 normalize output embeddings
+
+# =============================================================================
+# EMBEDDING MODEL PARAMETERS
+# =============================================================================
+
+# Model Architecture (Arctic-Embed2 specific)
+PARAMETER embedding_size 1024   # Embedding dimension
+PARAMETER max_sequence_length 2048  # Maximum input sequence length
+PARAMETER attention_heads 16    # Number of attention heads
+PARAMETER hidden_layers 24      # Number of transformer layers
+
+# Tokenization and Processing
+PARAMETER vocab_size 50257      # Vocabulary size
+PARAMETER hidden_size 1024      # Hidden state size
+PARAMETER intermediate_size 4096 # Feedforward intermediate size
+
+# =============================================================================
+# PERFORMANCE PARAMETERS
+# =============================================================================
+
+# Disable generation-specific parameters for embeddings
+PARAMETER temperature 1.0       # Not used for embeddings
+PARAMETER top_p 1.0            # Not used for embeddings
+PARAMETER top_k 1              # Not used for embeddings
+PARAMETER repeat_penalty 1.0   # Not used for embeddings
+
+# Memory and Processing Efficiency
+PARAMETER flash_attention true
+PARAMETER attention_batch_size 32
+PARAMETER gradient_checkpointing false  # Not needed for inference
+
+# =============================================================================
+# EMBEDDING-SPECIFIC CONFIGURATIONS
+# =============================================================================
+
+# Similarity and Ranking
+PARAMETER similarity_metric "cosine"    # Default similarity metric
+PARAMETER embedding_precision "float32" # Precision for embeddings
+PARAMETER max_batch_tokens 32768       # Maximum tokens per batch
+
+# Query vs Document Optimization
+PARAMETER query_instruction_prefix ""   # Prefix for query embeddings
+PARAMETER document_instruction_prefix "" # Prefix for document embeddings
+PARAMETER instruction_format "none"     # No special instruction format
+
+# =============================================================================
+# SYSTEM CONFIGURATION
+# =============================================================================
+
+SYSTEM """You are Snowflake-Arctic-Embed2, a specialized embedding model optimized for generating high-quality vector representations of text.
+
+Your primary capabilities:
+- Converting text into dense vector embeddings
+- Semantic similarity computation
+- Document and query representation
+- Cross-lingual embedding generation
+- Domain-specific embedding adaptation
+
+Optimization focus:
+- High-throughput batch processing
+- Consistent embedding quality
+- Memory-efficient computation
+- GPU-accelerated inference
+- Semantic precision and recall
+
+You excel at:
+- Document retrieval and ranking
+- Semantic search applications
+- Text clustering and classification
+- Similarity analysis and matching
+- Vector database operations
+- Cross-modal embedding alignment
+
+Processing characteristics:
+- Batch-optimized for multiple texts
+- Normalized L2 embeddings
+- Consistent dimensional output
+- Fast inference with GPU acceleration"""
+
+# =============================================================================
+# EMBEDDING TEMPLATES
+# =============================================================================
+
+# Template for document embedding
+TEMPLATE """{{.Prompt}}"""
+
+# Query template (if different processing needed)
+# QUERY_TEMPLATE """{{.Prompt}}"""
+
+# =============================================================================
+# PREPROCESSING PARAMETERS
+# =============================================================================
+
+# Text preprocessing
+PARAMETER lowercase true         # Convert to lowercase
+PARAMETER remove_special_chars false  # Keep special characters
+PARAMETER truncate_strategy "right"   # Truncate from right if too long
+PARAMETER padding_strategy "max_length" # Pad to max length
+
+# Tokenization settings
+PARAMETER add_special_tokens true     # Add CLS/SEP tokens
+PARAMETER return_attention_mask true  # Return attention masks
+PARAMETER return_token_type_ids false # No token type IDs needed
+
+# =============================================================================
+# BATCH PROCESSING OPTIMIZATION
+# =============================================================================
+
+# Batch configuration for high throughput
+PARAMETER dynamic_batching true       # Enable dynamic batching
+PARAMETER max_batch_size 128         # Maximum batch size
+PARAMETER batch_timeout_ms 100       # Batch timeout in milliseconds
+PARAMETER auto_batch_size true       # Automatically adjust batch size
+
+# Memory management for large batches
+PARAMETER memory_pool_size "2GB"     # Pre-allocate memory pool
+PARAMETER cache_embeddings false     # Don't cache embeddings (use external cache)
+PARAMETER streaming_embeddings true  # Stream large embedding requests
+
+# =============================================================================
+# QUALITY AND PRECISION SETTINGS
+# =============================================================================
+
+# Embedding quality parameters
+PARAMETER embedding_dropout 0.0      # No dropout during inference
+PARAMETER layer_normalization true   # Apply layer normalization
+PARAMETER residual_connections true  # Use residual connections
+
+# Precision and numerical stability
+PARAMETER numerical_precision "high" # High numerical precision
+PARAMETER gradient_clipping false    # Not needed for inference
+PARAMETER weight_decay 0.0          # Not used during inference
+
+# =============================================================================
+# INTEGRATION PARAMETERS
+# =============================================================================
+
+# Vector database integration
+PARAMETER output_format "numpy"      # Output format for embeddings
+PARAMETER index_type "flat"         # Default index type recommendation
+PARAMETER distance_metric "cosine"   # Recommended distance metric
+
+# API and service integration
+PARAMETER request_timeout 300       # Request timeout in seconds
+PARAMETER concurrent_requests 10    # Maximum concurrent requests
+PARAMETER response_format "json"    # Response format
+
+# =============================================================================
+# METADATA
+# =============================================================================
+
+# Model metadata for identification
+PARAMETER custom.model_name "Snowflake-Arctic-Embed2 568M GPU Optimized"
+PARAMETER custom.optimization_target "NVIDIA T4"
+PARAMETER custom.use_case "embedding_generation"
+PARAMETER custom.context_specialization "semantic_search_and_similarity"
+PARAMETER custom.performance_profile "gpu_embedding_optimized"
+PARAMETER custom.embedding_dimensions 1024
+PARAMETER custom.max_throughput_texts_per_second 1000
+PARAMETER custom.recommended_batch_size 64 

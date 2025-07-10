@@ -1,0 +1,495 @@
+# Crawl4AI Example Configuration and Usage Guide
+# This file demonstrates how to use Crawl4AI with LLM-based extraction strategies
+# for advanced web scraping and data extraction
+
+version: '1.0'
+
+# =============================================================================
+# CRAWL4AI LLM-BASED EXTRACTION CONFIGURATION EXAMPLES
+# =============================================================================
+
+# Example 1: Basic LLM Extraction with OpenAI
+basic_llm_extraction:
+  description: "Extract structured data using OpenAI GPT models"
+  extraction_strategy:
+    type: "LLMExtractionStrategy"
+    params:
+      llm_config:
+        type: "LlmConfig"
+        params:
+          provider: "openai/gpt-4o-mini"
+          api_token: "${OPENAI_API_KEY}"
+      schema:
+        type: "dict"
+        value:
+          type: "object"
+          properties:
+            title:
+              type: "string"
+              description: "Main title of the page"
+            content:
+              type: "string"
+              description: "Main content or article text"
+            author:
+              type: "string"
+              description: "Author name if available"
+            published_date:
+              type: "string"
+              description: "Publication date"
+            tags:
+              type: "array"
+              items:
+                type: "string"
+              description: "Relevant tags or categories"
+      extraction_type: "schema"
+      instruction: "Extract the main article information including title, content, author, publication date, and relevant tags. Return as valid JSON."
+      chunk_token_threshold: 4000
+      overlap_rate: 0.1
+      apply_chunking: true
+      input_format: "markdown"
+      extra_args:
+        type: "dict"
+        value:
+          temperature: 0.1
+          max_tokens: 1500
+
+# Example 2: Local LLM with Ollama Integration
+local_llm_extraction:
+  description: "Use local Ollama models for extraction (privacy-focused)"
+  extraction_strategy:
+    type: "LLMExtractionStrategy"
+    params:
+      llm_config:
+        type: "LlmConfig"
+        params:
+          provider: "ollama/deepseek-r1:8b-optimized"
+          base_url: "http://ollama:11434"
+      schema:
+        type: "dict"
+        value:
+          type: "object"
+          properties:
+            products:
+              type: "array"
+              items:
+                type: "object"
+                properties:
+                  name:
+                    type: "string"
+                  price:
+                    type: "string"
+                  description:
+                    type: "string"
+                  availability:
+                    type: "string"
+                  rating:
+                    type: "number"
+      extraction_type: "schema"
+      instruction: "Extract all product information from this e-commerce page. Focus on product name, price, description, availability status, and customer ratings."
+      chunk_token_threshold: 6000
+      input_format: "html"
+      extra_args:
+        type: "dict"
+        value:
+          temperature: 0.0
+          num_predict: 2048
+
+# Example 3: Knowledge Graph Extraction
+knowledge_graph_extraction:
+  description: "Extract entities and relationships for knowledge graphs"
+  extraction_strategy:
+    type: "LLMExtractionStrategy"
+    params:
+      llm_config:
+        type: "LlmConfig"
+        params:
+          provider: "anthropic/claude-3-sonnet-20240229"
+          api_token: "${ANTHROPIC_API_KEY}"
+      schema:
+        type: "dict"
+        value:
+          type: "object"
+          properties:
+            entities:
+              type: "array"
+              items:
+                type: "object"
+                properties:
+                  name:
+                    type: "string"
+                  type:
+                    type: "string"
+                    enum: ["person", "organization", "location", "event", "concept", "product"]
+                  description:
+                    type: "string"
+                  attributes:
+                    type: "object"
+            relationships:
+              type: "array"
+              items:
+                type: "object"
+                properties:
+                  source_entity:
+                    type: "string"
+                  target_entity:
+                    type: "string"
+                  relationship_type:
+                    type: "string"
+                  description:
+                    type: "string"
+                  confidence:
+                    type: "number"
+                    minimum: 0
+                    maximum: 1
+      extraction_type: "schema"
+      instruction: "Extract entities and their relationships from the content to build a knowledge graph. Identify people, organizations, locations, events, concepts, and products. For each relationship, provide the type and a confidence score."
+      chunk_token_threshold: 8000
+      overlap_rate: 0.2
+      input_format: "markdown"
+
+# Example 4: News Article Analysis
+news_analysis_extraction:
+  description: "Comprehensive news article analysis with sentiment and topics"
+  extraction_strategy:
+    type: "LLMExtractionStrategy"
+    params:
+      llm_config:
+        type: "LlmConfig"
+        params:
+          provider: "openai/gpt-4o"
+          api_token: "${OPENAI_API_KEY}"
+      schema:
+        type: "dict"
+        value:
+          type: "object"
+          properties:
+            headline:
+              type: "string"
+            summary:
+              type: "string"
+              description: "3-sentence summary"
+            main_topics:
+              type: "array"
+              items:
+                type: "string"
+              description: "Main topics covered"
+            sentiment:
+              type: "object"
+              properties:
+                overall:
+                  type: "string"
+                  enum: ["positive", "negative", "neutral"]
+                confidence:
+                  type: "number"
+                key_emotions:
+                  type: "array"
+                  items:
+                    type: "string"
+            key_facts:
+              type: "array"
+              items:
+                type: "object"
+                properties:
+                  fact:
+                    type: "string"
+                  source:
+                    type: "string"
+                  verified:
+                    type: "boolean"
+            stakeholders:
+              type: "array"
+              items:
+                type: "object"
+                properties:
+                  name:
+                    type: "string"
+                  role:
+                    type: "string"
+                  stance:
+                    type: "string"
+      extraction_type: "schema"
+      instruction: "Analyze this news article comprehensively. Extract the headline, create a summary, identify main topics, analyze sentiment, extract key facts with sources, and identify stakeholders with their roles and stances."
+
+# Example 5: E-commerce Product Research
+ecommerce_research:
+  description: "Extract detailed product information for competitive analysis"
+  extraction_strategy:
+    type: "LLMExtractionStrategy"
+    params:
+      llm_config:
+        type: "LlmConfig"
+        params:
+          provider: "ollama/qwen2.5:7b-vl-optimized"
+          base_url: "http://ollama:11434"
+      schema:
+        type: "dict"
+        value:
+          type: "object"
+          properties:
+            product_name:
+              type: "string"
+            brand:
+              type: "string"
+            category:
+              type: "string"
+            price:
+              type: "object"
+              properties:
+                current:
+                  type: "string"
+                original:
+                  type: "string"
+                discount_percentage:
+                  type: "number"
+            specifications:
+              type: "object"
+            customer_reviews:
+              type: "object"
+              properties:
+                average_rating:
+                  type: "number"
+                total_reviews:
+                  type: "integer"
+                recent_reviews:
+                  type: "array"
+                  items:
+                    type: "object"
+                    properties:
+                      rating:
+                        type: "integer"
+                      comment:
+                        type: "string"
+                      helpful_votes:
+                        type: "integer"
+            competitors:
+              type: "array"
+              items:
+                type: "object"
+                properties:
+                  name:
+                    type: "string"
+                  price:
+                    type: "string"
+                  key_differences:
+                    type: "string"
+      extraction_type: "schema"
+      instruction: "Extract comprehensive product information including pricing, specifications, customer reviews, and identify potential competitors mentioned on the page."
+
+# Example 6: Academic Paper Processing
+academic_paper_extraction:
+  description: "Extract structured information from academic papers"
+  extraction_strategy:
+    type: "LLMExtractionStrategy"
+    params:
+      llm_config:
+        type: "LlmConfig"
+        params:
+          provider: "openai/gpt-4o-mini"
+          api_token: "${OPENAI_API_KEY}"
+      schema:
+        type: "dict"
+        value:
+          type: "object"
+          properties:
+            title:
+              type: "string"
+            authors:
+              type: "array"
+              items:
+                type: "object"
+                properties:
+                  name:
+                    type: "string"
+                  affiliation:
+                    type: "string"
+            abstract:
+              type: "string"
+            keywords:
+              type: "array"
+              items:
+                type: "string"
+            methodology:
+              type: "string"
+            key_findings:
+              type: "array"
+              items:
+                type: "string"
+            conclusions:
+              type: "string"
+            references_count:
+              type: "integer"
+            research_field:
+              type: "string"
+            publication_year:
+              type: "integer"
+      extraction_type: "schema"
+      instruction: "Extract key information from this academic paper including metadata, abstract, methodology, findings, and conclusions."
+
+# =============================================================================
+# USAGE EXAMPLES WITH PYTHON SDK
+# =============================================================================
+
+python_examples:
+  basic_usage: |
+    import asyncio
+    import json
+    from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, LLMConfig
+    from crawl4ai.extraction_strategy import LLMExtractionStrategy
+    
+    async def extract_with_llm():
+        # Configure LLM extraction strategy
+        llm_strategy = LLMExtractionStrategy(
+            llm_config=LLMConfig(
+                provider="openai/gpt-4o-mini",
+                api_token="your-api-key"
+            ),
+            schema={
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "content": {"type": "string"},
+                    "author": {"type": "string"}
+                }
+            },
+            extraction_type="schema",
+            instruction="Extract article title, main content, and author name."
+        )
+        
+        # Create crawler configuration
+        crawl_config = CrawlerRunConfig(
+            extraction_strategy=llm_strategy,
+            cache_mode="bypass"
+        )
+        
+        # Crawl and extract
+        async with AsyncWebCrawler() as crawler:
+            result = await crawler.arun(
+                url="https://example.com/article",
+                config=crawl_config
+            )
+            
+            if result.success:
+                data = json.loads(result.extracted_content)
+                print(json.dumps(data, indent=2))
+    
+    asyncio.run(extract_with_llm())
+
+  rest_api_usage: |
+    import requests
+    import json
+    
+    # Configuration for REST API
+    crawl_payload = {
+        "urls": ["https://example.com/products"],
+        "crawler_config": {
+            "type": "CrawlerRunConfig",
+            "params": {
+                "extraction_strategy": {
+                    "type": "LLMExtractionStrategy",
+                    "params": {
+                        "llm_config": {
+                            "type": "LlmConfig",
+                            "params": {
+                                "provider": "ollama/deepseek-r1:8b-optimized",
+                                "base_url": "http://ollama:11434"
+                            }
+                        },
+                        "schema": {
+                            "type": "dict",
+                            "value": {
+                                "type": "object",
+                                "properties": {
+                                    "products": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "name": {"type": "string"},
+                                                "price": {"type": "string"}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "extraction_type": "schema",
+                        "instruction": "Extract all products with names and prices."
+                    }
+                }
+            }
+        }
+    }
+    
+    # Send request to Crawl4AI
+    response = requests.post(
+        "http://localhost:11235/crawl",
+        json=crawl_payload,
+        headers={"Content-Type": "application/json"}
+    )
+    
+    if response.ok:
+        result = response.json()
+        print(json.dumps(result, indent=2))
+
+# =============================================================================
+# ENVIRONMENT VARIABLES
+# =============================================================================
+
+required_environment_variables:
+  - name: "OPENAI_API_KEY"
+    description: "OpenAI API key for GPT models"
+    example: "sk-..."
+  - name: "ANTHROPIC_API_KEY"
+    description: "Anthropic API key for Claude models"
+    example: "sk-ant-..."
+  - name: "DEEPSEEK_API_KEY"
+    description: "DeepSeek API key"
+    example: "sk-..."
+  - name: "GROQ_API_KEY"
+    description: "Groq API key for fast inference"
+    example: "gsk_..."
+
+# =============================================================================
+# BEST PRACTICES
+# =============================================================================
+
+best_practices:
+  performance:
+    - "Use chunking for large documents (chunk_token_threshold: 4000-8000)"
+    - "Set overlap_rate to 0.1-0.2 for better context continuity"
+    - "Use local Ollama models for privacy and cost reduction"
+    - "Cache extraction results when possible"
+    - "Use appropriate temperature settings (0.0-0.1 for structured data)"
+    
+  cost_optimization:
+    - "Use smaller models like gpt-4o-mini for simple extraction tasks"
+    - "Implement caching to avoid re-processing same content"
+    - "Use local models when possible"
+    - "Pre-filter content to reduce token usage"
+    
+  accuracy:
+    - "Provide clear, specific instructions"
+    - "Use well-defined JSON schemas"
+    - "Include examples in prompts for complex extractions"
+    - "Validate extracted data with Pydantic models"
+    
+  security:
+    - "Never include sensitive data in prompts"
+    - "Use environment variables for API keys"
+    - "Consider using local models for sensitive content"
+    - "Validate and sanitize extracted data"
+
+# =============================================================================
+# TROUBLESHOOTING
+# =============================================================================
+
+troubleshooting:
+  common_issues:
+    - issue: "LLM returns invalid JSON"
+      solution: "Use lower temperature, clearer instructions, or add JSON validation examples"
+    - issue: "High token usage/costs"
+      solution: "Use chunking, pre-filter content, or switch to smaller models"
+    - issue: "Slow extraction"
+      solution: "Use local Ollama models or enable parallel processing"
+    - issue: "Inconsistent results"
+      solution: "Lower temperature, more specific schemas, or add validation" 
