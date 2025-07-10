@@ -60,6 +60,7 @@ x-n8n: &service-n8n
     - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
     - N8N_DIAGNOSTICS_ENABLED=false
     - N8N_PERSONALIZATION_ENABLED=false
+<<<<<<< HEAD
     - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
     - N8N_USER_MANAGEMENT_JWT_SECRET=${N8N_USER_MANAGEMENT_JWT_SECRET}
     - OLLAMA_HOST=ollama:11434
@@ -85,6 +86,37 @@ x-n8n: &service-n8n
     timeout: 10s
     retries: 3
     start_period: 40s
+=======
+    - N8N_ENCRYPTION_KEY
+    - N8N_USER_MANAGEMENT_JWT_SECRET
+    - OLLAMA_HOST=${OLLAMA_HOST:-ollama:11434}
+  env_file:
+    - path: .env
+      required: true
+
+x-ollama: &service-ollama
+  image: ollama/ollama:latest
+  container_name: ollama
+  networks: ['demo']
+  restart: unless-stopped
+  ports:
+    - 11434:11434
+  volumes:
+    - ollama_storage:/root/.ollama
+
+x-init-ollama: &init-ollama
+  image: ollama/ollama:latest
+  networks: ['demo']
+  container_name: ollama-pull-llama
+  volumes:
+    - ollama_storage:/root/.ollama
+  entrypoint: /bin/sh
+  environment:
+    - OLLAMA_HOST=ollama:11434
+  command:
+    - "-c"
+    - "sleep 3; ollama pull llama3.2"
+>>>>>>> 06319a57af662810230c1a63175baaf312b427a9
 
 services:
   postgres:
@@ -127,9 +159,17 @@ services:
     hostname: n8n-import
     container_name: n8n-import
     entrypoint: /bin/sh
+<<<<<<< HEAD
     command: ["-c", "n8n import:credentials --separate --input=/backup/credentials && n8n import:workflow --separate --input=/backup/workflows"]
     volumes:
       - ./n8n/backup:/backup:ro
+=======
+    command:
+      - "-c"
+      - "n8n import:credentials --separate --input=/demo-data/credentials && n8n import:workflow --separate --input=/demo-data/workflows"
+    volumes:
+      - ./n8n/demo-data:/demo-data
+>>>>>>> 06319a57af662810230c1a63175baaf312b427a9
     depends_on:
       postgres:
         condition: service_healthy
@@ -147,7 +187,11 @@ services:
       - "5678:5678"
     volumes:
       - n8n_storage:/home/node/.n8n
+<<<<<<< HEAD
       - ./n8n/backup:/backup:ro
+=======
+      - ./n8n/demo-data:/demo-data
+>>>>>>> 06319a57af662810230c1a63175baaf312b427a9
       - ./shared:/data/shared
       - ./n8n/certs:/files/certs:ro
     depends_on:

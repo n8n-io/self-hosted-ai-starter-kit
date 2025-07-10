@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Ignore environment variables
 .env
 .DS_Store
@@ -9,3 +10,6 @@
 .sh
 .bash
 .zsh
+=======
+.env
+>>>>>>> 06319a57af662810230c1a63175baaf312b427a9
