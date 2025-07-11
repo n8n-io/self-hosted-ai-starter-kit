@@ -42,7 +42,7 @@ An advanced AI-powered automation platform optimized for NVIDIA GPU workloads, f
    ```
 
 3. **Access Services**
-   - **n8n**: http://localhost:5678
+   - **n8n**: https://n8n.geuse.io/
    - **Crawl4AI**: http://localhost:11235
    - **Qdrant**: http://localhost:6333/dashboard
 
@@ -80,7 +80,7 @@ This setup leverages the latest Docker Compose features:
 ```yaml
 # Enhanced health checks with v2.38.2
 healthcheck:
-  test: ["CMD", "curl", "-f", "http://localhost:5678/healthz"]
+  test: ["CMD", "curl", "-f", "https://n8n.geuse.io/healthz"]
   interval: 30s
   timeout: 10s
   retries: 3
@@ -151,7 +151,7 @@ curl -X POST "http://localhost:11235/crawl" \
   -d '{"urls": ["https://example.com"]}'
 
 # Test n8n
-curl -X GET "http://localhost:5678/healthz"
+curl -X GET "https://n8n.geuse.io/healthz"
 
 # Test Ollama
 curl -X POST "http://localhost:11434/api/generate" \
@@ -215,6 +215,6 @@ MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
 
-**🚀 Ready to get started?** Run `docker compose up -d` and visit http://localhost:5678
+**🚀 Ready to get started?** Run `docker compose up -d` and visit https://n8n.geuse.io/
 
 **📚 Need more details?** Check out the [Complete Guide](COMPREHENSIVE_GUIDE.md)

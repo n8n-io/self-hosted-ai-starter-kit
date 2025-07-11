@@ -132,7 +132,7 @@ services:
   n8n:
     image: n8nio/n8n:latest
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5678/healthz"]
+      test: ["CMD", "curl", "-f", "https://n8n.geuse.io/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3

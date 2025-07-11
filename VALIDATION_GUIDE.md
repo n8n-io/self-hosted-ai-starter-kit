@@ -150,7 +150,7 @@ make test
 echo "Testing individual service endpoints..."
 
 # n8n
-curl -f http://localhost:5678/healthz && echo "✅ n8n healthy" || echo "❌ n8n unhealthy"
+curl -f https://n8n.geuse.io/healthz && echo "✅ n8n healthy" || echo "❌ n8n unhealthy"
 
 # Ollama
 curl -f http://localhost:11434/api/tags && echo "✅ Ollama healthy" || echo "❌ Ollama unhealthy"

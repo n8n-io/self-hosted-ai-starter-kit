@@ -77,7 +77,7 @@ cd 001-starter-kit
 docker-compose up -d
 
 # Access services
-# n8n: http://localhost:5678
+# n8n: https://n8n.geuse.io/
 # Crawl4AI: http://localhost:11235
 # Qdrant: http://localhost:6333
 ```
@@ -194,7 +194,7 @@ curl -X POST "http://localhost:11235/crawl" \
   -d '{"urls": ["https://example.com"], "extraction_strategy": "llm"}'
 
 # Test n8n workflow
-curl -X GET "http://localhost:5678/healthz"
+curl -X GET "https://n8n.geuse.io/healthz"
 
 # Test Ollama models
 curl -X POST "http://localhost:11434/api/generate" \
@@ -287,7 +287,7 @@ make setup-ssl
 make health-check
 
 # Individual service checks
-curl http://localhost:5678/healthz    # n8n
+curl https://n8n.geuse.io/healthz    # n8n
 curl http://localhost:11235/health    # Crawl4AI
 curl http://localhost:6333/healthz    # Qdrant
 curl http://localhost:11434/api/tags  # Ollama

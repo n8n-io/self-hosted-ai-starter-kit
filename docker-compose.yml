@@ -298,13 +298,7 @@ x-init-ollama: &init-ollama
 # =============================================================================
 services:
   postgres:
-    build:
-      context: .
-      dockerfile: Dockerfile.postgres
-      cache_from:
-        - postgres:latest
-      args:
-        BUILDKIT_INLINE_CACHE: 1
+    image: postgres:16-alpine
     hostname: postgres
     networks:
       - demo
@@ -375,13 +369,7 @@ services:
         window: 120s
 
   qdrant:
-    build:
-      context: .
-      dockerfile: Dockerfile.qdrant
-      cache_from:
-        - qdrant/qdrant:latest
-      args:
-        BUILDKIT_INLINE_CACHE: 1
+    image: qdrant/qdrant:latest
     hostname: qdrant
     container_name: qdrant
     networks:

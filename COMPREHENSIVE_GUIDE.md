@@ -159,7 +159,7 @@ graph TB
 4. **Access Services**
    ```bash
    # n8n Workflow Automation
-   open http://localhost:5678
+   open https://n8n.geuse.io/
    
    # Crawl4AI Web Scraping
    curl -X POST "http://localhost:11235/crawl" \
@@ -234,7 +234,7 @@ docker compose -f docker-compose.yml -f docker-compose.override.yml up -d
 #### 1. **Enhanced Health Checks**
 ```yaml
 healthcheck:
-  test: ["CMD", "curl", "-f", "http://localhost:5678/healthz"]
+      test: ["CMD", "curl", "-f", "https://n8n.geuse.io/healthz"]
   interval: 30s
   timeout: 10s
   retries: 3
@@ -320,7 +320,7 @@ N8N_ENCRYPTION_KEY=your-32-character-encryption-key
 N8N_USER_MANAGEMENT_JWT_SECRET=your-jwt-secret
 N8N_HOST=0.0.0.0
 N8N_PROTOCOL=http
-WEBHOOK_URL=http://localhost:5678
+WEBHOOK_URL=https://n8n.geuse.io
 
 # Ollama Configuration
 OLLAMA_HOST=ollama:11434
