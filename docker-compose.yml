@@ -3,6 +3,9 @@ volumes:
   postgres_storage:
   ollama_storage:
   qdrant_storage:
+  ngrok_storage:
+  mongodb_storage:
+  evolution_storage:
 
 networks:
   demo:
@@ -20,6 +23,8 @@ x-n8n: &service-n8n
     - N8N_ENCRYPTION_KEY
     - N8N_USER_MANAGEMENT_JWT_SECRET
     - OLLAMA_HOST=${OLLAMA_HOST:-ollama:11434}
+    - WEBHOOK_URL=https://4ebab0ed4020.ngrok-free.app
+
   env_file:
     - path: .env
       required: true
@@ -148,3 +153,53 @@ services:
     image: ollama/ollama:rocm
     depends_on:
      - ollama-gpu-amd
+
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: ngrok
+    restart: unless-stopped
+    networks:
+      - demo
+    ports:
+      - 4040:4040
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    command: 
+      - "http"
+      - "n8n:5678"
+    volumes:
+      - ngrok_storage:/home/ngrok/.ngrok2
+    depends_on:
+      - n8n
+
+  mongodb:
+    image: mongo:5.0
+    container_name: mongodb
+    restart: unless-stopped
+    networks:
+      - demo
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_INITDB_ROOT_USERNAME}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_INITDB_ROOT_PASSWORD}
+    volumes:
+      - mongodb_storage:/data/db
+
+  evolution-api:
+    image: atendai/evolution-api:latest
+    container_name: evolution-api
+    restart: unless-stopped
+    networks:
+      - demo
+    ports:
+      - "8080:8080" # Porta da API
+      - "3001:3001" # Porta do WebSocket
+    environment:
+      - SERVER_PORT=${EVOLUTION_SERVER_PORT}
+      - WEBSOCKET_PORT=${EVOLUTION_WEBSOCKET_PORT}
+      - MONGODB_URI=mongodb://${MONGO_INITDB_ROOT_USERNAME}:${MONGO_INITDB_ROOT_PASSWORD}@mongodb:27017/?authSource=admin
+      - API_KEY=${EVOLUTION_API_KEY}
+      - STORE_MESSAGES=${EVOLUTION_STORE_MESSAGES}
+    volumes:
+      - evolution_storage:/app/store
+    depends_on:
+      - mongodb
