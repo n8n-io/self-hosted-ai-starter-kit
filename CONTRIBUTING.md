@@ -1,5 +1,10 @@
 # Self-hosted AI Starter Kit - Vision & Contribution Guidelines
 
+Awesome that you're interested in contributing to the Self-hosted AI Starter
+Kit! These specific guidelines are in addition to the general [n8n
+contribution
+guidelines](https://github.com/n8n-io/n8n/blob/master/CONTRIBUTING.md).
+
 ## Vision Statement
 
 The Self-hosted AI Starter Kit is designed to be **the fastest path from zero
@@ -103,6 +108,7 @@ Including:
   - Focus on a single feature or fix per PR.
 - Typo-Only PRs:
   - Typos are not sufficient justification for a PR and will be rejected.
+
 
 Remember: **It's better to be an excellent starting point than a mediocre
 everything-solution.**
