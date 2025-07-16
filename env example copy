@@ -1,0 +1,32 @@
+<<<<<<< HEAD
+# n8n Configuration - using PostgreSQL
+DB_TYPE=postgresdb
+DB_POSTGRESDB_HOST=postgres        # hostname of the Postgres container
+DB_POSTGRESDB_PORT=5432
+DB_POSTGRESDB_DATABASE=n8n_db
+DB_POSTGRESDB_USER=n8n_user
+DB_POSTGRESDB_PASSWORD=<<SSM_FETCHED>>   # (retrieved from SSM and inserted by Cloud-Init)
+
+# n8n security and URL settings
+N8N_ENCRYPTION_KEY=<<SSM_FETCHED>>       # (fetched from SSM - used to encrypt credentials)
+WEBHOOK_URL=https://n8n.geuse.io/        # base URL for n8n (behind ALB) for webhook callbacks
+N8N_USER_MANAGEMENT_JWT_SECRET=<<SSM_FETCHED>>
+N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true  # Enable community package tool usage
+
+# GPU flag (set by Cloud-Init if GPU is present)
+ENABLE_CUDA=1            # (Only present if a GPU is detected on the instance)
+=======
+POSTGRES_USER=root
+POSTGRES_PASSWORD=password
+POSTGRES_DB=n8n
+
+N8N_ENCRYPTION_KEY=super-secret-key
+N8N_USER_MANAGEMENT_JWT_SECRET=even-more-secret
+N8N_DEFAULT_BINARY_DATA_MODE=filesystem
+
+# For Mac users running OLLAMA locally
+# See https://github.com/n8n-io/self-hosted-ai-starter-kit?tab=readme-ov-file#for-mac--apple-silicon-users
+# OLLAMA_HOST=host.docker.internal:11434
+
+
+>>>>>>> 06319a57af662810230c1a63175baaf312b427a9
