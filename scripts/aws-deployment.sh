@@ -109,36 +109,36 @@ get_availability_zones() {
 fetch_ssm_params() {
     log "Fetching parameters from AWS SSM..."
     
-    # List of parameters to fetch (based on user's image)
+    # List of parameters to fetch
     params=(
-        "/faibulkit/n8n/COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE"
-        "/faibulkit/n8n/CORS_ALLOWED_ORIGINS"
-        "/faibulkit/n8n/CORS_ENABLE"
-        "/faibulkit/n8n/ENCRYPTION_KEY"
-        "/faibulkit/n8n/USER_MANAGEMENT_JWT_SECRET"
-        "/faibulkit/OPENAI_API_KEY"
-        "/faibulkit/POSTGRES_DB"
-        "/faibulkit/POSTGRES_PASSWORD"
-        "/faibulkit/POSTGRES_USER"
-        "/faibulkit/WEBHOOK_URL"
-        "/faibulkit/n8n_id"
+        "/aibuildkit/n8n/COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE"
+        "/aibuildkit/n8n/CORS_ALLOWED_ORIGINS"
+        "/aibuildkit/n8n/CORS_ENABLE"
+        "/aibuildkit/n8n/ENCRYPTION_KEY"
+        "/aibuildkit/n8n/USER_MANAGEMENT_JWT_SECRET"
+        "/aibuildkit/OPENAI_API_KEY"
+        "/aibuildkit/POSTGRES_DB"
+        "/aibuildkit/POSTGRES_PASSWORD"
+        "/aibuildkit/POSTGRES_USER"
+        "/aibuildkit/WEBHOOK_URL"
+        "/aibuildkit/n8n_id"
     )
     
     # Fetch parameters in batch
     SSM_PARAMS=$(aws ssm get-parameters --names "${params[@]}" --with-decryption --region "$AWS_REGION" --query "Parameters" --output json)
     
     # Export as environment variables
-    export N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/faibulkit/n8n/COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE") | .Value')
-    export N8N_CORS_ALLOWED_ORIGINS=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/faibulkit/n8n/CORS_ALLOWED_ORIGINS") | .Value')
-    export N8N_CORS_ENABLE=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/faibulkit/n8n/CORS_ENABLE") | .Value')
-    export N8N_ENCRYPTION_KEY=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/faibulkit/n8n/ENCRYPTION_KEY") | .Value')
-    export N8N_USER_MANAGEMENT_JWT_SECRET=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/faibulkit/n8n/USER_MANAGEMENT_JWT_SECRET") | .Value')
-    export OPENAI_API_KEY=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/faibulkit/OPENAI_API_KEY") | .Value')
-    export POSTGRES_DB=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/faibulkit/POSTGRES_DB") | .Value')
-    export POSTGRES_PASSWORD=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/faibulkit/POSTGRES_PASSWORD") | .Value')
-    export POSTGRES_USER=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/faibulkit/POSTGRES_USER") | .Value')
-    export WEBHOOK_URL=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/faibulkit/WEBHOOK_URL") | .Value')
-    export N8N_ID=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/faibulkit/n8n_id") | .Value')
+    export N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/aibuildkit/n8n/COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE") | .Value')
+    export N8N_CORS_ALLOWED_ORIGINS=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/aibuildkit/n8n/CORS_ALLOWED_ORIGINS") | .Value')
+    export N8N_CORS_ENABLE=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/aibuildkit/n8n/CORS_ENABLE") | .Value')
+    export N8N_ENCRYPTION_KEY=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/aibuildkit/n8n/ENCRYPTION_KEY") | .Value')
+    export N8N_USER_MANAGEMENT_JWT_SECRET=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/aibuildkit/n8n/USER_MANAGEMENT_JWT_SECRET") | .Value')
+    export OPENAI_API_KEY=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/aibuildkit/OPENAI_API_KEY") | .Value')
+    export POSTGRES_DB=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/aibuildkit/POSTGRES_DB") | .Value')
+    export POSTGRES_PASSWORD=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/aibuildkit/POSTGRES_PASSWORD") | .Value')
+    export POSTGRES_USER=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/aibuildkit/POSTGRES_USER") | .Value')
+    export WEBHOOK_URL=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/aibuildkit/WEBHOOK_URL") | .Value')
+    export N8N_ID=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/aibuildkit/n8n_id") | .Value')
     
     success "Fetched parameters from SSM"
 }
@@ -499,6 +499,10 @@ EOF
         --role-name "${STACK_NAME}-role" \
         --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
     
+    aws iam attach-role-policy \
+        --role-name "${STACK_NAME}-role" \
+        --policy-arn arn:aws:iam::aws:policy/AmazonEC2SSMFullAccess
+    
     # Create custom policy for EFS and cost optimization
     cat > custom-policy.json << EOF
 {
@@ -852,6 +856,9 @@ deploy_application() {
     
     log "Deploying AI Starter Kit application with SSM parameters..."
     
+    # Fetch SSM params with error handling
+    fetch_ssm_params || { error "Failed to fetch SSM parameters"; return 1; }
+    
     # Create deployment script using SSM vars
     cat > deploy-app.sh << EOF
 #!/bin/bash
@@ -865,7 +872,7 @@ sudo mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,ret
 echo "$EFS_DNS:/ /mnt/efs nfs4 nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,fsc,_netdev 0 0" | sudo tee -a /etc/fstab
 
 # Clone repository
-git clone https://github.com/your-repo/001-starter-kit.git /home/ubuntu/ai-starter-kit || true
+git clone https://github.com/michael-pittman/001-starter-kit.git /home/ubuntu/ai-starter-kit || true
 cd /home/ubuntu/ai-starter-kit
 
 # Create .env from SSM parameters
@@ -966,10 +973,9 @@ validate_deployment() {
     
     log "Validating deployment..."
     
-    # Wait for services to be ready
+    # Wait with backoff
     sleep 120
     
-    # Test endpoints
     local endpoints=(
         "http://$PUBLIC_IP:5678/healthz:n8n"
         "http://$PUBLIC_IP:11434/api/tags:Ollama"
@@ -981,17 +987,22 @@ validate_deployment() {
         IFS=':' read -r url service <<< "$endpoint_info"
         
         log "Testing $service at $url..."
-        
-        for i in {1..10}; do
+        local retry=0
+        local max_retries=10
+        local backoff=30
+        while [ $retry -lt $max_retries ]; do
             if curl -f -s "$url" > /dev/null 2>&1; then
                 success "$service is healthy"
                 break
-            elif [[ $i -eq 10 ]]; then
-                warning "$service might not be ready yet (this is normal during startup)"
-            else
-                sleep 30
             fi
+            retry=$((retry+1))
+            info "Attempt $retry/$max_retries: $service not ready, waiting ${backoff}s..."
+            sleep $backoff
+            backoff=$((backoff * 2))  # Exponential backoff
         done
+        if [ $retry -eq $max_retries ]; then
+            error "$service failed health check after $max_retries attempts"
+        fi
     done
     
     success "Deployment validation completed!"
@@ -1049,8 +1060,68 @@ display_results() {
 cleanup_on_error() {
     error "Deployment failed. Cleaning up resources..."
     
-    # Add cleanup logic here if needed
-    warning "Please manually check AWS console for any resources that need cleanup"
+    # Terminate instance
+    if [ ! -z "${INSTANCE_ID:-}" ]; then
+        aws ec2 terminate-instances --instance-ids "$INSTANCE_ID" --region "$AWS_REGION"
+        aws ec2 wait instance-terminated --instance-ids "$INSTANCE_ID" --region "$AWS_REGION"
+    fi
+    
+    # Delete launch template
+    aws ec2 delete-launch-template --launch-template-name "${STACK_NAME}-launch-template" --region "$AWS_REGION" || true
+    
+    # Delete target groups
+    if [ ! -z "${TARGET_GROUP_ARN:-}" ]; then
+        aws elbv2 delete-target-group --target-group-arn "$TARGET_GROUP_ARN" --region "$AWS_REGION"
+    fi
+    if [ ! -z "${QDRANT_TG_ARN:-}" ]; then
+        aws elbv2 delete-target-group --target-group-arn "$QDRANT_TG_ARN" --region "$AWS_REGION"
+    fi
+    
+    # Delete ALB
+    if [ ! -z "${ALB_ARN:-}" ]; then
+        aws elbv2 delete-load-balancer --load-balancer-arn "$ALB_ARN" --region "$AWS_REGION"
+    fi
+    
+    # Delete CloudFront distribution
+    if [ ! -z "${DISTRIBUTION_ID:-}" ]; then
+        # Disable first
+        ETAG=$(aws cloudfront get-distribution-config --id "$DISTRIBUTION_ID" --query ETag --output text)
+        CONFIG=$(aws cloudfront get-distribution-config --id "$DISTRIBUTION_ID" --query DistributionConfig --output json)
+        echo "$CONFIG" | jq '.Enabled = false' > disabled-config.json
+        aws cloudfront update-distribution --id "$DISTRIBUTION_ID" --distribution-config file://disabled-config.json --if-match "$ETAG"
+        aws cloudfront wait distribution-deployed --id "$DISTRIBUTION_ID"
+        aws cloudfront delete-distribution --id "$DISTRIBUTION_ID" --if-match "$(aws cloudfront get-distribution --id "$DISTRIBUTION_ID" --query ETag --output text)"
+    fi
+    
+    # Delete EFS mount targets and file system
+    if [ ! -z "${EFS_ID:-}" ]; then
+        MOUNT_TARGETS=$(aws efs describe-mount-targets --file-system-id "$EFS_ID" --query 'MountTargets[].MountTargetId' --output text)
+        for MT in $MOUNT_TARGETS; do
+            aws efs delete-mount-target --mount-target-id "$MT" --region "$AWS_REGION"
+        done
+        sleep 30  # Wait for deletion
+        aws efs delete-file-system --file-system-id "$EFS_ID" --region "$AWS_REGION"
+    fi
+    
+    # Delete security group
+    if [ ! -z "${SG_ID:-}" ]; then
+        aws ec2 delete-security-group --group-id "$SG_ID" --region "$AWS_REGION" || true
+    fi
+    
+    # Delete IAM resources
+    aws iam remove-role-from-instance-profile --instance-profile-name "${STACK_NAME}-instance-profile" --role-name "${STACK_NAME}-role" || true
+    aws iam delete-instance-profile --instance-profile-name "${STACK_NAME}-instance-profile" || true
+    aws iam detach-role-policy --role-name "${STACK_NAME}-role" --policy-arn "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy" || true
+    aws iam detach-role-policy --role-name "${STACK_NAME}-role" --policy-arn "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore" || true
+    aws iam detach-role-policy --role-name "${STACK_NAME}-role" --policy-arn "arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):policy/${STACK_NAME}-custom-policy" || true
+    aws iam delete-policy --policy-arn "arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):policy/${STACK_NAME}-custom-policy" || true
+    aws iam delete-role --role-name "${STACK_NAME}-role" || true
+    
+    # Delete key pair
+    aws ec2 delete-key-pair --key-name "$KEY_NAME" --region "$AWS_REGION" || true
+    rm -f "${KEY_NAME}.pem"
+    
+    warning "Cleanup completed. Please verify in AWS console."
 }
 
 # =============================================================================
