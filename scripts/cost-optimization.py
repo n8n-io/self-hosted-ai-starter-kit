@@ -763,6 +763,12 @@ def setup_scheduled_optimization():
         schedule.run_pending()
         time.sleep(30)  # Reduced from 60 to 30 seconds for better spot monitoring
 
+# Add scheduled scaling
+def setup_scheduled_scaling():
+    # Scale down during low-usage hours (e.g., 2-6 AM)
+    schedule.every().day.at("02:00").do(optimizer.implement_auto_scaling) # Assuming optimizer is defined globally or passed
+    schedule.every().day.at("06:00").do(optimizer.implement_auto_scaling) # Assuming optimizer is defined globally or passed
+
 # =============================================================================
 # CLI INTERFACE
 # =============================================================================
@@ -793,6 +799,7 @@ def main():
         print(json.dumps(report, indent=2))
     elif args.action == 'schedule':
         setup_scheduled_optimization()
+        setup_scheduled_scaling() # Call the new function here
 
 if __name__ == "__main__":
     main() 
