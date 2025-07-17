@@ -105,6 +105,44 @@ get_availability_zones() {
         --output text | head -2
 }
 
+# Add SSM fetch function after utility functions
+fetch_ssm_params() {
+    log "Fetching parameters from AWS SSM..."
+    
+    # List of parameters to fetch (based on user's image)
+    params=(
+        "/faibulkit/n8n/COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE"
+        "/faibulkit/n8n/CORS_ALLOWED_ORIGINS"
+        "/faibulkit/n8n/CORS_ENABLE"
+        "/faibulkit/n8n/ENCRYPTION_KEY"
+        "/faibulkit/n8n/USER_MANAGEMENT_JWT_SECRET"
+        "/faibulkit/OPENAI_API_KEY"
+        "/faibulkit/POSTGRES_DB"
+        "/faibulkit/POSTGRES_PASSWORD"
+        "/faibulkit/POSTGRES_USER"
+        "/faibulkit/WEBHOOK_URL"
+        "/faibulkit/n8n_id"
+    )
+    
+    # Fetch parameters in batch
+    SSM_PARAMS=$(aws ssm get-parameters --names "${params[@]}" --with-decryption --region "$AWS_REGION" --query "Parameters" --output json)
+    
+    # Export as environment variables
+    export N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/faibulkit/n8n/COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE") | .Value')
+    export N8N_CORS_ALLOWED_ORIGINS=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/faibulkit/n8n/CORS_ALLOWED_ORIGINS") | .Value')
+    export N8N_CORS_ENABLE=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/faibulkit/n8n/CORS_ENABLE") | .Value')
+    export N8N_ENCRYPTION_KEY=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/faibulkit/n8n/ENCRYPTION_KEY") | .Value')
+    export N8N_USER_MANAGEMENT_JWT_SECRET=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/faibulkit/n8n/USER_MANAGEMENT_JWT_SECRET") | .Value')
+    export OPENAI_API_KEY=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/faibulkit/OPENAI_API_KEY") | .Value')
+    export POSTGRES_DB=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/faibulkit/POSTGRES_DB") | .Value')
+    export POSTGRES_PASSWORD=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/faibulkit/POSTGRES_PASSWORD") | .Value')
+    export POSTGRES_USER=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/faibulkit/POSTGRES_USER") | .Value')
+    export WEBHOOK_URL=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/faibulkit/WEBHOOK_URL") | .Value')
+    export N8N_ID=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/faibulkit/n8n_id") | .Value')
+    
+    success "Fetched parameters from SSM"
+}
+
 # =============================================================================
 # INFRASTRUCTURE SETUP
 # =============================================================================
@@ -535,6 +573,68 @@ launch_spot_instance() {
     echo "$INSTANCE_ID:$PUBLIC_IP"
 }
 
+# Add CloudFront setup after instance launch
+setup_cloudfront() {
+    local PUBLIC_IP="$1"
+    log "Setting up CloudFront distribution for geuse.io..."
+    
+    # Create origin access identity
+    OAI_ID=$(aws cloudfront create-cloud-front-origin-access-identity --cloud-front-origin-access-identity-config CallerReference="$(date +%s)" Comment="AI Starter Kit OAI" --query 'CloudFrontOriginAccessIdentity.Id' --output text)
+    
+    # Create distribution
+    DISTRIBUTION_ID=$(aws cloudfront create-distribution --distribution-config '{
+        "CallerReference": "'"$(date +%s)"'",
+        "Comment": "AI Starter Kit Distribution",
+        "Enabled": true,
+        "Origins": {
+            "Quantity": 1,
+            "Items": [{
+                "Id": "EC2Origin",
+                "DomainName": "'"$PUBLIC_IP"'",
+                "CustomOriginConfig": {
+                    "HTTPPort": 80,
+                    "HTTPSPort": 443,
+                    "OriginProtocolPolicy": "http-only",
+                    "OriginSslProtocols": {"Quantity": 1, "Items": ["TLSv1.2"]},
+                    "OriginReadTimeout": 30,
+                    "OriginKeepaliveTimeout": 5
+                }
+            }]
+        },
+        "DefaultCacheBehavior": {
+            "TargetOriginId": "EC2Origin",
+            "ViewerProtocolPolicy": "redirect-to-https",
+            "AllowedMethods": {"Quantity": 7, "Items": ["HEAD", "DELETE", "POST", "GET", "OPTIONS", "PUT", "PATCH"], "CachedMethods": {"Quantity": 3, "Items": ["HEAD", "GET", "OPTIONS"]}},
+            "Compress": true,
+            "ForwardedValues": {
+                "QueryString": true,
+                "Cookies": {"Forward": "all"},
+                "Headers": {"Quantity": 1, "Items": ["*"]}
+            },
+            "MinTTL": 0,
+            "DefaultTTL": 3600,
+            "MaxTTL": 86400
+        },
+        "ViewerCertificate": {
+            "CloudFrontDefaultCertificate": true
+        },
+        "Aliases": {
+            "Quantity": 1,
+            "Items": ["geuse.io"]
+        }
+    }' --query 'Distribution.Id' --output text)
+    
+    # Wait for distribution to deploy
+    aws cloudfront wait distribution-deployed --id "$DISTRIBUTION_ID"
+    
+    DISTRIBUTION_DOMAIN=$(aws cloudfront get-distribution --id "$DISTRIBUTION_ID" --query 'Distribution.DomainName' --output text)
+    
+    success "CloudFront distribution created: $DISTRIBUTION_DOMAIN"
+    echo "Point your CNAME record for geuse.io to $DISTRIBUTION_DOMAIN"
+    
+    export DISTRIBUTION_DOMAIN
+}
+
 # =============================================================================
 # APPLICATION DEPLOYMENT
 # =============================================================================
@@ -562,9 +662,9 @@ deploy_application() {
     local EFS_DNS="$2"
     local INSTANCE_ID="$3"
     
-    log "Deploying AI Starter Kit application..."
+    log "Deploying AI Starter Kit application with SSM parameters..."
     
-    # Create deployment script
+    # Create deployment script using SSM vars
     cat > deploy-app.sh << EOF
 #!/bin/bash
 set -euo pipefail
@@ -580,36 +680,25 @@ echo "$EFS_DNS:/ /mnt/efs nfs4 nfsvers=4.1,rsize=1048576,wsize=1048576,hard,time
 git clone https://github.com/your-repo/001-starter-kit.git /home/ubuntu/ai-starter-kit || true
 cd /home/ubuntu/ai-starter-kit
 
-# Create .env file
+# Create .env from SSM parameters
 cat > .env << 'EOFENV'
-# Database Configuration
-POSTGRES_DB=n8n
-POSTGRES_USER=n8n
-POSTGRES_PASSWORD=ai-starter-secure-$(openssl rand -hex 16)
-
-# n8n Configuration
-N8N_ENCRYPTION_KEY=$(openssl rand -hex 32)
-N8N_USER_MANAGEMENT_JWT_SECRET=$(openssl rand -hex 32)
+POSTGRES_DB=$POSTGRES_DB
+POSTGRES_USER=$POSTGRES_USER
+POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+N8N_ENCRYPTION_KEY=$N8N_ENCRYPTION_KEY
+N8N_USER_MANAGEMENT_JWT_SECRET=$N8N_USER_MANAGEMENT_JWT_SECRET
 N8N_HOST=0.0.0.0
 N8N_PORT=5678
-WEBHOOK_URL=http://$PUBLIC_IP:5678
-
-# EFS Configuration
+WEBHOOK_URL=$WEBHOOK_URL
 EFS_DNS=$EFS_DNS
-
-# Instance Information
 INSTANCE_ID=$INSTANCE_ID
 INSTANCE_TYPE=$INSTANCE_TYPE
 AWS_DEFAULT_REGION=$AWS_REGION
-
-# API Keys (set these manually if you have them)
-OPENAI_API_KEY=
-ANTHROPIC_API_KEY=
-DEEPSEEK_API_KEY=
-GROQ_API_KEY=
-TOGETHER_API_KEY=
-MISTRAL_API_KEY=
-GEMINI_API_TOKEN=
+OPENAI_API_KEY=$OPENAI_API_KEY
+N8N_CORS_ENABLE=$N8N_CORS_ENABLE
+N8N_CORS_ALLOWED_ORIGINS=$N8N_CORS_ALLOWED_ORIGINS
+N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=$N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE
+N8N_ID=$N8N_ID
 EOFENV
 
 # Start GPU-optimized services
@@ -617,13 +706,6 @@ export EFS_DNS=$EFS_DNS
 sudo -E docker-compose -f docker-compose.gpu-optimized.yml up -d
 
 echo "Deployment completed!"
-echo "Services starting up - this may take a few minutes..."
-echo ""
-echo "Access URLs:"
-echo "  n8n: http://$PUBLIC_IP:5678"
-echo "  Crawl4AI: http://$PUBLIC_IP:11235"
-echo "  Qdrant: http://$PUBLIC_IP:6333"
-echo "  Ollama: http://$PUBLIC_IP:11434"
 EOF
 
     # Copy application files and deploy
@@ -768,6 +850,8 @@ display_results() {
     echo -e "  - Auto-scaling based on utilization"
     echo -e "  - Cost alerts configured"
     echo ""
+    echo -e "  Domain: geuse.io (via CloudFront: $DISTRIBUTION_DOMAIN)"
+    echo ""
 }
 
 # =============================================================================
@@ -817,6 +901,8 @@ EOF
     INSTANCE_INFO=$(launch_spot_instance "$SG_ID" "$EFS_DNS")
     INSTANCE_ID=$(echo "$INSTANCE_INFO" | cut -d: -f1)
     PUBLIC_IP=$(echo "$INSTANCE_INFO" | cut -d: -f2)
+
+    setup_cloudfront "$PUBLIC_IP"
     
     wait_for_instance_ready "$PUBLIC_IP"
     deploy_application "$PUBLIC_IP" "$EFS_DNS" "$INSTANCE_ID"
