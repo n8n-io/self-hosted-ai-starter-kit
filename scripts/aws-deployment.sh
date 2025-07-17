@@ -316,6 +316,40 @@ create_efs() {
     echo "$EFS_DNS"
 }
 
+# Add qdrant target group creation after n8n target group
+create_qdrant_target_group() {
+    local SG_ID="$1"
+    local INSTANCE_ID="$2"
+    
+    log "Creating target group for qdrant..."
+    
+    QDRANT_TG_ARN=$(aws elbv2 create-target-group \
+        --name "${STACK_NAME}-qdrant-tg" \
+        --protocol HTTP \
+        --port 6333 \
+        --vpc-id "$(aws ec2 describe-vpcs --filters "Name=is-default,Values=true" --query 'Vpcs[0].VpcId' --output text)" \
+        --health-check-protocol HTTP \
+        --health-check-port 6333 \
+        --health-check-path /healthz \
+        --health-check-interval-seconds 30 \
+        --health-check-timeout-seconds 10 \
+        --healthy-threshold-count 2 \
+        --unhealthy-threshold-count 2 \
+        --target-type instance \
+        --region "$AWS_REGION" \
+        --query 'TargetGroups[0].TargetGroupArn' \
+        --output text)
+    
+    # Register instance to qdrant target group
+    aws elbv2 register-targets \
+        --target-group-arn "$QDRANT_TG_ARN" \
+        --targets Id="$INSTANCE_ID" Port=6333 \
+        --region "$AWS_REGION"
+    
+    success "Created qdrant target group: $QDRANT_TG_ARN"
+    echo "$QDRANT_TG_ARN"
+}
+
 # =============================================================================
 # SPOT INSTANCE MANAGEMENT
 # =============================================================================
@@ -635,6 +669,160 @@ setup_cloudfront() {
     export DISTRIBUTION_DOMAIN
 }
 
+# Update create_alb function to add qdrant listener rule
+create_alb() {
+    local SG_ID="$1"
+    local TARGET_GROUP_ARN="$2"
+    local QDRANT_TG_ARN="$3"
+    
+    log "Creating Application Load Balancer..."
+    
+    # Check if ALB exists
+    ALB_ARN=$(aws elbv2 describe-load-balancers \
+        --names "${STACK_NAME}-alb" \
+        --region "$AWS_REGION" \
+        --query 'LoadBalancers[0].LoadBalancerArn' \
+        --output text 2>/dev/null || echo "None")
+    
+    if [[ "$ALB_ARN" != "None" ]]; then
+        warning "ALB already exists: $ALB_ARN"
+        ALB_DNS=$(aws elbv2 describe-load-balancers \
+            --load-balancer-arns "$ALB_ARN" \
+            --region "$AWS_REGION" \
+            --query 'LoadBalancers[0].DNSName' \
+            --output text)
+        echo "$ALB_DNS"
+        return 0
+    fi
+    
+    # Get subnets
+    SUBNET_IDS=$(aws ec2 describe-subnets \
+        --filters "Name=default-for-az,Values=true" \
+        --region "$AWS_REGION" \
+        --query 'Subnets[].SubnetId' \
+        --output text)
+    
+    # Create ALB
+    ALB_ARN=$(aws elbv2 create-load-balancer \
+        --name "${STACK_NAME}-alb" \
+        --type application \
+        --scheme internet-facing \
+        --subnets $SUBNET_IDS \
+        --security-groups "$SG_ID" \
+        --region "$AWS_REGION" \
+        --query 'LoadBalancers[0].LoadBalancerArn' \
+        --output text)
+    
+    # Create listener
+    LISTENER_ARN=$(aws elbv2 create-listener \
+        --load-balancer-arn "$ALB_ARN" \
+        --protocol HTTP \
+        --port 80 \
+        --default-actions Type=forward,TargetGroupArn="$TARGET_GROUP_ARN" \
+        --region "$AWS_REGION" \
+        --query 'Listeners[0].ListenerArn' \
+        --output text)
+    
+    # Add host-header rule for qdrant
+    aws elbv2 create-rule \
+        --listener-arn "$LISTENER_ARN" \
+        --priority 10 \
+        --conditions Field=host-header,Values=qdrant.geuse.io \
+        --actions Type=forward,TargetGroupArn="$QDRANT_TG_ARN" \
+        --region "$AWS_REGION"
+    
+    # Get ALB DNS
+    ALB_DNS=$(aws elbv2 describe-load-balancers \
+        --load-balancer-arns "$ALB_ARN" \
+        --region "$AWS_REGION" \
+        --query 'LoadBalancers[0].DNSName' \
+        --output text)
+    
+    success "Created ALB: $ALB_DNS"
+    echo "$ALB_DNS"
+}
+
+# Update setup_cloudfront to include qdrant subdomain and cache behavior
+setup_cloudfront() {
+    local ALB_DNS="$1"
+    log "Setting up CloudFront distribution with subdomains..."
+    
+    # Create origin access identity
+    OAI_ID=$(aws cloudfront create-cloud-front-origin-access-identity --cloud-front-origin-access-identity-config CallerReference="$(date +%s)" Comment="AI Starter Kit OAI" --query 'CloudFrontOriginAccessIdentity.Id' --output text)
+    
+    # Create distribution with multiple aliases and behaviors
+    DISTRIBUTION_ID=$(aws cloudfront create-distribution --distribution-config '{
+        "CallerReference": "'"$(date +%s)"'",
+        "Comment": "AI Starter Kit Distribution with subdomains",
+        "Enabled": true,
+        "Origins": {
+            "Quantity": 1,
+            "Items": [{
+                "Id": "ALBOrigin",
+                "DomainName": "'"$ALB_DNS"'",
+                "CustomOriginConfig": {
+                    "HTTPPort": 80,
+                    "HTTPSPort": 443,
+                    "OriginProtocolPolicy": "http-only",
+                    "OriginSslProtocols": {"Quantity": 1, "Items": ["TLSv1.2"]},
+                    "OriginReadTimeout": 30,
+                    "OriginKeepaliveTimeout": 5
+                }
+            }]
+        },
+        "DefaultCacheBehavior": {
+            "TargetOriginId": "ALBOrigin",
+            "ViewerProtocolPolicy": "redirect-to-https",
+            "AllowedMethods": {"Quantity": 7, "Items": ["HEAD", "DELETE", "POST", "GET", "OPTIONS", "PUT", "PATCH"], "CachedMethods": {"Quantity": 3, "Items": ["HEAD", "GET", "OPTIONS"]}},
+            "Compress": true,
+            "ForwardedValues": {
+                "QueryString": true,
+                "Cookies": {"Forward": "all"},
+                "Headers": {"Quantity": 1, "Items": ["*"]},
+                "QueryStringCacheKeys": {"Quantity": 0}
+            },
+            "MinTTL": 0,
+            "DefaultTTL": 0,
+            "MaxTTL": 0
+        },
+        "CacheBehaviors": {
+            "Quantity": 1,
+            "Items": [{
+                "PathPattern": "*",
+                "TargetOriginId": "ALBOrigin",
+                "ViewerProtocolPolicy": "redirect-to-https",
+                "AllowedMethods": {"Quantity": 7, "Items": ["HEAD", "DELETE", "POST", "GET", "OPTIONS", "PUT", "PATCH"], "CachedMethods": {"Quantity": 3, "Items": ["HEAD", "GET", "OPTIONS"]}},
+                "Compress": true,
+                "ForwardedValues": {
+                    "QueryString": true,
+                    "Cookies": {"Forward": "all"},
+                    "Headers": {"Quantity": 2, "Items": ["Host", "*"]}
+                },
+                "MinTTL": 0,
+                "DefaultTTL": 0,
+                "MaxTTL": 0
+            }]
+        },
+        "ViewerCertificate": {
+            "CloudFrontDefaultCertificate": true
+        },
+        "Aliases": {
+            "Quantity": 2,
+            "Items": ["n8n.geuse.io", "qdrant.geuse.io"]
+        }
+    }' --query 'Distribution.Id' --output text)
+    
+    # Wait for distribution to deploy
+    aws cloudfront wait distribution-deployed --id "$DISTRIBUTION_ID"
+    
+    DISTRIBUTION_DOMAIN=$(aws cloudfront get-distribution --id "$DISTRIBUTION_ID" --query 'Distribution.DomainName' --output text)
+    
+    success "CloudFront distribution created: $DISTRIBUTION_DOMAIN"
+    echo "Update DNS: Point n8n.geuse.io and qdrant.geuse.io CNAMEs to $DISTRIBUTION_DOMAIN"
+    
+    export DISTRIBUTION_DOMAIN
+}
+
 # =============================================================================
 # APPLICATION DEPLOYMENT
 # =============================================================================
@@ -902,7 +1090,11 @@ EOF
     INSTANCE_ID=$(echo "$INSTANCE_INFO" | cut -d: -f1)
     PUBLIC_IP=$(echo "$INSTANCE_INFO" | cut -d: -f2)
 
-    setup_cloudfront "$PUBLIC_IP"
+    TARGET_GROUP_ARN=$(create_target_group "$SG_ID" "$INSTANCE_ID")
+    QDRANT_TG_ARN=$(create_qdrant_target_group "$SG_ID" "$INSTANCE_ID")
+    ALB_DNS=$(create_alb "$SG_ID" "$TARGET_GROUP_ARN" "$QDRANT_TG_ARN")
+    
+    setup_cloudfront "$ALB_DNS"
     
     wait_for_instance_ready "$PUBLIC_IP"
     deploy_application "$PUBLIC_IP" "$EFS_DNS" "$INSTANCE_ID"
