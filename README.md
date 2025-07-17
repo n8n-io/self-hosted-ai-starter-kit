@@ -21,7 +21,7 @@
 
 ### 🤖 **AI-Powered Workflows**
 - **n8n** - Visual workflow automation with AI agents
-- **Ollama** - Local LLM inference (DeepSeek-R1 8B, Qwen2.5-VL 7B)
+- **Ollama** - Local LLM inference (DeepSeek-R1:8B, Qwen2.5-VL:7B)
 - **Qdrant** - High-performance vector database
 - **Crawl4AI** - Intelligent web scraping with LLM extraction
 
@@ -50,7 +50,7 @@ graph TB
         EFS[Elastic File System]
     end
     
-    subgraph "GPU Instance (g4dn.xlarge)"
+    subgraph "GPU Instance"
         subgraph "Docker Containers"
             N8N[n8n Workflows]
             OLLAMA[Ollama LLMs]
@@ -65,8 +65,8 @@ graph TB
     
     CF --> ALB
     ALB --> ASG
-    ASG --> GPU Instance
-    GPU Instance --> EFS
+    ASG --> GPU
+    GPU --> EFS
     OLLAMA --> GPU
     MONITOR --> ASG
 ```
