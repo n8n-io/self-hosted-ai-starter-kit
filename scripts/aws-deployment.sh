@@ -445,12 +445,22 @@ EOF
             \"IamInstanceProfile\": {
                 \"Name\": \"${STACK_NAME}-instance-profile\"
             },
+            \"InstanceMarketOptions\": {
+                \"MarketType\": \"spot\",
+                \"SpotOptions\": {
+                    \"MaxPrice\": \"$MAX_SPOT_PRICE\",
+                    \"SpotInstanceType\": \"one-time\",
+                    \"InstanceInterruptionBehavior\": \"terminate\"
+                }
+            },
             \"TagSpecifications\": [
                 {
                     \"ResourceType\": \"instance\",
                     \"Tags\": [
                         {\"Key\": \"Name\", \"Value\": \"${STACK_NAME}-gpu-instance\"},
-                        {\"Key\": \"Project\", \"Value\": \"$PROJECT_NAME\"}
+                        {\"Key\": \"Project\", \"Value\": \"$PROJECT_NAME\"},
+                        {\"Key\": \"SpotInstance\", \"Value\": \"true\"},
+                        {\"Key\": \"CostOptimized\", \"Value\": \"true\"}
                     ]
                 }
             ]
@@ -827,6 +837,102 @@ setup_cloudfront() {
     export DISTRIBUTION_DOMAIN
 }
 
+create_auto_scaling_group() {
+    local SG_ID="$1"
+    local EFS_DNS="$2"
+    
+    log "Creating Auto Scaling Group for cost optimization..."
+    
+    # Check if ASG already exists
+    if aws autoscaling describe-auto-scaling-groups \
+        --auto-scaling-group-names "${STACK_NAME}-asg" \
+        --region "$AWS_REGION" &> /dev/null; then
+        warning "Auto Scaling Group already exists"
+        echo "${STACK_NAME}-asg"
+        return 0
+    fi
+    
+    # Get subnets for ASG
+    SUBNET_IDS=$(aws ec2 describe-subnets \
+        --filters "Name=default-for-az,Values=true" \
+        --region "$AWS_REGION" \
+        --query 'Subnets[0:2].SubnetId' \
+        --output text | tr '\t' ',')
+    
+    # Create Auto Scaling Group
+    aws autoscaling create-auto-scaling-group \
+        --auto-scaling-group-name "${STACK_NAME}-asg" \
+        --launch-template "LaunchTemplateName=${STACK_NAME}-launch-template,Version=\$Latest" \
+        --min-size 1 \
+        --max-size 3 \
+        --desired-capacity 1 \
+        --vpc-zone-identifier "$SUBNET_IDS" \
+        --health-check-type EC2 \
+        --health-check-grace-period 300 \
+        --default-cooldown 300 \
+        --tags \
+            "Key=Name,Value=${STACK_NAME}-asg-instance,PropagateAtLaunch=true,ResourceId=${STACK_NAME}-asg,ResourceType=auto-scaling-group" \
+            "Key=Project,Value=$PROJECT_NAME,PropagateAtLaunch=true,ResourceId=${STACK_NAME}-asg,ResourceType=auto-scaling-group" \
+            "Key=CostOptimized,Value=true,PropagateAtLaunch=true,ResourceId=${STACK_NAME}-asg,ResourceType=auto-scaling-group" \
+        --region "$AWS_REGION"
+    
+    # Create scaling policies for cost optimization
+    
+    # Scale up policy (when GPU utilization > 80%)
+    SCALE_UP_POLICY_ARN=$(aws autoscaling put-scaling-policy \
+        --auto-scaling-group-name "${STACK_NAME}-asg" \
+        --policy-name "${STACK_NAME}-scale-up" \
+        --policy-type TargetTrackingScaling \
+        --target-tracking-configuration '{
+            "TargetValue": 75.0,
+            "CustomizedMetricSpecification": {
+                "MetricName": "GPUUtilization",
+                "Namespace": "GPU/Monitoring",
+                "Statistic": "Average"
+            },
+            "ScaleOutCooldown": 300,
+            "ScaleInCooldown": 300
+        }' \
+        --region "$AWS_REGION" \
+        --query 'PolicyARN' \
+        --output text)
+    
+    # Create CloudWatch alarm for high GPU utilization
+    aws cloudwatch put-metric-alarm \
+        --alarm-name "${STACK_NAME}-high-gpu-utilization" \
+        --alarm-description "Scale up when GPU utilization is high" \
+        --metric-name GPUUtilization \
+        --namespace GPU/Monitoring \
+        --statistic Average \
+        --period 300 \
+        --threshold 80 \
+        --comparison-operator GreaterThanThreshold \
+        --evaluation-periods 2 \
+        --alarm-actions "$SCALE_UP_POLICY_ARN" \
+        --region "$AWS_REGION"
+    
+    # Create CloudWatch alarm for low GPU utilization  
+    aws cloudwatch put-metric-alarm \
+        --alarm-name "${STACK_NAME}-low-gpu-utilization" \
+        --alarm-description "Scale down when GPU utilization is low" \
+        --metric-name GPUUtilization \
+        --namespace GPU/Monitoring \
+        --statistic Average \
+        --period 900 \
+        --threshold 20 \
+        --comparison-operator LessThanThreshold \
+        --evaluation-periods 3 \
+        --treat-missing-data notBreaching \
+        --region "$AWS_REGION"
+    
+    # Wait for ASG to stabilize
+    log "Waiting for Auto Scaling Group to stabilize..."
+    sleep 30
+    
+    success "Created Auto Scaling Group: ${STACK_NAME}-asg"
+    echo "${STACK_NAME}-asg"
+}
+
 # =============================================================================
 # APPLICATION DEPLOYMENT
 # =============================================================================
@@ -1157,9 +1263,38 @@ EOF
     
     create_launch_template "$SG_ID"
     
-    INSTANCE_INFO=$(launch_spot_instance "$SG_ID" "$EFS_DNS")
-    INSTANCE_ID=$(echo "$INSTANCE_INFO" | cut -d: -f1)
-    PUBLIC_IP=$(echo "$INSTANCE_INFO" | cut -d: -f2)
+    # Create Auto Scaling Group for cost optimization
+    ASG_NAME=$(create_auto_scaling_group "$SG_ID" "$EFS_DNS")
+    
+    # Launch initial spot instance via ASG
+    log "Waiting for ASG to launch initial instance..."
+    sleep 60
+    
+    # Get instance info from ASG
+    INSTANCE_ID=$(aws autoscaling describe-auto-scaling-groups \
+        --auto-scaling-group-names "$ASG_NAME" \
+        --region "$AWS_REGION" \
+        --query 'AutoScalingGroups[0].Instances[0].InstanceId' \
+        --output text)
+    
+    # Wait for instance to be running
+    if [ "$INSTANCE_ID" != "None" ] && [ -n "$INSTANCE_ID" ]; then
+        log "Waiting for ASG instance to be running..."
+        aws ec2 wait instance-running --instance-ids "$INSTANCE_ID" --region "$AWS_REGION"
+        
+        # Get public IP
+        PUBLIC_IP=$(aws ec2 describe-instances \
+            --instance-ids "$INSTANCE_ID" \
+            --region "$AWS_REGION" \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' \
+            --output text)
+    else
+        # Fallback to direct spot instance launch if ASG fails
+        warning "ASG instance not available, falling back to direct spot launch"
+        INSTANCE_INFO=$(launch_spot_instance "$SG_ID" "$EFS_DNS")
+        INSTANCE_ID=$(echo "$INSTANCE_INFO" | cut -d: -f1)
+        PUBLIC_IP=$(echo "$INSTANCE_INFO" | cut -d: -f2)
+    fi
 
     TARGET_GROUP_ARN=$(create_target_group "$SG_ID" "$INSTANCE_ID")
     QDRANT_TG_ARN=$(create_qdrant_target_group "$SG_ID" "$INSTANCE_ID")

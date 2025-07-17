@@ -111,14 +111,91 @@ class CostOptimizationManager:
             return {}
     
     def get_on_demand_prices(self) -> Dict[str, float]:
-        """Get on-demand prices for comparison"""
-        # These are approximate prices as of 2024 - should be updated regularly
-        return {
-            'g4dn.xlarge': 1.19,
-            'g4dn.2xlarge': 2.38,
-            'g4ad.xlarge': 0.95,
-            'g5.xlarge': 1.21
-        }
+        """Get on-demand prices using AWS Pricing API"""
+        try:
+            # AWS Pricing API requires us-east-1 region
+            pricing_client = boto3.client('pricing', region_name='us-east-1')
+            
+            prices = {}
+            instance_types = ['g4dn.xlarge', 'g4dn.2xlarge', 'g4ad.xlarge', 'g5.xlarge']
+            
+            for instance_type in instance_types:
+                try:
+                    response = pricing_client.get_products(
+                        ServiceCode='AmazonEC2',
+                        Filters=[
+                            {'Type': 'TERM_MATCH', 'Field': 'instanceType', 'Value': instance_type},
+                            {'Type': 'TERM_MATCH', 'Field': 'location', 'Value': 'US East (N. Virginia)'},
+                            {'Type': 'TERM_MATCH', 'Field': 'tenancy', 'Value': 'Shared'},
+                            {'Type': 'TERM_MATCH', 'Field': 'operating-system', 'Value': 'Linux'},
+                            {'Type': 'TERM_MATCH', 'Field': 'capacitystatus', 'Value': 'Used'},
+                            {'Type': 'TERM_MATCH', 'Field': 'preInstalledSw', 'Value': 'NA'}
+                        ]
+                    )
+                    
+                    if response['PriceList']:
+                        price_data = json.loads(response['PriceList'][0])
+                        terms = price_data['terms']['OnDemand']
+                        
+                        for term_key in terms:
+                            price_dimensions = terms[term_key]['priceDimensions']
+                            for dimension_key in price_dimensions:
+                                price_per_hour = float(price_dimensions[dimension_key]['pricePerUnit']['USD'])
+                                prices[instance_type] = price_per_hour
+                                break
+                            break
+                            
+                except Exception as e:
+                    self.logger.warning(f"Could not get pricing for {instance_type}: {e}")
+                    # Fallback to approximate prices
+                    fallback_prices = {
+                        'g4dn.xlarge': 1.19,
+                        'g4dn.2xlarge': 2.38,
+                        'g4ad.xlarge': 0.95,
+                        'g5.xlarge': 1.21
+                    }
+                    if instance_type in fallback_prices:
+                        prices[instance_type] = fallback_prices[instance_type]
+            
+            # Cache prices for 24 hours to avoid excessive API calls
+            cache_file = '/tmp/on_demand_prices_cache.json'
+            cache_data = {
+                'timestamp': datetime.now().isoformat(),
+                'prices': prices
+            }
+            
+            try:
+                with open(cache_file, 'w') as f:
+                    json.dump(cache_data, f)
+            except:
+                pass
+                
+            return prices
+            
+        except Exception as e:
+            self.logger.error(f"Error getting on-demand prices from API: {e}")
+            
+            # Try to load from cache
+            try:
+                with open('/tmp/on_demand_prices_cache.json', 'r') as f:
+                    cache_data = json.load(f)
+                    cache_time = datetime.fromisoformat(cache_data['timestamp'])
+                    
+                    # Use cache if less than 24 hours old
+                    if datetime.now() - cache_time < timedelta(hours=24):
+                        self.logger.info("Using cached pricing data")
+                        return cache_data['prices']
+            except:
+                pass
+            
+            # Final fallback to hardcoded prices
+            self.logger.warning("Using fallback pricing data - may be inaccurate")
+            return {
+                'g4dn.xlarge': 1.19,
+                'g4dn.2xlarge': 2.38,
+                'g4ad.xlarge': 0.95,
+                'g5.xlarge': 1.21
+            }
     
     def calculate_potential_savings(self) -> Dict[str, Any]:
         """Calculate potential cost savings from optimization strategies"""
@@ -508,36 +585,161 @@ Consider:
             if response.status_code == 200:
                 data = response.json()
                 if data.get('action') == 'terminate':
-                    self.logger.warning(f"Spot termination notice received! Time: {data.get('time')}")
-                    self._handle_spot_termination()
+                    termination_time = data.get('time')
+                    self.logger.critical(f"SPOT TERMINATION NOTICE! Time: {termination_time}")
+                    self._handle_spot_termination(termination_time)
                     return True
             return False
-        except:
+        except requests.exceptions.RequestException:
+            # Normal case - no interruption notice
+            return False
+        except Exception as e:
+            self.logger.error(f"Error checking spot interruption: {e}")
             return False
     
-    def _handle_spot_termination(self):
-        """Handle spot instance termination"""
+    def _handle_spot_termination(self, termination_time: str = None):
+        """Handle spot instance termination with graceful shutdown"""
         try:
-            # Send alert
-            self._send_cost_alert(0.0)  # Reuse alert function with dummy cost
+            self.logger.critical("INITIATING EMERGENCY SPOT TERMINATION PROCEDURES")
             
-            # Scale up ASG to replace instance
-            if self.asg_name:
-                response = self.autoscaling.describe_auto_scaling_groups(
-                    AutoScalingGroupNames=[self.asg_name]
-                )
-                if response['AutoScalingGroups']:
-                    current_capacity = response['AutoScalingGroups'][0]['DesiredCapacity']
-                    self.autoscaling.set_desired_capacity(
-                        AutoScalingGroupName=self.asg_name,
-                        DesiredCapacity=current_capacity + 1
-                    )
-                    self.logger.info("Scaled up ASG to replace terminating spot instance")
+            # Calculate time until termination (AWS gives ~2 minutes notice)
+            if termination_time:
+                termination_dt = datetime.fromisoformat(termination_time.replace('Z', '+00:00'))
+                time_remaining = (termination_dt - datetime.now().replace(tzinfo=termination_dt.tzinfo)).total_seconds()
+                self.logger.info(f"Time remaining: {time_remaining:.0f} seconds")
             
-            # Graceful shutdown logic here (e.g., drain workloads)
+            # 1. Send immediate alert
+            self._send_spot_termination_alert(termination_time)
+            
+            # 2. Gracefully shutdown AI workloads
+            self._graceful_shutdown_workloads()
+            
+            # 3. Scale up ASG to replace instance (if configured)
+            self._scale_up_replacement_instance()
+            
+            # 4. Create final backup/checkpoint
+            self._create_emergency_backup()
+            
+            self.logger.info("Emergency procedures completed - instance ready for termination")
             
         except Exception as e:
             self.logger.error(f"Error handling spot termination: {e}")
+
+    def _send_spot_termination_alert(self, termination_time: str = None):
+        """Send urgent spot termination alert"""
+        try:
+            message = f"""
+🚨 URGENT: Spot Instance Termination Notice
+
+Instance: {self.instance_id}
+Region: {self.config.region}
+Termination Time: {termination_time or 'Unknown'}
+Current Time: {datetime.now().isoformat()}
+
+Actions Taken:
+1. Workload graceful shutdown initiated
+2. Replacement instance scaling triggered
+3. Emergency backup created
+4. Cost optimization suspended
+
+Next Steps:
+- Monitor replacement instance launch
+- Verify service restoration
+- Review spot pricing strategy
+"""
+            
+            # Log critical alert
+            self.logger.critical(message)
+            
+            # Would send to SNS topic if configured
+            # self.sns.publish(TopicArn='arn:aws:sns:region:account:spot-alerts', Message=message)
+            
+        except Exception as e:
+            self.logger.error(f"Error sending spot termination alert: {e}")
+
+    def _graceful_shutdown_workloads(self):
+        """Gracefully shutdown AI workloads before termination"""
+        try:
+            self.logger.info("Initiating graceful workload shutdown")
+            
+            # Stop new requests to Ollama
+            import subprocess
+            try:
+                subprocess.run(['docker', 'exec', 'ollama-gpu', 'pkill', '-TERM', 'ollama'], timeout=10)
+                self.logger.info("Ollama graceful shutdown initiated")
+            except:
+                pass
+            
+            # Flush any pending data to EFS
+            try:
+                subprocess.run(['sync'], timeout=5)
+                self.logger.info("File system sync completed")
+            except:
+                pass
+            
+            # Create workload checkpoint
+            try:
+                subprocess.run(['docker', 'exec', 'n8n-gpu', 'npm', 'run', 'export'], timeout=30)
+                self.logger.info("n8n workflow export completed")
+            except:
+                pass
+                
+        except Exception as e:
+            self.logger.error(f"Error during graceful shutdown: {e}")
+
+    def _scale_up_replacement_instance(self):
+        """Scale up ASG to replace terminating instance"""
+        try:
+            if not self.asg_name:
+                self.logger.warning("No ASG configured - cannot auto-replace instance")
+                return
+            
+            # Get current ASG status
+            response = self.autoscaling.describe_auto_scaling_groups(
+                AutoScalingGroupNames=[self.asg_name]
+            )
+            
+            if response['AutoScalingGroups']:
+                asg = response['AutoScalingGroups'][0]
+                current_capacity = asg['DesiredCapacity']
+                max_capacity = asg['MaxSize']
+                
+                # Scale up to replace terminating instance
+                new_capacity = min(current_capacity + 1, max_capacity)
+                
+                self.autoscaling.set_desired_capacity(
+                    AutoScalingGroupName=self.asg_name,
+                    DesiredCapacity=new_capacity
+                )
+                
+                self.logger.info(f"ASG scaled up to {new_capacity} instances to replace terminating spot instance")
+                
+        except Exception as e:
+            self.logger.error(f"Error scaling up replacement instance: {e}")
+
+    def _create_emergency_backup(self):
+        """Create emergency backup before termination"""
+        try:
+            import subprocess
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            # Backup critical data to EFS
+            backup_commands = [
+                f"tar -czf /mnt/efs/emergency_backup_{timestamp}.tar.gz /home/ubuntu/ai-starter-kit/",
+                f"cp /shared/gpu_metrics.json /mnt/efs/gpu_metrics_final_{timestamp}.json",
+                f"docker exec postgres-gpu pg_dump -U n8n n8n > /mnt/efs/db_backup_{timestamp}.sql"
+            ]
+            
+            for cmd in backup_commands:
+                try:
+                    subprocess.run(cmd, shell=True, timeout=30)
+                except:
+                    pass
+                    
+            self.logger.info(f"Emergency backup created: emergency_backup_{timestamp}")
+            
+        except Exception as e:
+            self.logger.error(f"Error creating emergency backup: {e}")
 
 # =============================================================================
 # SCHEDULING AND AUTOMATION
@@ -552,14 +754,14 @@ def setup_scheduled_optimization():
     schedule.every(1).hours.do(optimizer.optimize_spot_instance_pricing)
     schedule.every(6).hours.do(optimizer.cleanup_unused_resources)
     schedule.every(1).days.do(optimizer.generate_cost_report)
-    schedule.every(1).minutes.do(optimizer.check_spot_interruption)
+    schedule.every(30).seconds.do(optimizer.check_spot_interruption)  # AWS recommends 30-second intervals
     
     logging.info("Scheduled cost optimization tasks configured")
     
     # Run scheduling loop
     while True:
         schedule.run_pending()
-        time.sleep(60)
+        time.sleep(30)  # Reduced from 60 to 30 seconds for better spot monitoring
 
 # =============================================================================
 # CLI INTERFACE

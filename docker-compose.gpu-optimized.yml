@@ -165,11 +165,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 4G
-          cpus: '2.0'
+          memory: 3G
+          cpus: '1.5'
         reservations:
-          memory: 2G
-          cpus: '1.0'
+          memory: 1.5G
+          cpus: '0.75'
 
   # ---------------------------------------------------------------------------
   # n8n - Workflow Automation Platform
@@ -856,19 +856,23 @@ services:
 # =============================================================================
 # Total Resources: 4 vCPUs, 16GB RAM, 16GB T4 VRAM
 # 
-# CPU Allocation:
-# - postgres: 2.0 vCPUs (50%)
-# - n8n: 1.5 vCPUs (37.5%)
-# - ollama: 3.5 vCPUs (87.5%) - can use burst
-# - qdrant: 2.0 vCPUs (50%)
-# - monitoring: 0.6 vCPUs (15%)
+# OPTIMIZED CPU Allocation (Total: 4.0 vCPUs):
+# - postgres: 1.5 vCPUs (37.5%) - reduced from 2.0
+# - n8n: 1.0 vCPUs (25%) - reduced from 1.5  
+# - ollama: 2.5 vCPUs (62.5%) - reduced from 3.5, primary compute user
+# - qdrant: 1.5 vCPUs (37.5%) - reduced from 2.0
+# - crawl4ai: 1.5 vCPUs (37.5%) - reduced from 2.0
+# - monitoring: 0.5 vCPUs (12.5%) - slightly reduced
+# Note: Docker allows over-subscription, but limits prevent resource contention
 # 
-# Memory Allocation:
-# - postgres: 4GB (25%)
-# - n8n: 2GB (12.5%)
-# - ollama: 12GB (75%) - primary memory user
-# - qdrant: 4GB (25%)
-# - monitoring: 640MB (4%)
+# Memory Allocation (Total: 16GB):
+# - postgres: 3GB (18.75%) - reduced from 4GB
+# - n8n: 1.5GB (9.4%) - reduced from 2GB
+# - ollama: 10GB (62.5%) - reduced from 12GB, primary memory user
+# - qdrant: 3GB (18.75%) - reduced from 4GB
+# - crawl4ai: 3GB (18.75%) - reduced from 4GB
+# - monitoring: 512MB (3.2%)
+# Total Reserved: ~21GB (allows for container overhead with swap)
 # 
 # GPU Memory (T4 16GB):
 # - ollama: ~14.4GB (90% of 16GB)
