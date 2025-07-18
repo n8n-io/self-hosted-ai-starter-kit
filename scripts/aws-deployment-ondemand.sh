@@ -1,0 +1,567 @@
+#!/bin/bash
+
+# =============================================================================
+# AI-Powered Starter Kit - On-Demand AWS Deployment
+# =============================================================================
+# This script uses ONLY on-demand instances to completely avoid spot limits
+# Features: 100% reliable deployment, no spot instance complications
+# Target: g4dn.xlarge with NVIDIA T4 GPU
+# Cost: Higher but guaranteed availability
+# =============================================================================
+
+set -euo pipefail
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# Configuration
+AWS_REGION="${AWS_REGION:-us-east-1}"
+INSTANCE_TYPE="${INSTANCE_TYPE:-g4dn.xlarge}"
+KEY_NAME="${KEY_NAME:-ai-starter-kit-ondemand-key}"
+STACK_NAME="${STACK_NAME:-ai-starter-kit-ondemand}"
+PROJECT_NAME="${PROJECT_NAME:-ai-starter-kit}"
+
+# =============================================================================
+# UTILITY FUNCTIONS
+# =============================================================================
+
+log() {
+    echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}" >&2
+}
+
+error() {
+    echo -e "${RED}[ERROR] $1${NC}" >&2
+}
+
+success() {
+    echo -e "${GREEN}[SUCCESS] $1${NC}" >&2
+}
+
+warning() {
+    echo -e "${YELLOW}[WARNING] $1${NC}" >&2
+}
+
+info() {
+    echo -e "${CYAN}[INFO] $1${NC}" >&2
+}
+
+check_prerequisites() {
+    log "Checking prerequisites..."
+    
+    # Check AWS CLI
+    if ! command -v aws &> /dev/null; then
+        error "AWS CLI not found. Please install AWS CLI first."
+        exit 1
+    fi
+    
+    # Check AWS credentials
+    if ! aws sts get-caller-identity &> /dev/null; then
+        error "AWS credentials not configured. Please run 'aws configure' first."
+        exit 1
+    fi
+    
+    # Check jq for JSON processing
+    if ! command -v jq &> /dev/null; then
+        warning "jq not found. Installing jq for JSON processing..."
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            brew install jq || {
+                error "Failed to install jq. Please install it manually."
+                exit 1
+            }
+        elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+            sudo apt-get update && sudo apt-get install -y jq || {
+                error "Failed to install jq. Please install it manually."
+                exit 1
+            }
+        fi
+    fi
+    
+    success "Prerequisites check completed"
+}
+
+# =============================================================================
+# INFRASTRUCTURE SETUP
+# =============================================================================
+
+create_key_pair() {
+    log "Setting up SSH key pair..."
+    
+    if aws ec2 describe-key-pairs --key-names "$KEY_NAME" --region "$AWS_REGION" &> /dev/null; then
+        warning "Key pair $KEY_NAME already exists"
+        return 0
+    fi
+    
+    # Create key pair
+    aws ec2 create-key-pair \
+        --key-name "$KEY_NAME" \
+        --region "$AWS_REGION" \
+        --query 'KeyMaterial' \
+        --output text > "${KEY_NAME}.pem"
+    
+    chmod 600 "${KEY_NAME}.pem"
+    success "Created SSH key pair: ${KEY_NAME}.pem"
+}
+
+create_security_group() {
+    log "Creating security group..."
+    
+    # Check if security group exists
+    SG_ID=$(aws ec2 describe-security-groups \
+        --group-names "${STACK_NAME}-sg" \
+        --region "$AWS_REGION" \
+        --query 'SecurityGroups[0].GroupId' \
+        --output text 2>/dev/null || echo "None")
+    
+    if [[ "$SG_ID" != "None" ]]; then
+        warning "Security group already exists: $SG_ID"
+        echo "$SG_ID"
+        return 0
+    fi
+    
+    # Get VPC ID
+    VPC_ID=$(aws ec2 describe-vpcs \
+        --filters "Name=is-default,Values=true" \
+        --region "$AWS_REGION" \
+        --query 'Vpcs[0].VpcId' \
+        --output text)
+    
+    # Create security group
+    SG_ID=$(aws ec2 create-security-group \
+        --group-name "${STACK_NAME}-sg" \
+        --description "Security group for AI Starter Kit (On-Demand)" \
+        --vpc-id "$VPC_ID" \
+        --region "$AWS_REGION" \
+        --query 'GroupId' \
+        --output text)
+    
+    # Add rules for common ports
+    ports=(22 5678 11434 11235 6333 80 443)
+    for port in "${ports[@]}"; do
+        aws ec2 authorize-security-group-ingress \
+            --group-id "$SG_ID" \
+            --protocol tcp \
+            --port "$port" \
+            --cidr 0.0.0.0/0 \
+            --region "$AWS_REGION"
+    done
+    
+    success "Created security group: $SG_ID"
+    echo "$SG_ID"
+}
+
+launch_on_demand_instance() {
+    local SG_ID="$1"
+    
+    log "Launching on-demand instance (NO SPOT INSTANCES)..."
+    
+    # Get latest Ubuntu AMI with GPU support
+    AMI_ID=$(aws ec2 describe-images \
+        --owners 099720109477 \
+        --filters \
+            "Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-*-amd64-server-*" \
+            "Name=state,Values=available" \
+        --region "$AWS_REGION" \
+        --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' \
+        --output text)
+    
+    info "Using AMI: $AMI_ID"
+    
+    # Create user data script
+    cat > user-data-ondemand.sh << 'EOF'
+#!/bin/bash
+set -euo pipefail
+
+# Update system
+apt-get update && apt-get upgrade -y
+
+# Install Docker
+curl -fsSL https://get.docker.com -o get-docker.sh
+sh get-docker.sh
+usermod -aG docker ubuntu
+
+# Install Docker Compose
+curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+chmod +x /usr/local/bin/docker-compose
+
+# Install NVIDIA drivers and Docker GPU support
+apt-get install -y ubuntu-drivers-common
+ubuntu-drivers autoinstall
+
+# Install NVIDIA Container Toolkit
+distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list | \
+    sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+    sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+apt-get update && apt-get install -y nvidia-container-toolkit
+
+# Configure Docker daemon for GPU
+cat > /etc/docker/daemon.json << 'EODAEMON'
+{
+    "default-runtime": "nvidia",
+    "runtimes": {
+        "nvidia": {
+            "path": "nvidia-container-runtime",
+            "runtimeArgs": []
+        }
+    }
+}
+EODAEMON
+
+# Install additional tools
+apt-get install -y jq curl wget git htop awscli
+
+# Restart services
+systemctl restart docker
+systemctl enable docker
+
+# Signal that setup is complete
+touch /tmp/user-data-complete
+
+EOF
+
+    # Encode user data
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        USER_DATA=$(base64 -i user-data-ondemand.sh | tr -d '\n')
+    else
+        USER_DATA=$(base64 -w 0 user-data-ondemand.sh)
+    fi
+    
+    # Launch ON-DEMAND instance (no spot)
+    INSTANCE_ID=$(aws ec2 run-instances \
+        --image-id "$AMI_ID" \
+        --instance-type "$INSTANCE_TYPE" \
+        --key-name "$KEY_NAME" \
+        --security-group-ids "$SG_ID" \
+        --user-data "$USER_DATA" \
+        --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=${STACK_NAME}-gpu-instance},{Key=Project,Value=$PROJECT_NAME},{Key=Type,Value=OnDemand}]" \
+        --region "$AWS_REGION" \
+        --query 'Instances[0].InstanceId' \
+        --output text)
+    
+    if [[ -z "$INSTANCE_ID" || "$INSTANCE_ID" == "None" ]]; then
+        error "Failed to launch on-demand instance"
+        return 1
+    fi
+    
+    # Wait for instance to be running
+    log "Waiting for on-demand instance to be running..."
+    aws ec2 wait instance-running --instance-ids "$INSTANCE_ID" --region "$AWS_REGION"
+    
+    # Get public IP
+    PUBLIC_IP=$(aws ec2 describe-instances \
+        --instance-ids "$INSTANCE_ID" \
+        --region "$AWS_REGION" \
+        --query 'Reservations[0].Instances[0].PublicIpAddress' \
+        --output text)
+    
+    success "On-demand instance launched: $INSTANCE_ID (IP: $PUBLIC_IP)"
+    echo "$INSTANCE_ID:$PUBLIC_IP"
+}
+
+# =============================================================================
+# APPLICATION DEPLOYMENT
+# =============================================================================
+
+wait_for_instance_ready() {
+    local PUBLIC_IP="$1"
+    
+    log "Waiting for instance to be ready for SSH..."
+    
+    for i in {1..30}; do
+        if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i "${KEY_NAME}.pem" "ubuntu@$PUBLIC_IP" "test -f /tmp/user-data-complete" &> /dev/null; then
+            success "Instance is ready!"
+            return 0
+        fi
+        info "Attempt $i/30: Instance not ready yet, waiting 30 seconds..."
+        sleep 30
+    done
+    
+    error "Instance failed to become ready after 15 minutes"
+    return 1
+}
+
+deploy_application() {
+    local PUBLIC_IP="$1"
+    local INSTANCE_ID="$2"
+    
+    log "Deploying AI Starter Kit application..."
+    
+    # Create deployment script
+    cat > deploy-app-ondemand.sh << EOF
+#!/bin/bash
+set -euo pipefail
+
+echo "Starting AI Starter Kit deployment on on-demand instance..."
+
+# Clone repository
+git clone https://github.com/michael-pittman/001-starter-kit.git /home/ubuntu/ai-starter-kit || true
+cd /home/ubuntu/ai-starter-kit
+
+# Create basic .env file
+cat > .env << 'EOFENV'
+POSTGRES_DB=n8n
+POSTGRES_USER=n8n
+POSTGRES_PASSWORD=n8n_password_$(openssl rand -hex 12)
+N8N_ENCRYPTION_KEY=$(openssl rand -hex 32)
+N8N_USER_MANAGEMENT_JWT_SECRET=$(openssl rand -hex 32)
+N8N_HOST=0.0.0.0
+N8N_PORT=5678
+WEBHOOK_URL=http://$PUBLIC_IP:5678
+INSTANCE_ID=$INSTANCE_ID
+INSTANCE_TYPE=$INSTANCE_TYPE
+AWS_DEFAULT_REGION=$AWS_REGION
+N8N_CORS_ENABLE=true
+N8N_CORS_ALLOWED_ORIGINS=*
+N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true
+EOFENV
+
+# Start GPU-optimized services
+sudo -E docker-compose -f docker-compose.gpu-optimized.yml up -d
+
+echo "Deployment completed on on-demand instance!"
+EOF
+
+    # Copy application files and deploy
+    log "Copying application files..."
+    
+    # Copy the entire repository
+    rsync -avz --exclude '.git' --exclude 'node_modules' --exclude '*.log' \
+        -e "ssh -o StrictHostKeyChecking=no -i ${KEY_NAME}.pem" \
+        ./ "ubuntu@$PUBLIC_IP:/home/ubuntu/ai-starter-kit/"
+    
+    # Run deployment
+    log "Running deployment script..."
+    ssh -o StrictHostKeyChecking=no -i "${KEY_NAME}.pem" "ubuntu@$PUBLIC_IP" \
+        "chmod +x /home/ubuntu/ai-starter-kit/deploy-app-ondemand.sh && /home/ubuntu/ai-starter-kit/deploy-app-ondemand.sh"
+    
+    success "Application deployment completed!"
+}
+
+# =============================================================================
+# VALIDATION AND RESULTS
+# =============================================================================
+
+validate_deployment() {
+    local PUBLIC_IP="$1"
+    
+    log "Validating deployment..."
+    
+    # Wait for services to start
+    sleep 120
+    
+    local endpoints=(
+        "http://$PUBLIC_IP:5678/healthz:n8n"
+        "http://$PUBLIC_IP:11434/api/tags:Ollama"
+        "http://$PUBLIC_IP:6333/healthz:Qdrant"
+        "http://$PUBLIC_IP:11235/health:Crawl4AI"
+    )
+    
+    for endpoint_info in "${endpoints[@]}"; do
+        IFS=':' read -r url service <<< "$endpoint_info"
+        
+        log "Testing $service at $url..."
+        local retry=0
+        local max_retries=5
+        while [ $retry -lt $max_retries ]; do
+            if curl -f -s "$url" > /dev/null 2>&1; then
+                success "$service is healthy"
+                break
+            fi
+            retry=$((retry+1))
+            info "Attempt $retry/$max_retries: $service not ready, waiting 30s..."
+            sleep 30
+        done
+        if [ $retry -eq $max_retries ]; then
+            warning "$service may still be starting up"
+        fi
+    done
+    
+    success "Deployment validation completed!"
+}
+
+display_results() {
+    local PUBLIC_IP="$1"
+    local INSTANCE_ID="$2"
+    
+    echo ""
+    echo -e "${CYAN}=================================${NC}"
+    echo -e "${GREEN}   AI STARTER KIT DEPLOYED!    ${NC}"
+    echo -e "${CYAN}=================================${NC}"
+    echo ""
+    echo -e "${BLUE}Instance Information:${NC}"
+    echo -e "  Instance ID: ${YELLOW}$INSTANCE_ID${NC}"
+    echo -e "  Public IP: ${YELLOW}$PUBLIC_IP${NC}"
+    echo -e "  Instance Type: ${YELLOW}$INSTANCE_TYPE${NC}"
+    echo -e "  Billing: ${YELLOW}On-Demand (No Spot Instances)${NC}"
+    echo ""
+    echo -e "${BLUE}Service URLs:${NC}"
+    echo -e "  ${GREEN}n8n Workflow Editor:${NC}     http://$PUBLIC_IP:5678"
+    echo -e "  ${GREEN}Crawl4AI Web Scraper:${NC}    http://$PUBLIC_IP:11235"
+    echo -e "  ${GREEN}Qdrant Vector Database:${NC}  http://$PUBLIC_IP:6333"
+    echo -e "  ${GREEN}Ollama AI Models:${NC}        http://$PUBLIC_IP:11434"
+    echo ""
+    echo -e "${BLUE}SSH Access:${NC}"
+    echo -e "  ssh -i ${KEY_NAME}.pem ubuntu@$PUBLIC_IP"
+    echo ""
+    echo -e "${BLUE}Next Steps:${NC}"
+    echo -e "  1. Wait 5-10 minutes for all services to fully start"
+    echo -e "  2. Access n8n at http://$PUBLIC_IP:5678 to set up workflows"
+    echo -e "  3. Check service logs: ssh to instance and run 'docker-compose logs'"
+    echo ""
+    echo -e "${YELLOW}Cost Information:${NC}"
+    echo -e "  - On-demand g4dn.xlarge: ~$0.75/hour (~$18/day)"
+    echo -e "  - 100% reliable availability (no spot interruptions)"
+    echo -e "  - No spot instance limits or complications"
+    echo -e "  - ${RED}Remember to terminate when not in use!${NC}"
+    echo ""
+    echo -e "${GREEN}Advantages of On-Demand Deployment:${NC}"
+    echo -e "  ✅ No spot instance count limits"
+    echo -e "  ✅ Guaranteed availability"
+    echo -e "  ✅ Instant launch (no waiting for spot capacity)"
+    echo -e "  ✅ Predictable costs"
+    echo ""
+}
+
+# =============================================================================
+# CLEANUP FUNCTION
+# =============================================================================
+
+cleanup_on_error() {
+    error "Deployment failed. Cleaning up resources..."
+    
+    # Terminate instance
+    if [ ! -z "${INSTANCE_ID:-}" ]; then
+        log "Terminating on-demand instance $INSTANCE_ID..."
+        aws ec2 terminate-instances --instance-ids "$INSTANCE_ID" --region "$AWS_REGION" || true
+        aws ec2 wait instance-terminated --instance-ids "$INSTANCE_ID" --region "$AWS_REGION" || true
+    fi
+    
+    # Delete security group
+    if [ ! -z "${SG_ID:-}" ]; then
+        log "Deleting security group..."
+        sleep 30  # Wait for dependencies
+        aws ec2 delete-security-group --group-id "$SG_ID" --region "$AWS_REGION" || true
+    fi
+    
+    # Delete key pair
+    log "Deleting key pair and temporary files..."
+    aws ec2 delete-key-pair --key-name "$KEY_NAME" --region "$AWS_REGION" || true
+    rm -f "${KEY_NAME}.pem" user-data-ondemand.sh deploy-app-ondemand.sh
+    
+    warning "Cleanup completed."
+}
+
+# =============================================================================
+# MAIN DEPLOYMENT FLOW
+# =============================================================================
+
+main() {
+    echo -e "${CYAN}"
+    cat << 'EOF'
+ _____ _____   _____ _             _            _   _ _ _   
+|  _  |     | |   __| |_ ___ ___ _| |_ ___ ___  | | | |_| |_ 
+|     |-   -| |__   |  _| .'|  _|  _| -_|  _|  | |_| | |  _|
+|__|__|_____| |_____|_| |__,|_| |_| |___|_|    |___|_|_|_|  
+                                                           
+EOF
+    echo -e "${NC}"
+    echo -e "${BLUE}On-Demand AWS Deployment (100% Spot-Free)${NC}"
+    echo -e "${BLUE}Reliable | No Limits | Guaranteed Availability${NC}"
+    echo ""
+    
+    # Set error trap
+    trap cleanup_on_error ERR
+    
+    # Run deployment steps
+    check_prerequisites
+    
+    log "Starting on-demand AWS deployment (no spot instances)..."
+    create_key_pair
+    
+    SG_ID=$(create_security_group)
+    
+    # Launch on-demand instance
+    INSTANCE_INFO=$(launch_on_demand_instance "$SG_ID")
+    INSTANCE_ID=$(echo "$INSTANCE_INFO" | cut -d: -f1)
+    PUBLIC_IP=$(echo "$INSTANCE_INFO" | cut -d: -f2)
+
+    wait_for_instance_ready "$PUBLIC_IP"
+    deploy_application "$PUBLIC_IP" "$INSTANCE_ID"
+    validate_deployment "$PUBLIC_IP"
+    
+    display_results "$PUBLIC_IP" "$INSTANCE_ID"
+    
+    # Clean up temporary files
+    rm -f user-data-ondemand.sh deploy-app-ondemand.sh
+    
+    success "AI Starter Kit deployment completed successfully!"
+}
+
+# =============================================================================
+# COMMAND LINE INTERFACE
+# =============================================================================
+
+show_usage() {
+    echo "Usage: $0 [OPTIONS]"
+    echo ""
+    echo "On-Demand Instance Deployment (No Spot Instances)"
+    echo ""
+    echo "Options:"
+    echo "  --region REGION         AWS region (default: us-east-1)"
+    echo "  --instance-type TYPE    Instance type (default: g4dn.xlarge)"
+    echo "  --key-name NAME         SSH key name (default: ai-starter-kit-ondemand-key)"
+    echo "  --stack-name NAME       Stack name (default: ai-starter-kit-ondemand)"
+    echo "  --help                  Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  $0                                    # Deploy with defaults"
+    echo "  $0 --region us-west-2                # Deploy in different region"
+    echo "  $0 --instance-type g4dn.2xlarge      # Use larger instance"
+    echo ""
+    echo "Benefits of On-Demand Deployment:"
+    echo "  • No spot instance count limits"
+    echo "  • Guaranteed availability" 
+    echo "  • Instant launch"
+    echo "  • Predictable costs"
+}
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --region)
+            AWS_REGION="$2"
+            shift 2
+            ;;
+        --instance-type)
+            INSTANCE_TYPE="$2"
+            shift 2
+            ;;
+        --key-name)
+            KEY_NAME="$2"
+            shift 2
+            ;;
+        --stack-name)
+            STACK_NAME="$2"
+            shift 2
+            ;;
+        --help)
+            show_usage
+            exit 0
+            ;;
+        *)
+            error "Unknown option: $1"
+            show_usage
+            exit 1
+            ;;
+    esac
+done
+
+# Run main function
+main "$@" 

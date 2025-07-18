@@ -88,18 +88,43 @@ Store your API keys in AWS Systems Manager:
 aws ssm put-parameter --name "/aibuildkit/OPENAI_API_KEY" --value "your-key" --type SecureString
 aws ssm put-parameter --name "/aibuildkit/n8n/ENCRYPTION_KEY" --value "your-key" --type SecureString
 aws ssm put-parameter --name "/aibuildkit/POSTGRES_PASSWORD" --value "your-password" --type SecureString
+aws ssm put-parameter --name "/aibuildkit/WEBHOOK_URL" --value "https://your-domain.com" --type SecureString
 ```
 
-### 2️⃣ **Deploy to AWS**
+### 2️⃣ **Choose Your Deployment Strategy**
+
+#### **Option A: Cost-Optimized Spot Deployment (Recommended)**
 ```bash
-# Deploy with default settings (us-east-1, g4dn.xlarge)
+# Deploy with spot instances for 70% cost savings
 ./scripts/aws-deployment.sh
 
-# Or customize deployment
+# Customize deployment
 ./scripts/aws-deployment.sh \
   --region us-west-2 \
   --instance-type g4dn.2xlarge \
   --max-spot-price 1.00
+```
+
+#### **Option B: Simple On-Demand Deployment**
+```bash
+# Deploy with on-demand instances (reliable, higher cost)
+./scripts/aws-deployment-simple.sh
+
+# Customize deployment
+./scripts/aws-deployment-simple.sh \
+  --region us-west-2 \
+  --instance-type g4dn.2xlarge
+```
+
+#### **Option C: Full On-Demand Deployment**
+```bash
+# Deploy with guaranteed on-demand instances
+./scripts/aws-deployment-ondemand.sh
+
+# Customize deployment
+./scripts/aws-deployment-ondemand.sh \
+  --region us-west-2 \
+  --instance-type g4dn.2xlarge
 ```
 
 ### 3️⃣ **Access Your Services**
@@ -157,6 +182,8 @@ docker compose --profile cpu up
 # Optional Parameters
 /aibuildkit/n8n/CORS_ENABLE         # CORS settings
 /aibuildkit/n8n/CORS_ALLOWED_ORIGINS # Allowed origins
+/aibuildkit/n8n/COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE # Enable community packages
+/aibuildkit/n8n/USER_MANAGEMENT_JWT_SECRET # JWT secret for user management
 ```
 
 ### Resource Allocation (g4dn.xlarge)
@@ -224,18 +251,91 @@ tail -f /var/log/cost-optimization.log
 
 ---
 
-## 🧹 Cleanup
+## 🧹 AWS Console Cleanup Guide
 
-### Automated Cleanup
+### **Automatic Cleanup**
+The deployment scripts include automatic cleanup on error, but you should verify all resources are properly removed.
+
+### **Manual Cleanup Checklist**
+
+#### **1. EC2 Instances**
+- **Location**: AWS Console → EC2 → Instances
+- **Look for**: Instances with names containing `ai-starter-kit`, `ai-starter-kit-simple`, or `ai-starter-kit-ondemand`
+- **Action**: Terminate any running instances
+
+#### **2. Security Groups**
+- **Location**: AWS Console → EC2 → Security Groups
+- **Look for**: Security groups named:
+  - `ai-starter-kit-sg`
+  - `ai-starter-kit-simple-sg`
+  - `ai-starter-kit-ondemand-sg`
+- **Action**: Delete security groups (may need to wait for dependencies)
+
+#### **3. Key Pairs**
+- **Location**: AWS Console → EC2 → Key Pairs
+- **Look for**: Key pairs named:
+  - `ai-starter-kit-key`
+  - `ai-starter-kit-key-simple`
+  - `ai-starter-kit-ondemand-key`
+- **Action**: Delete key pairs
+
+#### **4. Elastic File System (EFS)**
+- **Location**: AWS Console → EFS → File systems
+- **Look for**: File systems with names containing `ai-starter-kit`
+- **Action**: Delete file systems and mount targets
+
+#### **5. Application Load Balancers**
+- **Location**: AWS Console → EC2 → Load Balancers
+- **Look for**: Load balancers with names containing `ai-starter-kit`
+- **Action**: Delete load balancers
+
+#### **6. Target Groups**
+- **Location**: AWS Console → EC2 → Target Groups
+- **Look for**: Target groups with names containing `ai-starter-kit`
+- **Action**: Delete target groups
+
+#### **7. CloudFront Distributions**
+- **Location**: AWS Console → CloudFront → Distributions
+- **Look for**: Distributions with comments containing `ai-starter-kit`
+- **Action**: Disable and delete distributions
+
+#### **8. IAM Roles and Policies**
+- **Location**: AWS Console → IAM → Roles
+- **Look for**: Roles named:
+  - `ai-starter-kit-role`
+  - `ai-starter-kit-simple-role`
+  - `ai-starter-kit-ondemand-role`
+- **Action**: Delete roles and associated instance profiles
+
+- **Location**: AWS Console → IAM → Policies
+- **Look for**: Policies named:
+  - `ai-starter-kit-custom-policy`
+- **Action**: Delete custom policies
+
+#### **9. Systems Manager Parameters**
+- **Location**: AWS Console → Systems Manager → Parameter Store
+- **Look for**: Parameters with prefix `/aibuildkit/`
+- **Action**: Delete parameters (optional - keep if reusing)
+
+#### **10. CloudWatch Log Groups**
+- **Location**: AWS Console → CloudWatch → Log groups
+- **Look for**: Log groups with names containing `ai-starter-kit`
+- **Action**: Delete log groups
+
+### **Cleanup Verification Commands**
 ```bash
-# The deployment script includes cleanup on error
-# Manual cleanup via AWS console:
-# 1. Terminate EC2 instances
-# 2. Delete Auto Scaling Groups
-# 3. Remove EFS file systems
-# 4. Delete CloudFront distributions
-# 5. Clean up IAM roles and policies
+# Check for remaining resources
+aws ec2 describe-instances --filters "Name=tag:Name,Values=*ai-starter-kit*" --query 'Reservations[].Instances[].InstanceId'
+aws ec2 describe-security-groups --filters "Name=group-name,Values=*ai-starter-kit*" --query 'SecurityGroups[].GroupId'
+aws efs describe-file-systems --query 'FileSystems[?contains(Name, `ai-starter-kit`)].FileSystemId'
+aws elbv2 describe-load-balancers --query 'LoadBalancers[?contains(LoadBalancerName, `ai-starter-kit`)].LoadBalancerArn'
 ```
+
+### **Troubleshooting Cleanup Issues**
+- **Security Group Dependencies**: Wait 5-10 minutes for all resources to fully detach
+- **EFS Mount Targets**: Ensure all mount targets are deleted before deleting file system
+- **IAM Role Dependencies**: Remove role from instance profile before deleting role
+- **CloudFront Distributions**: Must be disabled before deletion
 
 ---
 
@@ -249,6 +349,7 @@ tail -f /var/log/cost-optimization.log
 | **GPU not detected** | Verify NVIDIA drivers and Docker GPU runtime |
 | **EFS mount failures** | Check security groups and VPC configuration |
 | **High costs** | Review auto-scaling policies and spot pricing |
+| **Deployment script errors** | Check AWS CLI permissions and region settings |
 
 ### Debug Commands
 ```bash
@@ -263,6 +364,9 @@ nvidia-smi
 
 # Check cost optimization
 python3 scripts/cost-optimization.py --action report
+
+# Verify AWS resources
+aws ec2 describe-instances --filters "Name=instance-state-name,Values=running"
 ```
 
 ---

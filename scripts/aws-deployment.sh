@@ -33,7 +33,7 @@ PROJECT_NAME="${PROJECT_NAME:-ai-starter-kit}"
 # =============================================================================
 
 log() {
-    echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}"
+    echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}" >&2
 }
 
 error() {
@@ -41,15 +41,15 @@ error() {
 }
 
 success() {
-    echo -e "${GREEN}[SUCCESS] $1${NC}"
+    echo -e "${GREEN}[SUCCESS] $1${NC}" >&2
 }
 
 warning() {
-    echo -e "${YELLOW}[WARNING] $1${NC}"
+    echo -e "${YELLOW}[WARNING] $1${NC}" >&2
 }
 
 info() {
-    echo -e "${CYAN}[INFO] $1${NC}"
+    echo -e "${CYAN}[INFO] $1${NC}" >&2
 }
 
 check_prerequisites() {
@@ -98,11 +98,27 @@ check_prerequisites() {
     success "Prerequisites check completed"
 }
 
-get_availability_zones() {
+get_single_availability_zone() {
     aws ec2 describe-availability-zones \
         --region "$AWS_REGION" \
         --query 'AvailabilityZones[?State==`available`].ZoneName' \
-        --output text | head -2
+        --output text | awk '{print $1}'
+}
+
+get_all_availability_zones() {
+    aws ec2 describe-availability-zones \
+        --region "$AWS_REGION" \
+        --query 'AvailabilityZones[?State==`available`].ZoneName' \
+        --output text
+}
+
+get_subnet_for_az() {
+    local AZ="$1"
+    aws ec2 describe-subnets \
+        --filters "Name=availability-zone,Values=$AZ" "Name=default-for-az,Values=true" \
+        --region "$AWS_REGION" \
+        --query 'Subnets[0].SubnetId' \
+        --output text
 }
 
 # Add SSM fetch function after utility functions
@@ -251,22 +267,34 @@ create_security_group() {
 }
 
 create_efs() {
+    local SG_ID="$1"
     log "Setting up EFS (Elastic File System)..."
     
-    # Check if EFS already exists
-    EFS_ID=$(aws efs describe-file-systems \
+    # Check if EFS already exists by searching through all file systems
+    EFS_LIST=$(aws efs describe-file-systems \
         --region "$AWS_REGION" \
-        --query "FileSystems[?Name=='${STACK_NAME}-efs'].FileSystemId" \
+        --query 'FileSystems[].FileSystemId' \
         --output text 2>/dev/null || echo "")
     
-    if [[ -n "$EFS_ID" && "$EFS_ID" != "None" ]]; then
-        warning "EFS already exists: $EFS_ID"
-        
-        # Get EFS DNS name
-        EFS_DNS="${EFS_ID}.efs.${AWS_REGION}.amazonaws.com"
-        echo "$EFS_DNS"
-        return 0
-    fi
+    # Check each EFS to see if it has our tag
+    for EFS_ID in $EFS_LIST; do
+        if [[ -n "$EFS_ID" && "$EFS_ID" != "None" ]]; then
+            EFS_TAGS=$(aws efs list-tags-for-resource \
+                --resource-id "$EFS_ID" \
+                --region "$AWS_REGION" \
+                --query "Tags[?Key=='Name'].Value" \
+                --output text 2>/dev/null || echo "")
+            
+            if [[ "$EFS_TAGS" == "${STACK_NAME}-efs" ]]; then
+                warning "EFS already exists: $EFS_ID"
+                # Get EFS DNS name
+                EFS_DNS="${EFS_ID}.efs.${AWS_REGION}.amazonaws.com"
+                export EFS_ID
+                echo "$EFS_DNS"
+                return 0
+            fi
+        fi
+    done
     
     # Create EFS
     EFS_ID=$(aws efs create-file-system \
@@ -280,40 +308,120 @@ create_efs() {
         --output text)
     
     # Tag EFS
-    aws efs put-tags \
+    aws efs create-tags \
         --file-system-id "$EFS_ID" \
         --tags Key=Name,Value="${STACK_NAME}-efs" Key=Project,Value="$PROJECT_NAME" \
         --region "$AWS_REGION"
     
     # Wait for EFS to be available
     log "Waiting for EFS to become available..."
-    aws efs wait file-system-available --file-system-id "$EFS_ID" --region "$AWS_REGION"
-    
-    # Get availability zones and create mount targets
-    AVAILABILITY_ZONES=$(get_availability_zones)
-    for AZ in $AVAILABILITY_ZONES; do
-        log "Creating EFS mount target in $AZ..."
-        
-        # Get subnet ID for AZ
-        SUBNET_ID=$(aws ec2 describe-subnets \
-            --filters "Name=availability-zone,Values=$AZ" "Name=default-for-az,Values=true" \
+    while true; do
+        EFS_STATE=$(aws efs describe-file-systems \
+            --file-system-id "$EFS_ID" \
             --region "$AWS_REGION" \
-            --query 'Subnets[0].SubnetId' \
-            --output text)
+            --query 'FileSystems[0].LifeCycleState' \
+            --output text 2>/dev/null || echo "")
         
-        if [[ "$SUBNET_ID" != "None" ]]; then
-            aws efs create-mount-target \
-                --file-system-id "$EFS_ID" \
-                --subnet-id "$SUBNET_ID" \
-                --security-groups "$SG_ID" \
-                --region "$AWS_REGION" || warning "Mount target might already exist in $AZ"
+        if [[ "$EFS_STATE" == "available" ]]; then
+            log "EFS is now available"
+            break
+        elif [[ "$EFS_STATE" == "creating" ]]; then
+            log "EFS is still creating... waiting 10 seconds"
+            sleep 10
+        else
+            warning "EFS state: $EFS_STATE"
+            sleep 10
         fi
     done
     
+    # Note: Mount target creation is now handled after instance launch
+    # when we know which AZ the instance is in
+    
     # Get EFS DNS name
     EFS_DNS="${EFS_ID}.efs.${AWS_REGION}.amazonaws.com"
+    # Export EFS_ID for cleanup function
+    export EFS_ID
     success "Created EFS: $EFS_ID (DNS: $EFS_DNS)"
     echo "$EFS_DNS"
+}
+
+create_efs_mount_target() {
+    local SG_ID="$1"
+    local INSTANCE_AZ="$2"
+    
+    if [[ -z "$EFS_ID" ]]; then
+        error "EFS_ID not set. Cannot create mount target."
+        return 1
+    fi
+    
+    log "Creating EFS mount target in $INSTANCE_AZ (where instance is running)..."
+    
+    # Check if mount target already exists in this AZ
+    EXISTING_MT=$(aws efs describe-mount-targets \
+        --file-system-id "$EFS_ID" \
+        --region "$AWS_REGION" \
+        --query "MountTargets[?AvailabilityZoneName=='$INSTANCE_AZ'].MountTargetId" \
+        --output text 2>/dev/null || echo "")
+    
+    if [[ -n "$EXISTING_MT" && "$EXISTING_MT" != "None" ]]; then
+        warning "EFS mount target already exists in $INSTANCE_AZ: $EXISTING_MT"
+        return 0
+    fi
+    
+    # Get subnet ID for the instance AZ
+    SUBNET_ID=$(get_subnet_for_az "$INSTANCE_AZ")
+    
+    if [[ "$SUBNET_ID" != "None" && -n "$SUBNET_ID" ]]; then
+        aws efs create-mount-target \
+            --file-system-id "$EFS_ID" \
+            --subnet-id "$SUBNET_ID" \
+            --security-groups "$SG_ID" \
+            --region "$AWS_REGION" || {
+            warning "Mount target creation failed in $INSTANCE_AZ, but continuing..."
+            return 0
+        }
+        success "Created EFS mount target in $INSTANCE_AZ"
+    else
+        error "No suitable subnet found in $INSTANCE_AZ"
+        return 1
+    fi
+}
+
+# Create main target group for n8n
+create_target_group() {
+    local SG_ID="$1"
+    local INSTANCE_ID="$2"
+    
+    log "Creating target group for n8n..."
+    
+    # Get VPC ID
+    VPC_ID=$(aws ec2 describe-vpcs --filters "Name=is-default,Values=true" --query 'Vpcs[0].VpcId' --output text --region "$AWS_REGION")
+    
+    TARGET_GROUP_ARN=$(aws elbv2 create-target-group \
+        --name "${STACK_NAME}-n8n-tg" \
+        --protocol HTTP \
+        --port 5678 \
+        --vpc-id "$VPC_ID" \
+        --health-check-protocol HTTP \
+        --health-check-port 5678 \
+        --health-check-path /healthz \
+        --health-check-interval-seconds 30 \
+        --health-check-timeout-seconds 10 \
+        --healthy-threshold-count 2 \
+        --unhealthy-threshold-count 2 \
+        --target-type instance \
+        --region "$AWS_REGION" \
+        --query 'TargetGroups[0].TargetGroupArn' \
+        --output text)
+    
+    # Register instance to target group
+    aws elbv2 register-targets \
+        --target-group-arn "$TARGET_GROUP_ARN" \
+        --targets Id="$INSTANCE_ID" Port=5678 \
+        --region "$AWS_REGION"
+    
+    success "Created n8n target group: $TARGET_GROUP_ARN"
+    echo "$TARGET_GROUP_ARN"
 }
 
 # Add qdrant target group creation after n8n target group
@@ -323,11 +431,14 @@ create_qdrant_target_group() {
     
     log "Creating target group for qdrant..."
     
+    # Get VPC ID
+    VPC_ID=$(aws ec2 describe-vpcs --filters "Name=is-default,Values=true" --query 'Vpcs[0].VpcId' --output text --region "$AWS_REGION")
+    
     QDRANT_TG_ARN=$(aws elbv2 create-target-group \
         --name "${STACK_NAME}-qdrant-tg" \
         --protocol HTTP \
         --port 6333 \
-        --vpc-id "$(aws ec2 describe-vpcs --filters "Name=is-default,Values=true" --query 'Vpcs[0].VpcId' --output text)" \
+        --vpc-id "$VPC_ID" \
         --health-check-protocol HTTP \
         --health-check-port 6333 \
         --health-check-path /healthz \
@@ -431,7 +542,12 @@ touch /tmp/user-data-complete
 EOF
 
     # Encode user data
-    USER_DATA=$(base64 -w 0 user-data.sh)
+    # Use platform-specific base64 command
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        USER_DATA=$(base64 -i user-data.sh | tr -d '\n')
+    else
+        USER_DATA=$(base64 -w 0 user-data.sh)
+    fi
     
     # Create launch template
     aws ec2 create-launch-template \
@@ -498,22 +614,24 @@ EOF
     # Create role
     aws iam create-role \
         --role-name "${STACK_NAME}-role" \
-        --assume-role-policy-document file://trust-policy.json
+        --assume-role-policy-document file://trust-policy.json || {
+        warning "Role ${STACK_NAME}-role may already exist, continuing..."
+    }
     
-    # Attach policies
+    # Attach essential policies
     aws iam attach-role-policy \
         --role-name "${STACK_NAME}-role" \
-        --policy-arn arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+        --policy-arn arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy || {
+        warning "CloudWatchAgentServerPolicy may already be attached, continuing..."
+    }
     
     aws iam attach-role-policy \
         --role-name "${STACK_NAME}-role" \
-        --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore || {
+        warning "AmazonSSMManagedInstanceCore may already be attached, continuing..."
+    }
     
-    aws iam attach-role-policy \
-        --role-name "${STACK_NAME}-role" \
-        --policy-arn arn:aws:iam::aws:policy/AmazonEC2SSMFullAccess
-    
-    # Create custom policy for EFS and cost optimization
+    # Create custom policy for EFS and AWS service access
     cat > custom-policy.json << EOF
 {
     "Version": "2012-10-17",
@@ -521,11 +639,13 @@ EOF
         {
             "Effect": "Allow",
             "Action": [
-                "elasticfilesystem:*",
+                "elasticfilesystem:DescribeFileSystems",
+                "elasticfilesystem:DescribeMountTargets", 
                 "ec2:Describe*",
-                "autoscaling:*",
-                "cloudwatch:*",
-                "pricing:*"
+                "cloudwatch:PutMetricData",
+                "ssm:GetParameter",
+                "ssm:GetParameters",
+                "ssm:GetParametersByPath"
             ],
             "Resource": "*"
         }
@@ -539,7 +659,9 @@ EOF
     
     aws iam attach-role-policy \
         --role-name "${STACK_NAME}-role" \
-        --policy-arn "arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):policy/${STACK_NAME}-custom-policy"
+        --policy-arn "arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):policy/${STACK_NAME}-custom-policy" || {
+        warning "Custom policy may already be attached, continuing..."
+    }
     
     # Create instance profile
     aws iam create-instance-profile --instance-profile-name "${STACK_NAME}-instance-profile" || true
@@ -548,6 +670,7 @@ EOF
         --role-name "${STACK_NAME}-role" || true
     
     # Wait for IAM propagation
+    log "Waiting for IAM role propagation..."
     sleep 30
     
     success "Created IAM role and instance profile"
@@ -557,68 +680,192 @@ launch_spot_instance() {
     local SG_ID="$1"
     local EFS_DNS="$2"
     
-    log "Launching spot instance..."
+    log "Launching spot instance with multi-AZ fallback..."
     
-    # Create spot instance request
-    REQUEST_ID=$(aws ec2 request-spot-instances \
-        --spot-price "$MAX_SPOT_PRICE" \
-        --instance-count 1 \
-        --type "one-time" \
-        --launch-specification "{
-            \"ImageId\": \"$(aws ec2 describe-images \
-                --owners 099720109477 \
-                --filters \
-                    "Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-*-amd64-server-*" \
-                    "Name=state,Values=available" \
+    # Create user data script
+    cat > user-data.sh << 'EOF'
+#!/bin/bash
+set -euo pipefail
+
+# Update system
+apt-get update && apt-get upgrade -y
+
+# Install Docker
+curl -fsSL https://get.docker.com -o get-docker.sh
+sh get-docker.sh
+usermod -aG docker ubuntu
+
+# Install Docker Compose
+curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+chmod +x /usr/local/bin/docker-compose
+
+# Install NVIDIA drivers and Docker GPU support
+apt-get install -y ubuntu-drivers-common
+ubuntu-drivers autoinstall
+
+# Install NVIDIA Container Toolkit
+distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | apt-key add -
+curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | tee /etc/apt/sources.list.d/nvidia-docker.list
+apt-get update && apt-get install -y nvidia-docker2
+
+# Configure Docker daemon for GPU
+cat > /etc/docker/daemon.json << 'EODAEMON'
+{
+    "default-runtime": "nvidia",
+    "runtimes": {
+        "nvidia": {
+            "path": "nvidia-container-runtime",
+            "runtimeArgs": []
+        }
+    }
+}
+EODAEMON
+
+# Install additional tools
+apt-get install -y jq curl wget git htop nvtop awscli nfs-common
+
+# Install CloudWatch agent
+wget https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
+dpkg -i amazon-cloudwatch-agent.deb
+
+# Restart services
+systemctl restart docker
+systemctl enable docker
+
+# Create mount point for EFS
+mkdir -p /mnt/efs
+
+# Signal that setup is complete
+touch /tmp/user-data-complete
+
+EOF
+
+    # Get AMI ID once for all attempts
+    AMI_ID=$(aws ec2 describe-images \
+        --owners 099720109477 \
+        --filters \
+            "Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-*-amd64-server-*" \
+            "Name=state,Values=available" \
+        --region "$AWS_REGION" \
+        --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' \
+        --output text)
+    
+    info "Using AMI: $AMI_ID"
+    
+    # Get all available zones
+    AVAILABLE_ZONES=($(get_all_availability_zones))
+    info "Available AZs: ${AVAILABLE_ZONES[*]}"
+    
+    # Try each availability zone until one succeeds
+    for AZ in "${AVAILABLE_ZONES[@]}"; do
+        log "Attempting spot instance launch in AZ: $AZ"
+        
+        # Get subnet for this AZ
+        SUBNET_ID=$(get_subnet_for_az "$AZ")
+        if [[ "$SUBNET_ID" == "None" || -z "$SUBNET_ID" ]]; then
+            warning "No suitable subnet found in $AZ, skipping..."
+            continue
+        fi
+        
+        info "Using subnet $SUBNET_ID in $AZ"
+        
+        # Create spot instance request with specific subnet (which determines AZ)
+        REQUEST_ID=$(aws ec2 request-spot-instances \
+            --spot-price "$MAX_SPOT_PRICE" \
+            --instance-count 1 \
+            --type "one-time" \
+            --launch-specification "{
+                \"ImageId\": \"$AMI_ID\",
+                \"InstanceType\": \"$INSTANCE_TYPE\",
+                \"KeyName\": \"$KEY_NAME\",
+                \"SecurityGroupIds\": [\"$SG_ID\"],
+                \"SubnetId\": \"$SUBNET_ID\",
+                \"IamInstanceProfile\": {
+                    \"Name\": \"${STACK_NAME}-instance-profile\"
+                },
+                \"UserData\": \"$(if [[ "$OSTYPE" == "darwin"* ]]; then base64 -i user-data.sh | tr -d '\n'; else base64 -w 0 user-data.sh; fi)\"
+            }" \
+            --region "$AWS_REGION" \
+            --query 'SpotInstanceRequests[0].SpotInstanceRequestId' \
+            --output text 2>/dev/null) || {
+            warning "Failed to create spot instance request in $AZ, trying next AZ..."
+            continue
+        }
+        
+        # Check if REQUEST_ID is valid
+        if [[ -z "$REQUEST_ID" || "$REQUEST_ID" == "None" || "$REQUEST_ID" == "null" ]]; then
+            warning "Invalid spot instance request ID in $AZ: $REQUEST_ID, trying next AZ..."
+            continue
+        fi
+        
+        info "Spot instance request ID: $REQUEST_ID in $AZ"
+        
+        # Wait for spot request to be fulfilled with timeout
+        log "Waiting for spot instance to be launched in $AZ..."
+        if aws ec2 wait spot-instance-request-fulfilled \
+            --spot-instance-request-ids "$REQUEST_ID" \
+            --region "$AWS_REGION" \
+            --waiter-config maxAttempts=10,delay=30; then
+            
+            # Get instance ID with error checking
+            INSTANCE_ID=$(aws ec2 describe-spot-instance-requests \
+                --spot-instance-request-ids "$REQUEST_ID" \
                 --region "$AWS_REGION" \
-                --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' \
-                --output text)\",
-            \"InstanceType\": \"$INSTANCE_TYPE\",
-            \"KeyName\": \"$KEY_NAME\",
-            \"SecurityGroupIds\": [\"$SG_ID\"],
-            \"IamInstanceProfile\": {
-                \"Name\": \"${STACK_NAME}-instance-profile\"
-            },
-            \"UserData\": \"$(base64 -w 0 user-data.sh)\"
-        }" \
-        --region "$AWS_REGION" \
-        --query 'SpotInstanceRequests[0].SpotInstanceRequestId' \
-        --output text)
+                --query 'SpotInstanceRequests[0].InstanceId' \
+                --output text)
+            
+            if [[ -n "$INSTANCE_ID" && "$INSTANCE_ID" != "None" && "$INSTANCE_ID" != "null" ]]; then
+                # Wait for instance to be running
+                log "Waiting for instance to be running..."
+                aws ec2 wait instance-running --instance-ids "$INSTANCE_ID" --region "$AWS_REGION"
+                
+                # Get public IP and actual AZ
+                INSTANCE_INFO=$(aws ec2 describe-instances \
+                    --instance-ids "$INSTANCE_ID" \
+                    --region "$AWS_REGION" \
+                    --query 'Reservations[0].Instances[0].{PublicIp:PublicIpAddress,AZ:Placement.AvailabilityZone}' \
+                    --output json)
+                
+                PUBLIC_IP=$(echo "$INSTANCE_INFO" | jq -r '.PublicIp')
+                ACTUAL_AZ=$(echo "$INSTANCE_INFO" | jq -r '.AZ')
+                
+                # Tag instance
+                aws ec2 create-tags \
+                    --resources "$INSTANCE_ID" \
+                    --tags Key=Name,Value="${STACK_NAME}-gpu-instance" Key=Project,Value="$PROJECT_NAME" Key=AvailabilityZone,Value="$ACTUAL_AZ" \
+                    --region "$AWS_REGION"
+                
+                success "Spot instance launched: $INSTANCE_ID (IP: $PUBLIC_IP) in AZ: $ACTUAL_AZ"
+                
+                # Clean up temporary user data file
+                rm -f user-data.sh
+                
+                echo "$INSTANCE_ID:$PUBLIC_IP:$ACTUAL_AZ"
+                return 0
+            else
+                warning "Failed to get instance ID from spot request in $AZ, trying next AZ..."
+                continue
+            fi
+        else
+            warning "Spot instance request timed out in $AZ, trying next AZ..."
+            # Cancel the failed request
+            aws ec2 cancel-spot-instance-requests --spot-instance-request-ids "$REQUEST_ID" --region "$AWS_REGION" 2>/dev/null || true
+            continue
+        fi
+    done
     
-    info "Spot instance request ID: $REQUEST_ID"
+    # If we get here, all AZs failed
+    error "Failed to launch spot instance in any availability zone. This may be due to:"
+    error "  1. Spot instance capacity constraints across all AZs"
+    error "  2. Service limits on spot instances"
+    error "  3. Instance type not available in this region"
+    error "  4. Spot price too low (current max: $MAX_SPOT_PRICE)"
     
-    # Wait for spot request to be fulfilled
-    log "Waiting for spot instance to be launched..."
-    aws ec2 wait spot-instance-request-fulfilled \
-        --spot-instance-request-ids "$REQUEST_ID" \
-        --region "$AWS_REGION"
+    # Clean up temporary file
+    rm -f user-data.sh
     
-    # Get instance ID
-    INSTANCE_ID=$(aws ec2 describe-spot-instance-requests \
-        --spot-instance-request-ids "$REQUEST_ID" \
-        --region "$AWS_REGION" \
-        --query 'SpotInstanceRequests[0].InstanceId' \
-        --output text)
-    
-    # Wait for instance to be running
-    log "Waiting for instance to be running..."
-    aws ec2 wait instance-running --instance-ids "$INSTANCE_ID" --region "$AWS_REGION"
-    
-    # Get public IP
-    PUBLIC_IP=$(aws ec2 describe-instances \
-        --instance-ids "$INSTANCE_ID" \
-        --region "$AWS_REGION" \
-        --query 'Reservations[0].Instances[0].PublicIpAddress' \
-        --output text)
-    
-    # Tag instance
-    aws ec2 create-tags \
-        --resources "$INSTANCE_ID" \
-        --tags Key=Name,Value="${STACK_NAME}-gpu-instance" Key=Project,Value="$PROJECT_NAME" \
-        --region "$AWS_REGION"
-    
-    success "Spot instance launched: $INSTANCE_ID (IP: $PUBLIC_IP)"
-    echo "$INSTANCE_ID:$PUBLIC_IP"
+    return 1
 }
 
 # Add CloudFront setup after instance launch
@@ -1118,6 +1365,7 @@ display_results() {
     local PUBLIC_IP="$1"
     local INSTANCE_ID="$2"
     local EFS_DNS="$3"
+    local INSTANCE_AZ="$4"
     
     echo ""
     echo -e "${CYAN}=================================${NC}"
@@ -1128,6 +1376,7 @@ display_results() {
     echo -e "  Instance ID: ${YELLOW}$INSTANCE_ID${NC}"
     echo -e "  Public IP: ${YELLOW}$PUBLIC_IP${NC}"
     echo -e "  Instance Type: ${YELLOW}$INSTANCE_TYPE${NC}"
+    echo -e "  Availability Zone: ${YELLOW}$INSTANCE_AZ${NC}"
     echo -e "  EFS DNS: ${YELLOW}$EFS_DNS${NC}"
     echo ""
     echo -e "${BLUE}Service URLs:${NC}"
@@ -1145,17 +1394,18 @@ display_results() {
     echo -e "  3. Check service logs: ssh to instance and run 'docker-compose logs'"
     echo -e "  4. Configure API keys in .env file for enhanced features"
     echo ""
-    echo -e "${YELLOW}Cost Optimization:${NC}"
-    echo -e "  - Spot instance saves ~70% vs on-demand"
-    echo -e "  - Automatic cost monitoring and optimization enabled"
-    echo -e "  - Expected cost: ~$18-30/day (vs $60-100/day on-demand)"
+    echo -e "${YELLOW}Cost Information:${NC}"
+    echo -e "  - Single spot instance saves ~70% vs on-demand"
+    echo -e "  - No auto-scaling to avoid spot instance limits"
+    echo -e "  - Expected cost: ~$6-8/day (single g4dn.xlarge spot)"
     echo ""
-    echo -e "${YELLOW}Monitoring:${NC}"
-    echo -e "  - GPU utilization monitoring active"
-    echo -e "  - Auto-scaling based on utilization"
-    echo -e "  - Cost alerts configured"
-    echo ""
-    echo -e "  Domain: geuse.io (via CloudFront: $DISTRIBUTION_DOMAIN)"
+    echo -e "${YELLOW}Instance Details:${NC}"
+    echo -e "  - Single spot instance deployment with multi-AZ fallback"
+    echo -e "  - Deployed in $INSTANCE_AZ (automatically selected)"
+    echo -e "  - CloudWatch monitoring enabled"
+    echo -e "  - EFS shared storage available"
+    echo -e "  - SSM management access"
+    echo -e "  - Optimized for spot instance availability across all AZs"
     echo ""
 }
 
@@ -1166,68 +1416,113 @@ display_results() {
 cleanup_on_error() {
     error "Deployment failed. Cleaning up resources..."
     
-    # Terminate instance
+    # Terminate instance first
     if [ ! -z "${INSTANCE_ID:-}" ]; then
-        aws ec2 terminate-instances --instance-ids "$INSTANCE_ID" --region "$AWS_REGION"
-        aws ec2 wait instance-terminated --instance-ids "$INSTANCE_ID" --region "$AWS_REGION"
+        log "Terminating instance $INSTANCE_ID..."
+        aws ec2 terminate-instances --instance-ids "$INSTANCE_ID" --region "$AWS_REGION" || true
+        aws ec2 wait instance-terminated --instance-ids "$INSTANCE_ID" --region "$AWS_REGION" || true
     fi
     
-    # Delete launch template
-    aws ec2 delete-launch-template --launch-template-name "${STACK_NAME}-launch-template" --region "$AWS_REGION" || true
+    # Note: No Auto Scaling Group to delete (using single spot instance)
     
-    # Delete target groups
+    # Delete CloudWatch alarms (if any were created)
+    log "Deleting CloudWatch alarms..."
+    aws cloudwatch delete-alarms \
+        --alarm-names "${STACK_NAME}-high-gpu-utilization" "${STACK_NAME}-low-gpu-utilization" \
+        --region "$AWS_REGION" 2>/dev/null || true
+    
+    # Delete CloudFront distribution (takes longest, do early)
+    if [ ! -z "${DISTRIBUTION_ID:-}" ]; then
+        log "Disabling and deleting CloudFront distribution..."
+        # Disable first
+        ETAG=$(aws cloudfront get-distribution-config --id "$DISTRIBUTION_ID" --query ETag --output text 2>/dev/null) || true
+        if [ ! -z "$ETAG" ] && [ "$ETAG" != "None" ]; then
+            CONFIG=$(aws cloudfront get-distribution-config --id "$DISTRIBUTION_ID" --query DistributionConfig --output json 2>/dev/null) || true
+            if [ ! -z "$CONFIG" ]; then
+                echo "$CONFIG" | jq '.Enabled = false' > disabled-config.json 2>/dev/null || true
+                aws cloudfront update-distribution --id "$DISTRIBUTION_ID" --distribution-config file://disabled-config.json --if-match "$ETAG" 2>/dev/null || true
+                aws cloudfront wait distribution-deployed --id "$DISTRIBUTION_ID" 2>/dev/null || true
+                NEW_ETAG=$(aws cloudfront get-distribution --id "$DISTRIBUTION_ID" --query ETag --output text 2>/dev/null) || true
+                aws cloudfront delete-distribution --id "$DISTRIBUTION_ID" --if-match "$NEW_ETAG" 2>/dev/null || true
+            fi
+        fi
+    fi
+    
+    # Wait for ALB dependencies to clear, then delete ALB
+    if [ ! -z "${ALB_ARN:-}" ]; then
+        log "Deleting Application Load Balancer..."
+        sleep 30  # Wait for connections to clear
+        aws elbv2 delete-load-balancer --load-balancer-arn "$ALB_ARN" --region "$AWS_REGION" || true
+        # Wait for ALB to be deleted before deleting target groups
+        sleep 60
+    fi
+    
+    # Delete target groups after ALB is gone
     if [ ! -z "${TARGET_GROUP_ARN:-}" ]; then
-        aws elbv2 delete-target-group --target-group-arn "$TARGET_GROUP_ARN" --region "$AWS_REGION"
+        log "Deleting n8n target group..."
+        aws elbv2 delete-target-group --target-group-arn "$TARGET_GROUP_ARN" --region "$AWS_REGION" || true
     fi
     if [ ! -z "${QDRANT_TG_ARN:-}" ]; then
-        aws elbv2 delete-target-group --target-group-arn "$QDRANT_TG_ARN" --region "$AWS_REGION"
+        log "Deleting qdrant target group..."
+        aws elbv2 delete-target-group --target-group-arn "$QDRANT_TG_ARN" --region "$AWS_REGION" || true
     fi
     
-    # Delete ALB
-    if [ ! -z "${ALB_ARN:-}" ]; then
-        aws elbv2 delete-load-balancer --load-balancer-arn "$ALB_ARN" --region "$AWS_REGION"
-    fi
-    
-    # Delete CloudFront distribution
-    if [ ! -z "${DISTRIBUTION_ID:-}" ]; then
-        # Disable first
-        ETAG=$(aws cloudfront get-distribution-config --id "$DISTRIBUTION_ID" --query ETag --output text)
-        CONFIG=$(aws cloudfront get-distribution-config --id "$DISTRIBUTION_ID" --query DistributionConfig --output json)
-        echo "$CONFIG" | jq '.Enabled = false' > disabled-config.json
-        aws cloudfront update-distribution --id "$DISTRIBUTION_ID" --distribution-config file://disabled-config.json --if-match "$ETAG"
-        aws cloudfront wait distribution-deployed --id "$DISTRIBUTION_ID"
-        aws cloudfront delete-distribution --id "$DISTRIBUTION_ID" --if-match "$(aws cloudfront get-distribution --id "$DISTRIBUTION_ID" --query ETag --output text)"
-    fi
+    # Note: No launch template to delete (using direct spot instance)
     
     # Delete EFS mount targets and file system
     if [ ! -z "${EFS_ID:-}" ]; then
-        MOUNT_TARGETS=$(aws efs describe-mount-targets --file-system-id "$EFS_ID" --query 'MountTargets[].MountTargetId' --output text)
+        log "Deleting EFS mount targets and file system..."
+        MOUNT_TARGETS=$(aws efs describe-mount-targets --file-system-id "$EFS_ID" --query 'MountTargets[].MountTargetId' --output text --region "$AWS_REGION" 2>/dev/null) || true
         for MT in $MOUNT_TARGETS; do
-            aws efs delete-mount-target --mount-target-id "$MT" --region "$AWS_REGION"
+            if [ ! -z "$MT" ] && [ "$MT" != "None" ]; then
+                aws efs delete-mount-target --mount-target-id "$MT" --region "$AWS_REGION" || true
+            fi
         done
-        sleep 30  # Wait for deletion
-        aws efs delete-file-system --file-system-id "$EFS_ID" --region "$AWS_REGION"
+        sleep 30  # Wait for mount targets to be deleted
+        aws efs delete-file-system --file-system-id "$EFS_ID" --region "$AWS_REGION" || true
     fi
     
-    # Delete security group
+    # Delete security group (wait for all dependencies to clear)
     if [ ! -z "${SG_ID:-}" ]; then
-        aws ec2 delete-security-group --group-id "$SG_ID" --region "$AWS_REGION" || true
+        log "Deleting security group..."
+        # Wait longer for EFS mount targets and other dependencies to fully detach
+        sleep 60
+        # Retry security group deletion with better error handling
+        local retry_count=0
+        while [ $retry_count -lt 3 ]; do
+            if aws ec2 delete-security-group --group-id "$SG_ID" --region "$AWS_REGION" 2>/dev/null; then
+                success "Security group deleted"
+                break
+            else
+                retry_count=$((retry_count + 1))
+                warning "Security group deletion attempt $retry_count failed, waiting 30s..."
+                sleep 30
+            fi
+        done
+        if [ $retry_count -eq 3 ]; then
+            warning "Security group $SG_ID could not be deleted due to dependencies. Please delete manually."
+        fi
     fi
     
     # Delete IAM resources
-    aws iam remove-role-from-instance-profile --instance-profile-name "${STACK_NAME}-instance-profile" --role-name "${STACK_NAME}-role" || true
-    aws iam delete-instance-profile --instance-profile-name "${STACK_NAME}-instance-profile" || true
-    aws iam detach-role-policy --role-name "${STACK_NAME}-role" --policy-arn "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy" || true
-    aws iam detach-role-policy --role-name "${STACK_NAME}-role" --policy-arn "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore" || true
-    aws iam detach-role-policy --role-name "${STACK_NAME}-role" --policy-arn "arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):policy/${STACK_NAME}-custom-policy" || true
-    aws iam delete-policy --policy-arn "arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):policy/${STACK_NAME}-custom-policy" || true
-    aws iam delete-role --role-name "${STACK_NAME}-role" || true
+    log "Cleaning up IAM resources..."
+    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) || ""
+    aws iam remove-role-from-instance-profile --instance-profile-name "${STACK_NAME}-instance-profile" --role-name "${STACK_NAME}-role" 2>/dev/null || true
+    aws iam delete-instance-profile --instance-profile-name "${STACK_NAME}-instance-profile" 2>/dev/null || true
+    aws iam detach-role-policy --role-name "${STACK_NAME}-role" --policy-arn "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy" 2>/dev/null || true
+    aws iam detach-role-policy --role-name "${STACK_NAME}-role" --policy-arn "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore" 2>/dev/null || true
+    if [ ! -z "$ACCOUNT_ID" ]; then
+        aws iam detach-role-policy --role-name "${STACK_NAME}-role" --policy-arn "arn:aws:iam::${ACCOUNT_ID}:policy/${STACK_NAME}-custom-policy" 2>/dev/null || true
+        aws iam delete-policy --policy-arn "arn:aws:iam::${ACCOUNT_ID}:policy/${STACK_NAME}-custom-policy" 2>/dev/null || true
+    fi
+    aws iam delete-role --role-name "${STACK_NAME}-role" 2>/dev/null || true
     
-    # Delete key pair
+    # Delete key pair and local files
+    log "Deleting key pair and temporary files..."
     aws ec2 delete-key-pair --key-name "$KEY_NAME" --region "$AWS_REGION" || true
-    rm -f "${KEY_NAME}.pem"
+    rm -f "${KEY_NAME}.pem" user-data.sh trust-policy.json custom-policy.json deploy-app.sh disabled-config.json
     
-    warning "Cleanup completed. Please verify in AWS console."
+    warning "Cleanup completed. Please verify in AWS console that all resources are deleted."
 }
 
 # =============================================================================
@@ -1259,42 +1554,17 @@ EOF
     create_iam_role
     
     SG_ID=$(create_security_group)
-    EFS_DNS=$(create_efs)
+    EFS_DNS=$(create_efs "$SG_ID")
     
-    create_launch_template "$SG_ID"
-    
-    # Create Auto Scaling Group for cost optimization
-    ASG_NAME=$(create_auto_scaling_group "$SG_ID" "$EFS_DNS")
-    
-    # Launch initial spot instance via ASG
-    log "Waiting for ASG to launch initial instance..."
-    sleep 60
-    
-    # Get instance info from ASG
-    INSTANCE_ID=$(aws autoscaling describe-auto-scaling-groups \
-        --auto-scaling-group-names "$ASG_NAME" \
-        --region "$AWS_REGION" \
-        --query 'AutoScalingGroups[0].Instances[0].InstanceId' \
-        --output text)
-    
-    # Wait for instance to be running
-    if [ "$INSTANCE_ID" != "None" ] && [ -n "$INSTANCE_ID" ]; then
-        log "Waiting for ASG instance to be running..."
-        aws ec2 wait instance-running --instance-ids "$INSTANCE_ID" --region "$AWS_REGION"
-        
-        # Get public IP
-        PUBLIC_IP=$(aws ec2 describe-instances \
-            --instance-ids "$INSTANCE_ID" \
-            --region "$AWS_REGION" \
-            --query 'Reservations[0].Instances[0].PublicIpAddress' \
-            --output text)
-    else
-        # Fallback to direct spot instance launch if ASG fails
-        warning "ASG instance not available, falling back to direct spot launch"
-        INSTANCE_INFO=$(launch_spot_instance "$SG_ID" "$EFS_DNS")
-        INSTANCE_ID=$(echo "$INSTANCE_INFO" | cut -d: -f1)
-        PUBLIC_IP=$(echo "$INSTANCE_INFO" | cut -d: -f2)
-    fi
+    # Launch single spot instance directly (no ASG to avoid multiple instances)
+    log "Launching single spot instance with multi-AZ fallback..."
+    INSTANCE_INFO=$(launch_spot_instance "$SG_ID" "$EFS_DNS")
+    INSTANCE_ID=$(echo "$INSTANCE_INFO" | cut -d: -f1)
+    PUBLIC_IP=$(echo "$INSTANCE_INFO" | cut -d: -f2)
+    INSTANCE_AZ=$(echo "$INSTANCE_INFO" | cut -d: -f3)
+
+    # Now create EFS mount target in the AZ where instance was actually launched
+    create_efs_mount_target "$SG_ID" "$INSTANCE_AZ"
 
     TARGET_GROUP_ARN=$(create_target_group "$SG_ID" "$INSTANCE_ID")
     QDRANT_TG_ARN=$(create_qdrant_target_group "$SG_ID" "$INSTANCE_ID")
@@ -1307,7 +1577,7 @@ EOF
     setup_monitoring "$PUBLIC_IP"
     validate_deployment "$PUBLIC_IP"
     
-    display_results "$PUBLIC_IP" "$INSTANCE_ID" "$EFS_DNS"
+    display_results "$PUBLIC_IP" "$INSTANCE_ID" "$EFS_DNS" "$INSTANCE_AZ"
     
     # Clean up temporary files
     rm -f user-data.sh trust-policy.json custom-policy.json deploy-app.sh
