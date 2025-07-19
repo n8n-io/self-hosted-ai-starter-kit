@@ -1,0 +1,69 @@
+import requests
+import pandas as pd
+from prettytable import PrettyTable
+from datetime import datetime
+
+# Custom user-agent for NSE
+headers = {
+    'User-Agent': 'Mozilla/5.0'
+}
+
+# === FII/DII Live Data ===
+def get_fiidii_data():
+    url = 'https://www.nseindia.com/api/fiidiiTradeStatistics?category=all'
+    response = requests.get(url, headers=headers)
+    data = response.json()
+    
+    fii_net = None
+    dii_net = None
+    for item in data['data']:
+        if item['category'] == 'FII':
+            fii_net = float(item['netValue'].replace(',', ''))
+        elif item['category'] == 'DII':
+            dii_net = float(item['netValue'].replace(',', ''))
+    
+    return fii_net, dii_net
+
+# === Top Gainers/Losers Volume Check ===
+def get_market_activity():
+    url = 'https://www.nseindia.com/api/live-analysis-variations?index=gainers'
+    response = requests.get(url, headers=headers)
+    data = response.json()
+    
+    # Process top 5 gainers as strong buying
+    gainers = pd.DataFrame(data['DATA']).head(5)
+    gainers['Side'] = 'Buying'
+
+    # Top 5 losers as strong selling
+    url = 'https://www.nseindia.com/api/live-analysis-variations?index=losers'
+    response = requests.get(url, headers=headers)
+    data = response.json()
+    losers = pd.DataFrame(data['DATA']).head(5)
+    losers['Side'] = 'Selling'
+    
+    result = pd.concat([gainers[['symbol', 'ltP', 'trdVol', 'Side']], losers[['symbol', 'ltP', 'trdVol', 'Side']]])
+    return result
+
+# === Display Function ===
+def display_data():
+    try:
+        fii, dii = get_fiidii_data()
+        activity = get_market_activity()
+
+        print("\n=== FII/DII Net Activity ===")
+        print(f"FII Net: ₹{fii:,.2f} | DII Net: ₹{dii:,.2f}")
+
+        print("\n=== Market Buy/Sell Pressure ===")
+        table = PrettyTable()
+        table.field_names = ["Stock", "LTP (₹)", "Volume", "Signal"]
+        for _, row in activity.iterrows():
+            table.add_row([row['symbol'], row['ltP'], row['trdVol'], row['Side']])
+        print(table)
+
+    except Exception as e:
+        print("Error occurred:", e)
+
+# Run periodically
+if __name__ == "__main__":
+    print(f"Live Market Data | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    display_data()
