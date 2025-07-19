@@ -1,4 +1,4 @@
-# 🚀 AI Starter Kit - GPU-Optimized AWS Deployment by [G E U S E](geuse.io)
+# 🚀 AI Starter Kit - GPU-Optimized AWS Deployment by [G E U S E](HTTPS://geuse.io)
 
 <div align="center">
 
