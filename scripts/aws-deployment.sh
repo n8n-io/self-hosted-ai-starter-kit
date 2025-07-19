@@ -5,9 +5,20 @@
 # =============================================================================
 # This script automates the complete deployment of the AI starter kit on AWS
 # Features: EFS setup, GPU instances, cost optimization, monitoring
-# Target: g4dn.xlarge with NVIDIA T4 GPU
-# Cost Optimization: 70% savings with spot instances
+# Intelligent AMI and Instance Selection: Automatically selects best price/performance
+# Deep Learning AMIs: Pre-configured NVIDIA drivers, Docker GPU runtime, CUDA toolkit
+# Cost Optimization: 70% savings with spot instances + intelligent configuration selection
 # =============================================================================
+
+# Check if running under bash (required for associative arrays)
+if [ -z "${BASH_VERSION:-}" ]; then
+    echo "Error: This script requires bash to run properly."
+    echo "Please run: bash $0 $*"
+    echo "Or make the script executable and ensure it uses the bash shebang."
+    exit 1
+fi
+
+# Note: Converted to work with bash 3.2+ (compatible with macOS default bash)
 
 set -euo pipefail
 
@@ -22,11 +33,64 @@ NC='\033[0m' # No Color
 
 # Configuration
 AWS_REGION="${AWS_REGION:-us-east-1}"
-INSTANCE_TYPE="${INSTANCE_TYPE:-g4dn.xlarge}"
-MAX_SPOT_PRICE="${MAX_SPOT_PRICE:-0.75}"
+INSTANCE_TYPE="${INSTANCE_TYPE:-auto}"  # Changed to auto-selection
+MAX_SPOT_PRICE="${MAX_SPOT_PRICE:-2.00}"  # Increased for G5 instances
 KEY_NAME="${KEY_NAME:-ai-starter-kit-key}"
 STACK_NAME="${STACK_NAME:-ai-starter-kit}"
 PROJECT_NAME="${PROJECT_NAME:-ai-starter-kit}"
+ENABLE_CROSS_REGION="${ENABLE_CROSS_REGION:-false}"  # Cross-region analysis
+
+# =============================================================================
+# GPU INSTANCE AND AMI CONFIGURATION MATRIX
+# =============================================================================
+
+# Define supported AMI and instance type combinations
+# Based on AWS Deep Learning AMI and NVIDIA NGC documentation
+# Function to get GPU configuration (replaces associative array for bash 3.2 compatibility)
+get_gpu_config() {
+    local key="$1"
+    case "$key" in
+        # G4DN instances with Deep Learning AMI (Intel Xeon + NVIDIA T4)
+        "g4dn.xlarge_primary") echo "ami-0489c31b03f0be3d6" ;;
+        "g4dn.xlarge_secondary") echo "ami-00b530caaf8eee2c5" ;;
+        "g4dn.2xlarge_primary") echo "ami-0489c31b03f0be3d6" ;;
+        "g4dn.2xlarge_secondary") echo "ami-00b530caaf8eee2c5" ;;
+        
+        # G5G instances with Deep Learning AMI (ARM Graviton2 + NVIDIA T4G)
+        "g5g.xlarge_primary") echo "ami-0126d561b2bb55618" ;;
+        "g5g.xlarge_secondary") echo "ami-04ba92cdace8a636f" ;;
+        "g5g.2xlarge_primary") echo "ami-0126d561b2bb55618" ;;
+        "g5g.2xlarge_secondary") echo "ami-04ba92cdace8a636f" ;;
+        
+        *) echo "" ;;  # Return empty string for unknown keys
+    esac
+}
+
+# Instance type specifications
+# Function to get instance specs (replaces associative array for bash 3.2 compatibility)
+get_instance_specs() {
+    local key="$1"
+    case "$key" in
+        "g4dn.xlarge") echo "4:16:1:T4:Intel:125GB" ;;     # vCPUs:RAM:GPUs:GPU_Type:CPU_Arch:Storage
+        "g4dn.2xlarge") echo "8:32:1:T4:Intel:225GB" ;;
+        "g5g.xlarge") echo "4:8:1:T4G:ARM:125GB" ;;
+        "g5g.2xlarge") echo "8:16:1:T4G:ARM:225GB" ;;
+        *) echo "" ;;  # Return empty string for unknown keys
+    esac
+}
+
+# Performance scoring (higher = better)
+# Function to get performance scores (replaces associative array for bash 3.2 compatibility)
+get_performance_score() {
+    local key="$1"
+    case "$key" in
+        "g4dn.xlarge") echo "70" ;;
+        "g4dn.2xlarge") echo "85" ;;
+        "g5g.xlarge") echo "65" ;;      # ARM may have compatibility considerations
+        "g5g.2xlarge") echo "80" ;;
+        *) echo "0" ;;  # Return 0 for unknown keys
+    esac
+}
 
 # =============================================================================
 # UTILITY FUNCTIONS
@@ -53,115 +117,1290 @@ info() {
 }
 
 check_prerequisites() {
-    log "Checking prerequisites..."
+    log "🔍 Checking prerequisites for intelligent GPU deployment..."
     
     # Check AWS CLI
     if ! command -v aws &> /dev/null; then
         error "AWS CLI not found. Please install AWS CLI first."
+        error "Install: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
         exit 1
     fi
     
     # Check Docker
     if ! command -v docker &> /dev/null; then
         error "Docker not found. Please install Docker first."
+        error "Install: https://docs.docker.com/get-docker/"
         exit 1
     fi
     
     # Check Docker Compose
     if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
         error "Docker Compose not found. Please install Docker Compose first."
+        error "Install: https://docs.docker.com/compose/install/"
         exit 1
     fi
     
     # Check AWS credentials
     if ! aws sts get-caller-identity &> /dev/null; then
         error "AWS credentials not configured. Please run 'aws configure' first."
+        error "Documentation: https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-configure.html"
         exit 1
     fi
     
-    # Check jq for JSON processing
+    # Check jq for JSON processing (critical for intelligent selection)
     if ! command -v jq &> /dev/null; then
-        warning "jq not found. Installing jq for JSON processing..."
+        warning "jq not found. Installing jq for intelligent configuration selection..."
         if [[ "$OSTYPE" == "darwin"* ]]; then
-            brew install jq || {
-                error "Failed to install jq. Please install it manually."
+            if command -v brew &> /dev/null; then
+                brew install jq || {
+                    error "Failed to install jq via Homebrew. Please install it manually."
+                    error "Install: brew install jq"
+                    exit 1
+                }
+            else
+                error "jq required for intelligent selection but Homebrew not found."
+                error "Please install jq manually: https://stedolan.github.io/jq/download/"
                 exit 1
-            }
+            fi
         elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-            sudo apt-get update && sudo apt-get install -y jq || {
-                error "Failed to install jq. Please install it manually."
+            if command -v apt-get &> /dev/null; then
+                sudo apt-get update && sudo apt-get install -y jq || {
+                    error "Failed to install jq. Please install it manually."
+                    error "Install: sudo apt-get install jq"
+                    exit 1
+                }
+            elif command -v yum &> /dev/null; then
+                sudo yum install -y jq || {
+                    error "Failed to install jq. Please install it manually."
+                    error "Install: sudo yum install jq"
+                    exit 1
+                }
+            else
+                error "jq required for intelligent selection. Please install manually."
+                error "Install: https://stedolan.github.io/jq/download/"
                 exit 1
-            }
+            fi
+        else
+            error "jq required for intelligent selection on this platform."
+            error "Install: https://stedolan.github.io/jq/download/"
+            exit 1
         fi
     fi
     
-    success "Prerequisites check completed"
-}
-
-get_single_availability_zone() {
-    aws ec2 describe-availability-zones \
-        --region "$AWS_REGION" \
-        --query 'AvailabilityZones[?State==`available`].ZoneName' \
-        --output text | awk '{print $1}'
-}
-
-get_all_availability_zones() {
-    aws ec2 describe-availability-zones \
-        --region "$AWS_REGION" \
-        --query 'AvailabilityZones[?State==`available`].ZoneName' \
-        --output text
-}
-
-get_subnet_for_az() {
-    local AZ="$1"
-    aws ec2 describe-subnets \
-        --filters "Name=availability-zone,Values=$AZ" "Name=default-for-az,Values=true" \
-        --region "$AWS_REGION" \
-        --query 'Subnets[0].SubnetId' \
-        --output text
-}
-
-# Add SSM fetch function after utility functions
-fetch_ssm_params() {
-    log "Fetching parameters from AWS SSM..."
+    # Check bc for price calculations (critical for cost optimization)
+    if ! command -v bc &> /dev/null; then
+        warning "bc (calculator) not found. Installing bc for price calculations..."
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            if command -v brew &> /dev/null; then
+                brew install bc || {
+                    error "Failed to install bc via Homebrew. Please install it manually."
+                    exit 1
+                }
+            else
+                error "bc required for price calculations but Homebrew not found."
+                error "Please install bc manually"
+                exit 1
+            fi
+        elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+            if command -v apt-get &> /dev/null; then
+                sudo apt-get update && sudo apt-get install -y bc || {
+                    error "Failed to install bc. Please install it manually."
+                    exit 1
+                }
+            elif command -v yum &> /dev/null; then
+                sudo yum install -y bc || {
+                    error "Failed to install bc. Please install it manually."
+                    exit 1
+                }
+            fi
+        fi
+    fi
     
-    # List of parameters to fetch
-    params=(
-        "/aibuildkit/n8n/COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE"
-        "/aibuildkit/n8n/CORS_ALLOWED_ORIGINS"
-        "/aibuildkit/n8n/CORS_ENABLE"
-        "/aibuildkit/n8n/ENCRYPTION_KEY"
-        "/aibuildkit/n8n/USER_MANAGEMENT_JWT_SECRET"
-        "/aibuildkit/OPENAI_API_KEY"
-        "/aibuildkit/POSTGRES_DB"
-        "/aibuildkit/POSTGRES_PASSWORD"
-        "/aibuildkit/POSTGRES_USER"
-        "/aibuildkit/WEBHOOK_URL"
-        "/aibuildkit/n8n_id"
-    )
+    # Verify AWS region availability
+    if ! aws ec2 describe-regions --region-names "$AWS_REGION" &> /dev/null; then
+        error "Invalid or inaccessible AWS region: $AWS_REGION"
+        error "Please specify a valid region with --region"
+        exit 1
+    fi
     
-    # Fetch parameters in batch
-    SSM_PARAMS=$(aws ssm get-parameters --names "${params[@]}" --with-decryption --region "$AWS_REGION" --query "Parameters" --output json)
+    # Get account info for display
+    local ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null)
+    local CALLER_USER=$(aws sts get-caller-identity --query Arn --output text 2>/dev/null | sed 's/.*\///')
     
-    # Export as environment variables
-    export N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/aibuildkit/n8n/COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE") | .Value')
-    export N8N_CORS_ALLOWED_ORIGINS=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/aibuildkit/n8n/CORS_ALLOWED_ORIGINS") | .Value')
-    export N8N_CORS_ENABLE=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/aibuildkit/n8n/CORS_ENABLE") | .Value')
-    export N8N_ENCRYPTION_KEY=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/aibuildkit/n8n/ENCRYPTION_KEY") | .Value')
-    export N8N_USER_MANAGEMENT_JWT_SECRET=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/aibuildkit/n8n/USER_MANAGEMENT_JWT_SECRET") | .Value')
-    export OPENAI_API_KEY=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/aibuildkit/OPENAI_API_KEY") | .Value')
-    export POSTGRES_DB=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/aibuildkit/POSTGRES_DB") | .Value')
-    export POSTGRES_PASSWORD=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/aibuildkit/POSTGRES_PASSWORD") | .Value')
-    export POSTGRES_USER=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/aibuildkit/POSTGRES_USER") | .Value')
-    export WEBHOOK_URL=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/aibuildkit/WEBHOOK_URL") | .Value')
-    export N8N_ID=$(echo "$SSM_PARAMS" | jq -r '.[] | select(.Name=="/aibuildkit/n8n_id") | .Value')
-    
-    success "Fetched parameters from SSM"
+    success "✅ Prerequisites check completed"
+    info "AWS Account: $ACCOUNT_ID"
+    info "Caller: $CALLER_USER"
+    info "Region: $AWS_REGION"
+    info "Ready for intelligent GPU deployment!"
 }
 
 # =============================================================================
-# INFRASTRUCTURE SETUP
+# INTELLIGENT AMI AND INSTANCE SELECTION
 # =============================================================================
+
+get_instance_type_list() {
+    echo "g4dn.xlarge g4dn.2xlarge g5g.xlarge g5g.2xlarge"
+}
+
+verify_ami_availability() {
+    local ami_id="$1"
+    local region="$2"
+    
+    log "Verifying AMI availability: $ami_id in $region..."
+    
+    AMI_STATE=$(aws ec2 describe-images \
+        --image-ids "$ami_id" \
+        --region "$region" \
+        --query 'Images[0].State' \
+        --output text 2>/dev/null || echo "NotFound")
+    
+    if [[ "$AMI_STATE" == "available" ]]; then
+        # Get AMI details
+        AMI_INFO=$(aws ec2 describe-images \
+            --image-ids "$ami_id" \
+            --region "$region" \
+            --query 'Images[0].{Name:Name,Description:Description,Architecture:Architecture,CreationDate:CreationDate}' \
+            --output json 2>/dev/null)
+        
+        if [[ -n "$AMI_INFO" && "$AMI_INFO" != "null" ]]; then
+            AMI_NAME=$(echo "$AMI_INFO" | jq -r '.Name // "Unknown"')
+            AMI_ARCH=$(echo "$AMI_INFO" | jq -r '.Architecture // "Unknown"')
+            AMI_DATE=$(echo "$AMI_INFO" | jq -r '.CreationDate // "Unknown"')
+            
+            success "✓ AMI $ami_id available: $AMI_NAME ($AMI_ARCH)"
+            info "  Creation Date: $AMI_DATE"
+            return 0
+        fi
+    fi
+    
+    warning "✗ AMI $ami_id not available in $region (State: $AMI_STATE)"
+    return 1
+}
+
+check_instance_type_availability() {
+    local instance_type="$1"
+    local region="$2"
+    
+    log "Checking instance type availability: $instance_type in $region..."
+    
+    AVAILABLE_AZS=$(aws ec2 describe-instance-type-offerings \
+        --location-type availability-zone \
+        --filters "Name=instance-type,Values=$instance_type" \
+        --region "$region" \
+        --query 'InstanceTypeOfferings[].Location' \
+        --output text 2>/dev/null || echo "")
+    
+    if [[ -n "$AVAILABLE_AZS" && "$AVAILABLE_AZS" != "None" ]]; then
+        success "✓ $instance_type available in AZs: $AVAILABLE_AZS"
+        echo "$AVAILABLE_AZS"
+        return 0
+    else
+        warning "✗ $instance_type not available in $region"
+        return 1
+    fi
+}
+
+get_comprehensive_spot_pricing() {
+    local instance_types="$1"
+    local region="$2"
+    
+    log "Analyzing comprehensive spot pricing across all configurations..."
+    
+    # Create temporary file for pricing data
+    local pricing_file=$(mktemp)
+    echo "[]" > "$pricing_file"
+    
+    for instance_type in $instance_types; do
+        info "Fetching spot prices for $instance_type..."
+        
+        # Get recent spot price history with better error handling
+        SPOT_DATA=$(aws ec2 describe-spot-price-history \
+            --instance-types "$instance_type" \
+            --product-descriptions "Linux/UNIX" \
+            --max-items 50 \
+            --region "$region" \
+            --query 'SpotPrices | sort_by(@, &Timestamp) | reverse(@) | [*] | group_by(@, &AvailabilityZone) | map({instance_type: `'"$instance_type"'`, az: .[0].AvailabilityZone, price: .[0].SpotPrice, timestamp: .[0].Timestamp})' \
+            --output json 2>/dev/null || echo "[]")
+        
+        if [[ "$SPOT_DATA" != "[]" && -n "$SPOT_DATA" && "$SPOT_DATA" != "null" ]]; then
+            # Validate JSON and merge with existing data
+            if echo "$SPOT_DATA" | jq empty 2>/dev/null; then
+                jq -s '.[0] + .[1]' "$pricing_file" <(echo "$SPOT_DATA") > "${pricing_file}.tmp"
+                mv "${pricing_file}.tmp" "$pricing_file"
+            else
+                warning "Invalid JSON response for $instance_type pricing data"
+            fi
+        else
+            warning "No spot pricing data available for $instance_type in $region"
+            # Add fallback pricing based on typical market rates
+            case "$instance_type" in
+                "g4dn.xlarge")
+                    FALLBACK_PRICE="0.45"
+                    ;;
+                "g4dn.2xlarge")
+                    FALLBACK_PRICE="0.89"
+                    ;;
+                "g5g.xlarge")
+                    FALLBACK_PRICE="0.38"
+                    ;;
+                "g5g.2xlarge")
+                    FALLBACK_PRICE="0.75"
+                    ;;
+                *)
+                    FALLBACK_PRICE="1.00"
+                    ;;
+            esac
+            
+            warning "Using fallback pricing estimate: \$$FALLBACK_PRICE/hour for $instance_type"
+            FALLBACK_DATA=$(jq -n --arg instance_type "$instance_type" --arg price "$FALLBACK_PRICE" --arg az "${region}a" \
+                '[{instance_type: $instance_type, az: $az, price: $price, timestamp: (now | strftime("%Y-%m-%dT%H:%M:%S.000Z"))}]')
+            
+            jq -s '.[0] + .[1]' "$pricing_file" <(echo "$FALLBACK_DATA") > "${pricing_file}.tmp"
+            mv "${pricing_file}.tmp" "$pricing_file"
+        fi
+    done
+    
+    # Validate final pricing data
+    local final_data=$(cat "$pricing_file")
+    if [[ "$final_data" == "[]" || -z "$final_data" ]]; then
+        error "No pricing data could be obtained for any instance type"
+        rm -f "$pricing_file"
+        return 1
+    fi
+    
+    # Output comprehensive pricing data
+    cat "$pricing_file"
+    rm -f "$pricing_file"
+}
+
+analyze_cost_performance_matrix() {
+    local pricing_data="$1"
+    
+    log "Analyzing cost-performance matrix for optimal selection..."
+    
+    # Validate input pricing data
+    if [[ -z "$pricing_data" || "$pricing_data" == "[]" || "$pricing_data" == "null" ]]; then
+        error "No pricing data provided for analysis"
+        return 1
+    fi
+    
+    # Create comprehensive analysis
+    local analysis_file=$(mktemp)
+    echo "[]" > "$analysis_file"
+    
+    for instance_type in $(get_instance_type_list); do
+        # Check if we have pricing data for this instance type
+        local avg_price=$(echo "$pricing_data" | jq -r --arg type "$instance_type" '
+            [.[] | select(.instance_type == $type) | .price | tonumber] | 
+            if length > 0 then (add / length) else null end' 2>/dev/null || echo "null")
+        
+        if [[ "$avg_price" != "null" && -n "$avg_price" && "$avg_price" != "0" ]]; then
+            # Get performance score
+            local perf_score="$(get_performance_score "$instance_type")"
+            
+            # Validate performance score
+            if [[ -z "$perf_score" || "$perf_score" == "0" ]]; then
+                warning "No performance score available for $instance_type, skipping"
+                continue
+            fi
+            
+            # Calculate price-performance ratio (higher = better value)
+            local price_perf_ratio=$(echo "scale=3; $perf_score / $avg_price" | bc -l 2>/dev/null || echo "0")
+            
+            # Validate calculation
+            if [[ "$price_perf_ratio" == "0" || -z "$price_perf_ratio" ]]; then
+                warning "Could not calculate price-performance ratio for $instance_type"
+                continue
+            fi
+            
+            # Get instance specifications
+            local specs="$(get_instance_specs "$instance_type")"
+            if [[ -z "$specs" ]]; then
+                warning "No specifications available for $instance_type, skipping"
+                continue
+            fi
+            
+            IFS=':' read -r vcpus ram gpus gpu_type cpu_arch storage <<< "$specs"
+            
+            # Create analysis entry with validation
+            local entry=$(jq -n \
+                --arg instance_type "$instance_type" \
+                --arg avg_price "$avg_price" \
+                --arg perf_score "$perf_score" \
+                --arg price_perf_ratio "$price_perf_ratio" \
+                --arg vcpus "$vcpus" \
+                --arg ram "$ram" \
+                --arg gpus "$gpus" \
+                --arg gpu_type "$gpu_type" \
+                --arg cpu_arch "$cpu_arch" \
+                --arg storage "$storage" \
+                '{
+                    instance_type: $instance_type,
+                    avg_spot_price: ($avg_price | tonumber),
+                    performance_score: ($perf_score | tonumber),
+                    price_performance_ratio: ($price_perf_ratio | tonumber),
+                    vcpus: ($vcpus | tonumber),
+                    ram_gb: ($ram | tonumber),
+                    gpus: ($gpus | tonumber),
+                    gpu_type: $gpu_type,
+                    cpu_architecture: $cpu_arch,
+                    storage: $storage
+                }' 2>/dev/null)
+            
+            if [[ -n "$entry" && "$entry" != "null" ]]; then
+                # Add to analysis
+                jq -s '.[0] + [.[1]]' "$analysis_file" <(echo "$entry") > "${analysis_file}.tmp" 2>/dev/null && \
+                mv "${analysis_file}.tmp" "$analysis_file" || {
+                    warning "Failed to add $instance_type to analysis"
+                }
+            fi
+        else
+            warning "No valid pricing data for $instance_type (price: $avg_price)"
+        fi
+    done
+    
+    # Validate we have some analysis data
+    local analysis_count=$(jq 'length' "$analysis_file" 2>/dev/null || echo "0")
+    if [[ "$analysis_count" == "0" ]]; then
+        error "No valid configurations could be analyzed"
+        rm -f "$analysis_file"
+        return 1
+    fi
+    
+    # Sort by price-performance ratio (descending)
+    local sorted_analysis=$(jq 'sort_by(-.price_performance_ratio)' "$analysis_file" 2>/dev/null || echo "[]")
+    echo "$sorted_analysis"
+    rm -f "$analysis_file"
+}
+
+select_optimal_configuration() {
+    local max_budget="$1"
+    local enable_cross_region="${2:-false}"
+    
+    log "🤖 Intelligent Configuration Selection Process Starting..."
+    log "Budget limit: \$$max_budget/hour"
+    log "Cross-region analysis: $enable_cross_region"
+    
+    # Define regions to analyze
+    local regions_to_check=("$AWS_REGION")
+    if [[ "$enable_cross_region" == "true" ]]; then
+        # Add popular regions with good GPU availability
+        regions_to_check=("us-east-1" "us-west-2" "eu-west-1" "ap-southeast-1" "us-east-2" "eu-central-1")
+        info "Cross-region analysis enabled - checking regions: ${regions_to_check[*]}"
+    fi
+    
+    local all_valid_configs=()
+    local best_region=""
+    local best_config=""
+    local best_price="999999"
+    
+    # Analyze each region
+    for region in "${regions_to_check[@]}"; do
+        log "Analyzing region: $region"
+        
+        # Step 1: Check availability of all instance types in this region
+        info "Step 1: Checking instance type availability in $region..."
+        local available_types=""
+        for instance_type in $(get_instance_type_list); do
+            if check_instance_type_availability "$instance_type" "$region" >/dev/null 2>&1; then
+                available_types="$available_types $instance_type"
+            fi
+        done
+        
+        if [[ -z "$available_types" ]]; then
+            warning "No GPU instance types available in region $region, skipping"
+            continue
+        fi
+        
+        info "Available instance types in $region:$available_types"
+        
+        # Step 2: Check AMI availability for each configuration in this region
+        info "Step 2: Verifying AMI availability for each configuration in $region..."
+        local valid_configs=()
+        
+        for instance_type in $available_types; do
+            local primary_ami="$(get_gpu_config "${instance_type}_primary")"
+            local secondary_ami="$(get_gpu_config "${instance_type}_secondary")"
+            
+            if verify_ami_availability "$primary_ami" "$region" >/dev/null 2>&1; then
+                valid_configs+=("${instance_type}:${primary_ami}:primary:${region}")
+                info "✓ $instance_type with primary AMI $primary_ami in $region"
+            elif verify_ami_availability "$secondary_ami" "$region" >/dev/null 2>&1; then
+                valid_configs+=("${instance_type}:${secondary_ami}:secondary:${region}")
+                info "✓ $instance_type with secondary AMI $secondary_ami in $region"
+            else
+                warning "✗ $instance_type: No valid AMIs available in $region"
+            fi
+        done
+        
+        if [[ ${#valid_configs[@]} -eq 0 ]]; then
+            warning "No valid AMI+instance combinations available in $region"
+            continue
+        fi
+        
+        # Step 3: Get comprehensive spot pricing for this region
+        info "Step 3: Analyzing spot pricing in $region..."
+        local pricing_data=$(get_comprehensive_spot_pricing "$available_types" "$region")
+        
+        if [[ -z "$pricing_data" || "$pricing_data" == "[]" ]]; then
+            warning "No pricing data available for $region, skipping"
+            continue
+        fi
+        
+        # Step 4: Perform cost-performance analysis for this region
+        info "Step 4: Performing cost-performance analysis for $region..."
+        local analysis=$(analyze_cost_performance_matrix "$pricing_data")
+        
+        if [[ -z "$analysis" || "$analysis" == "[]" ]]; then
+            warning "No valid analysis results for $region, skipping"
+            continue
+        fi
+        
+        # Add region info to configs and find best in this region
+        for config in "${valid_configs[@]}"; do
+            all_valid_configs+=("$config")
+        done
+        
+        # Find best config in this region within budget
+        local region_best_config=$(echo "$analysis" | jq -r --arg budget "$max_budget" '
+            [.[] | select(.avg_spot_price <= ($budget | tonumber))] | 
+            if length > 0 then 
+                sort_by(-.price_performance_ratio)[0] | 
+                "\(.instance_type)|\(.avg_spot_price)"
+            else 
+                empty 
+            end')
+        
+        if [[ -n "$region_best_config" ]]; then
+            IFS='|' read -r region_instance region_price <<< "$region_best_config"
+            
+            # Check if this is better than our current best
+            if (( $(echo "$region_price < $best_price" | bc -l 2>/dev/null || echo "0") )); then
+                best_price="$region_price"
+                best_region="$region"
+                
+                # Find corresponding AMI for this config
+                for config in "${valid_configs[@]}"; do
+                    IFS=':' read -r inst ami type reg <<< "$config"
+                    if [[ "$inst" == "$region_instance" ]]; then
+                        best_config="$region_instance:$ami:$type:$region_price:$region"
+                        break
+                    fi
+                done
+            fi
+            
+            info "Best in $region: $region_instance at \$$region_price/hour"
+        fi
+    done
+    
+    # Step 5: Display comprehensive analysis if cross-region enabled
+    if [[ "$enable_cross_region" == "true" && ${#all_valid_configs[@]} -gt 0 ]]; then
+        info "Step 5: Cross-Region Configuration Analysis:"
+        echo ""
+        echo -e "${CYAN}┌─────────────────────────────────────────────────────────────────────────────────────┐${NC}"
+        echo -e "${CYAN}│                      CROSS-REGION COST-PERFORMANCE ANALYSIS                        │${NC}"
+        echo -e "${CYAN}├─────────────────┬─────────────┬──────────┬────────────┬─────────────┬─────────────────┤${NC}"
+        echo -e "${CYAN}│ Region          │ Best Instance│ Price/hr │ Perf Score │ Architecture│ Availability    │${NC}"
+        echo -e "${CYAN}├─────────────────┼─────────────┼──────────┼────────────┼─────────────┼─────────────────┤${NC}"
+        
+        # Show best option per region
+        for region in "${regions_to_check[@]}"; do
+            # Find best config for this region
+            local region_configs=()
+            for config in "${all_valid_configs[@]}"; do
+                if [[ "$config" == *":$region" ]]; then
+                    region_configs+=("$config")
+                fi
+            done
+            
+            if [[ ${#region_configs[@]} -gt 0 ]]; then
+                # Get pricing for first available instance in region
+                local sample_config="${region_configs[0]}"
+                IFS=':' read -r sample_inst sample_ami sample_type sample_region <<< "$sample_config"
+                
+                local region_pricing=$(get_comprehensive_spot_pricing "$sample_inst" "$region" 2>/dev/null || echo "[]")
+                if [[ "$region_pricing" != "[]" ]]; then
+                    local region_analysis=$(analyze_cost_performance_matrix "$region_pricing" 2>/dev/null || echo "[]")
+                    if [[ "$region_analysis" != "[]" ]]; then
+                        local region_best=$(echo "$region_analysis" | jq -r --arg budget "$max_budget" '
+                            [.[] | select(.avg_spot_price <= ($budget | tonumber))] | 
+                            if length > 0 then 
+                                sort_by(-.price_performance_ratio)[0] | 
+                                "\(.instance_type)|\(.avg_spot_price)|\(.performance_score)|\(.cpu_architecture)"
+                            else 
+                                "none|N/A|N/A|N/A"
+                            end')
+                        
+                        IFS='|' read -r r_inst r_price r_perf r_arch <<< "$region_best"
+                        local availability="✓ Available"
+                        if [[ "$r_inst" == "none" ]]; then
+                            availability="✗ Over budget"
+                        fi
+                        
+                        printf "${CYAN}│ %-15s │ %-11s │ %-8s │ %-10s │ %-11s │ %-15s │${NC}\n" \
+                            "$region" "$r_inst" "\$${r_price}" "$r_perf" "$r_arch" "$availability"
+                    fi
+                fi
+            else
+                printf "${CYAN}│ %-15s │ %-11s │ %-8s │ %-10s │ %-11s │ %-15s │${NC}\n" \
+                    "$region" "none" "N/A" "N/A" "N/A" "✗ No capacity"
+            fi
+        done
+        
+        echo -e "${CYAN}└─────────────────┴─────────────┴──────────┴────────────┴─────────────┴─────────────────┘${NC}"
+        echo ""
+    fi
+    
+    # Step 6: Select final configuration
+    if [[ -n "$best_config" ]]; then
+        IFS=':' read -r selected_instance selected_ami selected_type selected_price selected_region <<< "$best_config"
+        
+        success "🎯 OPTIMAL CONFIGURATION SELECTED:"
+        info "  Instance Type: $selected_instance"
+        info "  AMI: $selected_ami ($selected_type)"
+        info "  Region: $selected_region"
+        info "  Average Spot Price: \$$selected_price/hour"
+        info "  Performance Score: $(get_performance_score "$selected_instance")"
+        
+        # If different region selected, update global region
+        if [[ "$selected_region" != "$AWS_REGION" ]]; then
+            warning "Optimal configuration found in different region: $selected_region"
+            info "Updating deployment region from $AWS_REGION to $selected_region"
+            export AWS_REGION="$selected_region"
+        fi
+        
+        # Export variables for use by other functions - THIS IS THE KEY FIX
+        export SELECTED_INSTANCE_TYPE="$selected_instance"
+        export SELECTED_AMI="$selected_ami"
+        export SELECTED_AMI_TYPE="$selected_type"
+        export SELECTED_PRICE="$selected_price"
+        export SELECTED_REGION="$selected_region"
+        
+        # Return the configuration string
+        echo "$selected_instance:$selected_ami:$selected_type:$selected_price:$selected_region"
+        return 0
+        
+    else
+        error "No configurations available within budget of \$$max_budget/hour"
+        
+        # Try to suggest alternatives
+        if [[ ${#all_valid_configs[@]} -gt 0 ]]; then
+            warning "Available configurations exceed budget. Consider:"
+            warning "  1. Increase --max-spot-price (current: $max_budget)"
+            warning "  2. Try during off-peak hours for better pricing"
+            warning "  3. Use on-demand instances instead"
+            
+            # Show cheapest available option
+            local cheapest_found=""
+            local cheapest_price="999999"
+            
+            for region in "${regions_to_check[@]}"; do
+                local available_types=""
+                for instance_type in $(get_instance_type_list); do
+                    if check_instance_type_availability "$instance_type" "$region" >/dev/null 2>&1; then
+                        available_types="$available_types $instance_type"
+                    fi
+                done
+                
+                if [[ -n "$available_types" ]]; then
+                    local pricing_data=$(get_comprehensive_spot_pricing "$available_types" "$region" 2>/dev/null || echo "[]")
+                    if [[ "$pricing_data" != "[]" ]]; then
+                        local min_price=$(echo "$pricing_data" | jq -r 'min_by(.price | tonumber) | .price' 2>/dev/null || echo "999999")
+                        if (( $(echo "$min_price < $cheapest_price" | bc -l 2>/dev/null || echo "0") )); then
+                            cheapest_price="$min_price"
+                            cheapest_found="$region"
+                        fi
+                    fi
+                fi
+            done
+            
+            if [[ -n "$cheapest_found" ]]; then
+                info "Cheapest option found: \$$cheapest_price/hour in $cheapest_found"
+                info "Suggested budget: \$$(echo "scale=2; $cheapest_price * 1.2" | bc -l)/hour"
+            fi
+        fi
+        
+        return 1
+    fi
+}
+
+# =============================================================================
+# OPTIMIZED USER DATA GENERATION
+# =============================================================================
+
+create_optimized_user_data() {
+    local instance_type="$1"
+    local ami_type="$2"
+    
+    log "Creating optimized user data for $instance_type with $ami_type AMI..."
+    
+    # Determine CPU architecture
+    local cpu_arch="x86_64"
+    if [[ "$instance_type" == g5g* ]]; then
+        cpu_arch="arm64"
+    fi
+    
+    cat > user-data.sh << EOF
+#!/bin/bash
+set -euo pipefail
+
+# Log all output for debugging
+exec > >(tee /var/log/user-data.log) 2>&1
+
+echo "=== AI Starter Kit Deep Learning AMI Setup ==="
+echo "Timestamp: \$(date)"
+echo "Instance Type: $instance_type"
+echo "CPU Architecture: $cpu_arch"
+echo "AMI Type: $ami_type"
+
+# System identification
+echo "System Information:"
+uname -a
+cat /etc/os-release
+
+# Update system packages
+echo "Updating system packages..."
+if command -v apt-get &> /dev/null; then
+    apt-get update && apt-get upgrade -y
+elif command -v yum &> /dev/null; then
+    yum update -y
+fi
+
+# Verify Deep Learning AMI components
+echo "=== Verifying Deep Learning AMI Components ==="
+
+# Check NVIDIA drivers
+if command -v nvidia-smi &> /dev/null; then
+    echo "✓ NVIDIA drivers found:"
+    nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv
+else
+    echo "⚠ NVIDIA drivers not found - may need installation"
+    # Install NVIDIA drivers for Deep Learning AMI
+    if [[ "$cpu_arch" == "x86_64" ]]; then
+        wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.0-1_all.deb
+        dpkg -i cuda-keyring_1.0-1_all.deb
+        apt-get update
+        apt-get install -y nvidia-driver-470 cuda-toolkit-11-8
+    else
+        echo "ARM64 architecture - using different driver installation method"
+        apt-get install -y nvidia-jetpack
+    fi
+fi
+
+# Verify Docker
+if command -v docker &> /dev/null; then
+    echo "✓ Docker found:"
+    docker --version
+    # Ensure ubuntu user is in docker group
+    usermod -aG docker ubuntu
+else
+    echo "Installing Docker..."
+    curl -fsSL https://get.docker.com -o get-docker.sh
+    sh get-docker.sh
+    usermod -aG docker ubuntu
+    rm get-docker.sh
+fi
+
+# Install/verify Docker Compose
+if command -v docker-compose &> /dev/null; then
+    echo "✓ Docker Compose found:"
+    docker-compose --version
+else
+    echo "Installing Docker Compose..."
+    if [[ "$cpu_arch" == "x86_64" ]]; then
+        curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m)" -o /usr/local/bin/docker-compose
+    else
+        # ARM64 version
+        curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-aarch64" -o /usr/local/bin/docker-compose
+    fi
+    chmod +x /usr/local/bin/docker-compose
+fi
+
+# Configure NVIDIA Container Runtime
+echo "=== Configuring NVIDIA Container Runtime ==="
+if ! docker info | grep -q nvidia; then
+    echo "Configuring NVIDIA Container Runtime..."
+    
+    # Install nvidia-container-toolkit
+    if [[ "$cpu_arch" == "x86_64" ]]; then
+        distribution=\$(. /etc/os-release;echo \$ID\$VERSION_ID)
+        curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | apt-key add -
+        curl -s -L https://nvidia.github.io/nvidia-docker/\$distribution/nvidia-docker.list | tee /etc/apt/sources.list.d/nvidia-docker.list
+        apt-get update && apt-get install -y nvidia-container-toolkit
+    else
+        # ARM64 specific nvidia container runtime
+        apt-get install -y nvidia-container-runtime
+    fi
+    
+    # Configure Docker daemon
+    cat > /etc/docker/daemon.json << 'EODAEMON'
+{
+    "default-runtime": "nvidia",
+    "runtimes": {
+        "nvidia": {
+            "path": "nvidia-container-runtime",
+            "runtimeArgs": []
+        }
+    }
+}
+EODAEMON
+    
+    systemctl restart docker
+fi
+
+# Test GPU access
+echo "=== Testing GPU Access ==="
+if [[ "$cpu_arch" == "x86_64" ]]; then
+    if docker run --rm --gpus all nvidia/cuda:12.0-base-ubuntu20.04 nvidia-smi; then
+        echo "✓ GPU access in Docker containers verified"
+    else
+        echo "✗ GPU access in Docker containers failed"
+    fi
+else
+    # ARM64 GPU test
+    if docker run --rm --runtime=nvidia --gpus all nvcr.io/nvidia/l4t-base:r32.7.1 nvidia-smi; then
+        echo "✓ ARM64 GPU access verified"
+    else
+        echo "✗ ARM64 GPU access failed"
+    fi
+fi
+
+# Install additional tools
+echo "Installing additional tools..."
+if command -v apt-get &> /dev/null; then
+    apt-get install -y jq curl wget git htop awscli nfs-common tree
+    
+    # Install nvtop for GPU monitoring (if available)
+    if [[ "$cpu_arch" == "x86_64" ]]; then
+        apt-get install -y nvtop || echo "nvtop not available"
+    fi
+elif command -v yum &> /dev/null; then
+    yum install -y jq curl wget git htop awscli nfs-utils tree
+fi
+
+# Install CloudWatch agent
+echo "Installing CloudWatch agent..."
+if [[ "$cpu_arch" == "x86_64" ]]; then
+    wget -q https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
+    dpkg -i amazon-cloudwatch-agent.deb
+    rm amazon-cloudwatch-agent.deb
+else
+    # ARM64 CloudWatch agent
+    wget -q https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/arm64/latest/amazon-cloudwatch-agent.deb
+    dpkg -i amazon-cloudwatch-agent.deb
+    rm amazon-cloudwatch-agent.deb
+fi
+
+# Ensure services are running
+systemctl enable docker
+systemctl start docker
+
+# Create mount point for EFS
+mkdir -p /mnt/efs
+
+# Create architecture-aware GPU monitoring script
+cat > /usr/local/bin/gpu-check.sh << 'EOGPU'
+#!/bin/bash
+echo "=== GPU Status Check ==="
+echo "Date: \$(date)"
+echo "Architecture: $cpu_arch"
+echo "Instance Type: $instance_type"
+
+if command -v nvidia-smi &> /dev/null; then
+    echo "NVIDIA Driver Version:"
+    nvidia-smi --query-gpu=driver_version --format=csv,noheader,nounits
+    echo "GPU Information:"
+    nvidia-smi --query-gpu=name,memory.total,memory.used,memory.free,temperature.gpu,power.draw --format=csv
+    echo "Docker GPU Test:"
+    if [[ "$cpu_arch" == "x86_64" ]]; then
+        docker run --rm --gpus all nvidia/cuda:12.0-base-ubuntu20.04 nvidia-smi -L
+    else
+        docker run --rm --runtime=nvidia --gpus all nvcr.io/nvidia/l4t-base:r32.7.1 nvidia-smi -L
+    fi
+else
+    echo "NVIDIA drivers not found"
+fi
+EOGPU
+
+chmod +x /usr/local/bin/gpu-check.sh
+
+# Run initial GPU check
+echo "=== Running Initial GPU Check ==="
+/usr/local/bin/gpu-check.sh
+
+# Signal completion
+echo "=== Deep Learning AMI Setup Complete ==="
+echo "Timestamp: \$(date)"
+echo "Instance: $instance_type ($cpu_arch)"
+echo "AMI Type: $ami_type"
+touch /tmp/user-data-complete
+
+EOF
+}
+
+# =============================================================================
+# INTELLIGENT SPOT INSTANCE LAUNCH
+# =============================================================================
+
+launch_spot_instance() {
+    local SG_ID="$1"
+    local EFS_DNS="$2"
+    local enable_cross_region="${3:-false}"
+    
+    log "🚀 Launching GPU spot instance with intelligent configuration selection..."
+    
+    # Step 1: Run intelligent configuration selection
+    if [[ "$INSTANCE_TYPE" == "auto" ]]; then
+        log "Auto-selection mode: Finding optimal configuration..."
+        OPTIMAL_CONFIG=$(select_optimal_configuration "$MAX_SPOT_PRICE" "$enable_cross_region")
+        
+        if [[ $? -ne 0 ]]; then
+            error "Failed to find optimal configuration within budget"
+            return 1
+        fi
+        
+        # Parse optimal configuration - FIXED: Handle new format with region
+        if [[ "$OPTIMAL_CONFIG" == *:*:*:*:* ]]; then
+            # New format with region
+            IFS=':' read -r SELECTED_INSTANCE_TYPE SELECTED_AMI SELECTED_AMI_TYPE SELECTED_PRICE SELECTED_REGION <<< "$OPTIMAL_CONFIG"
+        else
+            # Fallback for old format
+            IFS=':' read -r SELECTED_INSTANCE_TYPE SELECTED_AMI SELECTED_AMI_TYPE SELECTED_PRICE <<< "$OPTIMAL_CONFIG"
+            SELECTED_REGION="$AWS_REGION"
+        fi
+        
+        # Debug output to fix the empty variable issue
+        info "Parsed configuration:"
+        info "  SELECTED_INSTANCE_TYPE: '$SELECTED_INSTANCE_TYPE'"
+        info "  SELECTED_AMI: '$SELECTED_AMI'"
+        info "  SELECTED_AMI_TYPE: '$SELECTED_AMI_TYPE'"
+        info "  SELECTED_PRICE: '$SELECTED_PRICE'"
+        info "  SELECTED_REGION: '$SELECTED_REGION'"
+        
+    else
+        log "Manual selection mode: Using specified instance type $INSTANCE_TYPE"
+        
+        # Verify manually selected instance type and find best AMI
+        if ! check_instance_type_availability "$INSTANCE_TYPE" "$AWS_REGION" >/dev/null 2>&1; then
+            error "Specified instance type $INSTANCE_TYPE not available in $AWS_REGION"
+            return 1
+        fi
+        
+        # Find best AMI for specified instance type
+        local primary_ami="$(get_gpu_config "${INSTANCE_TYPE}_primary")"
+        local secondary_ami="$(get_gpu_config "${INSTANCE_TYPE}_secondary")"
+        
+        if verify_ami_availability "$primary_ami" "$AWS_REGION" >/dev/null 2>&1; then
+            SELECTED_AMI="$primary_ami"
+            SELECTED_AMI_TYPE="primary"
+        elif verify_ami_availability "$secondary_ami" "$AWS_REGION" >/dev/null 2>&1; then
+            SELECTED_AMI="$secondary_ami"
+            SELECTED_AMI_TYPE="secondary"
+        else
+            error "No valid AMIs available for $INSTANCE_TYPE"
+            return 1
+        fi
+        
+        SELECTED_INSTANCE_TYPE="$INSTANCE_TYPE"
+        SELECTED_PRICE="$MAX_SPOT_PRICE"
+        SELECTED_REGION="$AWS_REGION"
+    fi
+    
+    # Validate that we have all required values
+    if [[ -z "$SELECTED_INSTANCE_TYPE" || -z "$SELECTED_AMI" || -z "$SELECTED_AMI_TYPE" ]]; then
+        error "Configuration selection failed - missing required values:"
+        error "  Instance Type: '$SELECTED_INSTANCE_TYPE'"
+        error "  AMI: '$SELECTED_AMI'"
+        error "  AMI Type: '$SELECTED_AMI_TYPE'"
+        return 1
+    fi
+    
+    success "Selected configuration: $SELECTED_INSTANCE_TYPE with AMI $SELECTED_AMI ($SELECTED_AMI_TYPE)"
+    info "Budget: \$$SELECTED_PRICE/hour"
+    info "Region: $SELECTED_REGION"
+    
+    # Step 2: Create optimized user data
+    create_optimized_user_data "$SELECTED_INSTANCE_TYPE" "$SELECTED_AMI_TYPE"
+    
+    # Step 3: Get pricing data for selected instance type for AZ optimization
+    log "Analyzing spot pricing by availability zone for $SELECTED_INSTANCE_TYPE..."
+    SPOT_PRICES_JSON=$(aws ec2 describe-spot-price-history \
+        --instance-types "$SELECTED_INSTANCE_TYPE" \
+        --product-descriptions "Linux/UNIX" \
+        --max-items 50 \
+        --region "$AWS_REGION" \
+        --query 'SpotPrices | sort_by(@, &Timestamp) | reverse(@) | [*] | group_by(@, &AvailabilityZone) | map([.[0].AvailabilityZone, .[0].SpotPrice]) | sort_by(@, &[1])' \
+        --output json 2>/dev/null || echo "[]")
+    
+    # Step 4: Determine AZ launch order
+    local ORDERED_AZS=()
+    if [[ "$SPOT_PRICES_JSON" != "[]" && -n "$SPOT_PRICES_JSON" ]]; then
+        info "Current spot pricing by AZ:"
+        echo "$SPOT_PRICES_JSON" | jq -r '.[] | "  \(.[0]): $\(.[1])/hour"'
+        
+        # Create ordered list of AZs by price (lowest first)
+        ORDERED_AZS=($(echo "$SPOT_PRICES_JSON" | jq -r '.[] | .[0]' 2>/dev/null || echo ""))
+        
+        # Filter AZs within budget
+        local AFFORDABLE_AZS=()
+        for AZ_PRICE in $(echo "$SPOT_PRICES_JSON" | jq -r '.[] | "\(.[0]):\(.[1])"' 2>/dev/null); do
+            IFS=':' read -r AZ PRICE <<< "$AZ_PRICE"
+            if (( $(echo "$PRICE <= $MAX_SPOT_PRICE" | bc -l 2>/dev/null || echo "1") )); then
+                AFFORDABLE_AZS+=("$AZ")
+            else
+                warning "Excluding $AZ (price: \$$PRICE exceeds budget: \$$MAX_SPOT_PRICE)"
+            fi
+        done
+        
+        if [[ ${#AFFORDABLE_AZS[@]} -gt 0 ]]; then
+            ORDERED_AZS=("${AFFORDABLE_AZS[@]}")
+            info "Attempting launch in price-ordered AZs: ${ORDERED_AZS[*]}"
+        else
+            warning "No AZs within budget, trying all available AZs"
+            ORDERED_AZS=($(aws ec2 describe-availability-zones --region "$AWS_REGION" --query 'AvailabilityZones[?State==`available`].ZoneName' --output text))
+        fi
+    else
+        warning "Could not retrieve pricing data, using all available AZs"
+        ORDERED_AZS=($(aws ec2 describe-availability-zones --region "$AWS_REGION" --query 'AvailabilityZones[?State==`available`].ZoneName' --output text))
+    fi
+    
+    # Step 5: Try launching in each AZ in order
+    for AZ in "${ORDERED_AZS[@]}"; do
+        log "Attempting spot instance launch in AZ: $AZ"
+        
+        # Get subnet for this AZ
+        SUBNET_ID=$(aws ec2 describe-subnets \
+            --filters "Name=availability-zone,Values=$AZ" "Name=default-for-az,Values=true" \
+            --region "$AWS_REGION" \
+            --query 'Subnets[0].SubnetId' \
+            --output text)
+        
+        if [[ "$SUBNET_ID" == "None" || -z "$SUBNET_ID" ]]; then
+            warning "No suitable subnet found in $AZ, skipping..."
+            continue
+        fi
+        
+        info "Using subnet $SUBNET_ID in $AZ"
+        
+        # Get current price for this AZ
+        CURRENT_PRICE=$(echo "$SPOT_PRICES_JSON" | jq -r ".[] | select(.[0] == \"$AZ\") | .[1]" 2>/dev/null || echo "unknown")
+        if [[ "$CURRENT_PRICE" != "unknown" && "$CURRENT_PRICE" != "null" ]]; then
+            info "Current spot price in $AZ: \$$CURRENT_PRICE/hour"
+        fi
+        
+        # Create spot instance request
+        log "Creating spot instance request in $AZ with max price \$$MAX_SPOT_PRICE/hour..."
+        REQUEST_RESULT=$(aws ec2 request-spot-instances \
+            --spot-price "$MAX_SPOT_PRICE" \
+            --instance-count 1 \
+            --type "one-time" \
+            --launch-specification "{
+                \"ImageId\": \"$SELECTED_AMI\",
+                \"InstanceType\": \"$SELECTED_INSTANCE_TYPE\",
+                \"KeyName\": \"$KEY_NAME\",
+                \"SecurityGroupIds\": [\"$SG_ID\"],
+                \"SubnetId\": \"$SUBNET_ID\",
+                \"IamInstanceProfile\": {
+                    \"Name\": \"${STACK_NAME}-instance-profile\"
+                },
+                \"UserData\": \"$(if [[ "$OSTYPE" == "darwin"* ]]; then base64 -i user-data.sh | tr -d '\n'; else base64 -w 0 user-data.sh; fi)\"
+            }" \
+            --region "$AWS_REGION" 2>&1) || {
+            warning "Failed to create spot instance request in $AZ: $REQUEST_RESULT"
+            continue
+        }
+        
+        REQUEST_ID=$(echo "$REQUEST_RESULT" | jq -r '.SpotInstanceRequests[0].SpotInstanceRequestId' 2>/dev/null || echo "")
+        
+        if [[ -z "$REQUEST_ID" || "$REQUEST_ID" == "None" || "$REQUEST_ID" == "null" ]]; then
+            warning "Invalid spot instance request ID in $AZ, trying next AZ..."
+            continue
+        fi
+        
+        info "Spot instance request ID: $REQUEST_ID in $AZ"
+        
+        # Wait for spot request fulfillment
+        log "Waiting for spot instance to be launched in $AZ..."
+        local attempt=0
+        local max_attempts=10
+        local fulfilled=false
+        
+        while [ $attempt -lt $max_attempts ]; do
+            REQUEST_STATE=$(aws ec2 describe-spot-instance-requests \
+                --spot-instance-request-ids "$REQUEST_ID" \
+                --region "$AWS_REGION" \
+                --query 'SpotInstanceRequests[0].State' \
+                --output text 2>/dev/null || echo "failed")
+            
+            if [[ "$REQUEST_STATE" == "active" ]]; then
+                fulfilled=true
+                break
+            elif [[ "$REQUEST_STATE" == "failed" || "$REQUEST_STATE" == "cancelled" ]]; then
+                warning "Spot instance request failed with state: $REQUEST_STATE"
+                break
+            fi
+            
+            attempt=$((attempt + 1))
+            info "Attempt $attempt/$max_attempts: Request state is $REQUEST_STATE, waiting 30s..."
+            sleep 30
+        done
+        
+        if [ "$fulfilled" = true ]; then
+            # Get instance ID
+            INSTANCE_ID=$(aws ec2 describe-spot-instance-requests \
+                --spot-instance-request-ids "$REQUEST_ID" \
+                --region "$AWS_REGION" \
+                --query 'SpotInstanceRequests[0].InstanceId' \
+                --output text)
+            
+            if [[ -n "$INSTANCE_ID" && "$INSTANCE_ID" != "None" && "$INSTANCE_ID" != "null" ]]; then
+                # Wait for instance to be running
+                log "Waiting for instance to be running..."
+                aws ec2 wait instance-running --instance-ids "$INSTANCE_ID" --region "$AWS_REGION"
+                
+                # Get instance details
+                INSTANCE_INFO=$(aws ec2 describe-instances \
+                    --instance-ids "$INSTANCE_ID" \
+                    --region "$AWS_REGION" \
+                    --query 'Reservations[0].Instances[0].{PublicIp:PublicIpAddress,AZ:Placement.AvailabilityZone}' \
+                    --output json)
+                
+                PUBLIC_IP=$(echo "$INSTANCE_INFO" | jq -r '.PublicIp')
+                ACTUAL_AZ=$(echo "$INSTANCE_INFO" | jq -r '.AZ')
+                
+                # Tag instance with configuration details
+                aws ec2 create-tags \
+                    --resources "$INSTANCE_ID" \
+                    --tags \
+                        Key=Name,Value="${STACK_NAME}-gpu-instance" \
+                        Key=Project,Value="$PROJECT_NAME" \
+                        Key=InstanceType,Value="$SELECTED_INSTANCE_TYPE" \
+                        Key=AMI,Value="$SELECTED_AMI" \
+                        Key=AMIType,Value="$SELECTED_AMI_TYPE" \
+                        Key=AvailabilityZone,Value="$ACTUAL_AZ" \
+                        Key=SpotPrice,Value="${CURRENT_PRICE:-unknown}" \
+                        Key=Architecture,Value="$(echo "$(get_instance_specs "$SELECTED_INSTANCE_TYPE")" | cut -d: -f5)" \
+                        Key=GPUType,Value="$(echo "$(get_instance_specs "$SELECTED_INSTANCE_TYPE")" | cut -d: -f4)" \
+                    --region "$AWS_REGION"
+                
+                success "🎉 Spot instance launched successfully!"
+                success "  Instance ID: $INSTANCE_ID"
+                success "  Public IP: $PUBLIC_IP"
+                success "  Instance Type: $SELECTED_INSTANCE_TYPE"
+                success "  AMI: $SELECTED_AMI ($SELECTED_AMI_TYPE)"
+                success "  Availability Zone: $ACTUAL_AZ"
+                if [[ "$CURRENT_PRICE" != "unknown" ]]; then
+                    success "  Spot Price: \$$CURRENT_PRICE/hour"
+                fi
+                
+                # Clean up user data file
+                rm -f user-data.sh
+                
+                # Export for other functions
+                export DEPLOYED_INSTANCE_TYPE="$SELECTED_INSTANCE_TYPE"
+                export DEPLOYED_AMI="$SELECTED_AMI"
+                export DEPLOYED_AMI_TYPE="$SELECTED_AMI_TYPE"
+                
+                echo "$INSTANCE_ID:$PUBLIC_IP:$ACTUAL_AZ"
+                return 0
+            else
+                warning "Failed to get instance ID from spot request in $AZ"
+                continue
+            fi
+        else
+            warning "Spot instance request failed/timed out in $AZ, trying next AZ..."
+            aws ec2 cancel-spot-instance-requests --spot-instance-request-ids "$REQUEST_ID" --region "$AWS_REGION" 2>/dev/null || true
+            continue
+        fi
+    done
+    
+    # If we get here, all AZs failed
+    error "❌ Failed to launch spot instance in any availability zone"
+    error "This may be due to:"
+    error "  1. Capacity constraints across all AZs for selected instance type"
+    error "  2. Service quota limits for GPU spot instances"
+    error "  3. Current spot prices exceed budget limit"
+    error "  4. AMI availability issues in the region"
+    error ""
+    error "💡 Suggestions:"
+    error "  1. Increase --max-spot-price (current: $MAX_SPOT_PRICE)"
+    error "  2. Try a different region with better capacity"
+    error "  3. Check service quotas for GPU instances"
+    error "  4. Try during off-peak hours for better pricing"
+    
+    # Clean up
+    rm -f user-data.sh
+    return 1
+}
+
+# =============================================================================
+# DEPLOYMENT RESULTS DISPLAY
+# =============================================================================
+
+display_results() {
+    local PUBLIC_IP="$1"
+    local INSTANCE_ID="$2"
+    local EFS_DNS="$3"
+    local INSTANCE_AZ="$4"
+    
+    # Get deployed configuration info
+    local DEPLOYED_TYPE="${DEPLOYED_INSTANCE_TYPE:-$INSTANCE_TYPE}"
+    local DEPLOYED_AMI_ID="${DEPLOYED_AMI:-unknown}"
+    local DEPLOYED_AMI_TYPE="${DEPLOYED_AMI_TYPE:-unknown}"
+    
+    # Get instance specs
+    local SPECS="$(get_instance_specs "$DEPLOYED_TYPE")"
+    if [[ -z "$SPECS" ]]; then
+        SPECS="unknown:unknown:unknown:unknown:unknown:unknown"
+    fi
+    IFS=':' read -r vcpus ram gpus gpu_type cpu_arch storage <<< "$SPECS"
+    
+    echo ""
+    echo -e "${CYAN}=================================${NC}"
+    echo -e "${GREEN}   🚀 AI STARTER KIT DEPLOYED!    ${NC}"
+    echo -e "${CYAN}=================================${NC}"
+    echo ""
+    echo -e "${BLUE}🎯 Intelligent Configuration Selected:${NC}"
+    echo -e "  Instance Type: ${YELLOW}$DEPLOYED_TYPE${NC}"
+    echo -e "  vCPUs: ${YELLOW}$vcpus${NC} | RAM: ${YELLOW}${ram}GB${NC} | GPUs: ${YELLOW}$gpus x $gpu_type${NC}"
+    echo -e "  Architecture: ${YELLOW}$cpu_arch${NC} | Storage: ${YELLOW}$storage${NC}"
+    echo -e "  AMI: ${YELLOW}$DEPLOYED_AMI_ID${NC} ($DEPLOYED_AMI_TYPE)"
+    local perf_score="$(get_performance_score "$DEPLOYED_TYPE")"
+    if [[ -z "$perf_score" || "$perf_score" == "0" ]]; then
+        perf_score="N/A"
+    fi
+    echo -e "  Performance Score: ${YELLOW}${perf_score}/100${NC}"
+    echo ""
+    echo -e "${BLUE}📍 Deployment Location:${NC}"
+    echo -e "  Instance ID: ${YELLOW}$INSTANCE_ID${NC}"
+    echo -e "  Public IP: ${YELLOW}$PUBLIC_IP${NC}"
+    echo -e "  Availability Zone: ${YELLOW}$INSTANCE_AZ${NC}"
+    echo -e "  Region: ${YELLOW}$AWS_REGION${NC}"
+    echo -e "  EFS DNS: ${YELLOW}$EFS_DNS${NC}"
+    echo ""
+    echo -e "${BLUE}🌐 Service URLs:${NC}"
+    echo -e "  ${GREEN}n8n Workflow Editor:${NC}     http://$PUBLIC_IP:5678"
+    echo -e "  ${GREEN}Crawl4AI Web Scraper:${NC}    http://$PUBLIC_IP:11235"
+    echo -e "  ${GREEN}Qdrant Vector Database:${NC}  http://$PUBLIC_IP:6333"
+    echo -e "  ${GREEN}Ollama AI Models:${NC}        http://$PUBLIC_IP:11434"
+    echo ""
+    echo -e "${BLUE}🔐 SSH Access:${NC}"
+    echo -e "  ssh -i ${KEY_NAME}.pem ubuntu@$PUBLIC_IP"
+    echo ""
+    
+    # Show architecture-specific benefits
+    if [[ "$cpu_arch" == "ARM" ]]; then
+        echo -e "${BLUE}🔧 ARM64 Graviton2 Benefits:${NC}"
+        echo -e "  ${GREEN}✓${NC} Up to 40% better price-performance than x86"
+        echo -e "  ${GREEN}✓${NC} Lower power consumption"
+        echo -e "  ${GREEN}✓${NC} Custom ARM-optimized Deep Learning AMI"
+        echo -e "  ${GREEN}✓${NC} NVIDIA T4G Tensor Core GPUs"
+        echo -e "  ${YELLOW}⚠${NC} Some software may require ARM64 compatibility"
+    else
+        echo -e "${BLUE}🔧 Intel x86_64 Benefits:${NC}"
+        echo -e "  ${GREEN}✓${NC} Universal software compatibility"
+        echo -e "  ${GREEN}✓${NC} Mature ecosystem and optimizations"
+        echo -e "  ${GREEN}✓${NC} NVIDIA T4 Tensor Core GPUs"
+        echo -e "  ${GREEN}✓${NC} High-performance Intel Xeon processors"
+    fi
+    
+    echo ""
+    echo -e "${BLUE}🤖 Deep Learning AMI Features:${NC}"
+    echo -e "  ${GREEN}✓${NC} Pre-installed NVIDIA drivers (optimized versions)"
+    echo -e "  ${GREEN}✓${NC} Docker with NVIDIA container runtime"
+    echo -e "  ${GREEN}✓${NC} CUDA toolkit and cuDNN libraries"
+    echo -e "  ${GREEN}✓${NC} Python ML frameworks (TensorFlow, PyTorch, etc.)"
+    echo -e "  ${GREEN}✓${NC} Conda environments for different frameworks"
+    echo -e "  ${GREEN}✓${NC} Jupyter notebooks and development tools"
+    echo ""
+    echo -e "${BLUE}🚀 Next Steps:${NC}"
+    echo -e "  1. ${CYAN}Wait 5-10 minutes${NC} for all services to fully start"
+    echo -e "  2. ${CYAN}Access n8n${NC} at http://$PUBLIC_IP:5678 to set up workflows"
+    echo -e "  3. ${CYAN}Check GPU status${NC}: ssh to instance and run '/usr/local/bin/gpu-check.sh'"
+    echo -e "  4. ${CYAN}Check service logs${NC}: ssh to instance and run 'docker-compose logs'"
+    echo -e "  5. ${CYAN}Configure API keys${NC} in .env file for enhanced features"
+    echo ""
+    echo -e "${YELLOW}💰 Cost Optimization:${NC}"
+    if [[ -n "${SELECTED_PRICE:-}" ]]; then
+        echo -e "  ${GREEN}✓${NC} Spot instance selected at ~\$${SELECTED_PRICE}/hour"
+        local daily_cost=$(echo "scale=2; $SELECTED_PRICE * 24" | bc -l 2>/dev/null || echo "N/A")
+        if [[ "$daily_cost" != "N/A" ]]; then
+            echo -e "  ${GREEN}✓${NC} Estimated daily cost: ~\$${daily_cost} (24 hours)"
+        fi
+    else
+        echo -e "  ${GREEN}✓${NC} Spot instance pricing optimized"
+    fi
+    echo -e "  ${GREEN}✓${NC} ~70% savings vs on-demand pricing"
+    echo -e "  ${GREEN}✓${NC} Multi-AZ failover for availability"
+    echo -e "  ${GREEN}✓${NC} Intelligent configuration selection"
+    echo -e "  ${RED}⚠${NC} Remember to terminate when not in use!"
+    echo ""
+    echo -e "${BLUE}🎛️ Deployment Features:${NC}"
+    echo -e "  ${GREEN}✓${NC} Intelligent AMI and instance selection"
+    echo -e "  ${GREEN}✓${NC} Real-time spot pricing analysis"
+    echo -e "  ${GREEN}✓${NC} Multi-architecture support (Intel/ARM)"
+    echo -e "  ${GREEN}✓${NC} EFS shared storage"
+    echo -e "  ${GREEN}✓${NC} Application Load Balancer"
+    echo -e "  ${GREEN}✓${NC} CloudFront CDN"
+    echo -e "  ${GREEN}✓${NC} CloudWatch monitoring"
+    echo -e "  ${GREEN}✓${NC} SSM parameter management"
+    echo ""
+    echo -e "${PURPLE}🧠 Intelligent Selection Summary:${NC}"
+    if [[ "$INSTANCE_TYPE" == "auto" ]]; then
+        echo -e "  ${CYAN}Mode:${NC} Automatic optimal configuration selection"
+        echo -e "  ${CYAN}Budget:${NC} \$$MAX_SPOT_PRICE/hour maximum"
+        echo -e "  ${CYAN}Selection:${NC} $DEPLOYED_TYPE chosen for best price/performance"
+    else
+        echo -e "  ${CYAN}Mode:${NC} Manual instance type selection"
+        echo -e "  ${CYAN}Specified:${NC} $INSTANCE_TYPE"
+        echo -e "  ${CYAN}AMI Selection:${NC} Best available AMI auto-selected"
+    fi
+    echo ""
+    echo -e "${GREEN}🎉 Deployment completed successfully!${NC}"
+    echo -e "${BLUE}Happy building with your AI-powered infrastructure! 🚀${NC}"
+    echo ""
+}
+
+# =============================================================================
+# INFRASTRUCTURE SETUP FUNCTIONS
+# =============================================================================
+
+cleanup_on_error() {
+    error "Deployment failed. Cleaning up resources..."
+    
+    # Terminate instance first
+    if [ ! -z "${INSTANCE_ID:-}" ]; then
+        log "Terminating instance $INSTANCE_ID..."
+        aws ec2 terminate-instances --instance-ids "$INSTANCE_ID" --region "$AWS_REGION" || true
+        aws ec2 wait instance-terminated --instance-ids "$INSTANCE_ID" --region "$AWS_REGION" || true
+    fi
+    
+    # Delete CloudWatch alarms (if any were created)
+    log "Deleting CloudWatch alarms..."
+    aws cloudwatch delete-alarms \
+        --alarm-names "${STACK_NAME}-high-gpu-utilization" "${STACK_NAME}-low-gpu-utilization" \
+        --region "$AWS_REGION" 2>/dev/null || true
+    
+    # Delete CloudFront distribution (takes longest, do early)
+    if [ ! -z "${DISTRIBUTION_ID:-}" ]; then
+        log "Disabling and deleting CloudFront distribution..."
+        # Disable first
+        ETAG=$(aws cloudfront get-distribution-config --id "$DISTRIBUTION_ID" --query ETag --output text 2>/dev/null) || true
+        if [ ! -z "$ETAG" ] && [ "$ETAG" != "None" ]; then
+            CONFIG=$(aws cloudfront get-distribution-config --id "$DISTRIBUTION_ID" --query DistributionConfig --output json 2>/dev/null) || true
+            if [ ! -z "$CONFIG" ]; then
+                echo "$CONFIG" | jq '.Enabled = false' > disabled-config.json 2>/dev/null || true
+                aws cloudfront update-distribution --id "$DISTRIBUTION_ID" --distribution-config file://disabled-config.json --if-match "$ETAG" 2>/dev/null || true
+                aws cloudfront wait distribution-deployed --id "$DISTRIBUTION_ID" 2>/dev/null || true
+                NEW_ETAG=$(aws cloudfront get-distribution --id "$DISTRIBUTION_ID" --query ETag --output text 2>/dev/null) || true
+                aws cloudfront delete-distribution --id "$DISTRIBUTION_ID" --if-match "$NEW_ETAG" 2>/dev/null || true
+            fi
+        fi
+    fi
+    
+    # Clean up temporary files
+    rm -f user-data.sh trust-policy.json custom-policy.json deploy-app.sh disabled-config.json
+}
 
 create_key_pair() {
     log "Setting up SSH key pair..."
@@ -208,7 +1447,7 @@ create_security_group() {
     # Create security group
     SG_ID=$(aws ec2 create-security-group \
         --group-name "${STACK_NAME}-sg" \
-        --description "Security group for AI Starter Kit" \
+        --description "Security group for AI Starter Kit Intelligent Deployment" \
         --vpc-id "$VPC_ID" \
         --region "$AWS_REGION" \
         --query 'GroupId' \
@@ -254,6 +1493,21 @@ create_security_group() {
         --cidr 0.0.0.0/0 \
         --region "$AWS_REGION"
     
+    # ALB ports
+    aws ec2 authorize-security-group-ingress \
+        --group-id "$SG_ID" \
+        --protocol tcp \
+        --port 80 \
+        --cidr 0.0.0.0/0 \
+        --region "$AWS_REGION"
+    
+    aws ec2 authorize-security-group-ingress \
+        --group-id "$SG_ID" \
+        --protocol tcp \
+        --port 443 \
+        --cidr 0.0.0.0/0 \
+        --region "$AWS_REGION"
+    
     # NFS for EFS
     aws ec2 authorize-security-group-ingress \
         --group-id "$SG_ID" \
@@ -264,326 +1518,6 @@ create_security_group() {
     
     success "Created security group: $SG_ID"
     echo "$SG_ID"
-}
-
-create_efs() {
-    local SG_ID="$1"
-    log "Setting up EFS (Elastic File System)..."
-    
-    # Check if EFS already exists by searching through all file systems
-    EFS_LIST=$(aws efs describe-file-systems \
-        --region "$AWS_REGION" \
-        --query 'FileSystems[].FileSystemId' \
-        --output text 2>/dev/null || echo "")
-    
-    # Check each EFS to see if it has our tag
-    for EFS_ID in $EFS_LIST; do
-        if [[ -n "$EFS_ID" && "$EFS_ID" != "None" ]]; then
-            EFS_TAGS=$(aws efs list-tags-for-resource \
-                --resource-id "$EFS_ID" \
-                --region "$AWS_REGION" \
-                --query "Tags[?Key=='Name'].Value" \
-                --output text 2>/dev/null || echo "")
-            
-            if [[ "$EFS_TAGS" == "${STACK_NAME}-efs" ]]; then
-                warning "EFS already exists: $EFS_ID"
-                # Get EFS DNS name
-                EFS_DNS="${EFS_ID}.efs.${AWS_REGION}.amazonaws.com"
-                export EFS_ID
-                echo "$EFS_DNS"
-                return 0
-            fi
-        fi
-    done
-    
-    # Create EFS
-    EFS_ID=$(aws efs create-file-system \
-        --creation-token "${STACK_NAME}-efs-$(date +%s)" \
-        --performance-mode generalPurpose \
-        --throughput-mode provisioned \
-        --provisioned-throughput-in-mibps 100 \
-        --encrypted \
-        --region "$AWS_REGION" \
-        --query 'FileSystemId' \
-        --output text)
-    
-    # Tag EFS
-    aws efs create-tags \
-        --file-system-id "$EFS_ID" \
-        --tags Key=Name,Value="${STACK_NAME}-efs" Key=Project,Value="$PROJECT_NAME" \
-        --region "$AWS_REGION"
-    
-    # Wait for EFS to be available
-    log "Waiting for EFS to become available..."
-    while true; do
-        EFS_STATE=$(aws efs describe-file-systems \
-            --file-system-id "$EFS_ID" \
-            --region "$AWS_REGION" \
-            --query 'FileSystems[0].LifeCycleState' \
-            --output text 2>/dev/null || echo "")
-        
-        if [[ "$EFS_STATE" == "available" ]]; then
-            log "EFS is now available"
-            break
-        elif [[ "$EFS_STATE" == "creating" ]]; then
-            log "EFS is still creating... waiting 10 seconds"
-            sleep 10
-        else
-            warning "EFS state: $EFS_STATE"
-            sleep 10
-        fi
-    done
-    
-    # Note: Mount target creation is now handled after instance launch
-    # when we know which AZ the instance is in
-    
-    # Get EFS DNS name
-    EFS_DNS="${EFS_ID}.efs.${AWS_REGION}.amazonaws.com"
-    # Export EFS_ID for cleanup function
-    export EFS_ID
-    success "Created EFS: $EFS_ID (DNS: $EFS_DNS)"
-    echo "$EFS_DNS"
-}
-
-create_efs_mount_target() {
-    local SG_ID="$1"
-    local INSTANCE_AZ="$2"
-    
-    if [[ -z "$EFS_ID" ]]; then
-        error "EFS_ID not set. Cannot create mount target."
-        return 1
-    fi
-    
-    log "Creating EFS mount target in $INSTANCE_AZ (where instance is running)..."
-    
-    # Check if mount target already exists in this AZ
-    EXISTING_MT=$(aws efs describe-mount-targets \
-        --file-system-id "$EFS_ID" \
-        --region "$AWS_REGION" \
-        --query "MountTargets[?AvailabilityZoneName=='$INSTANCE_AZ'].MountTargetId" \
-        --output text 2>/dev/null || echo "")
-    
-    if [[ -n "$EXISTING_MT" && "$EXISTING_MT" != "None" ]]; then
-        warning "EFS mount target already exists in $INSTANCE_AZ: $EXISTING_MT"
-        return 0
-    fi
-    
-    # Get subnet ID for the instance AZ
-    SUBNET_ID=$(get_subnet_for_az "$INSTANCE_AZ")
-    
-    if [[ "$SUBNET_ID" != "None" && -n "$SUBNET_ID" ]]; then
-        aws efs create-mount-target \
-            --file-system-id "$EFS_ID" \
-            --subnet-id "$SUBNET_ID" \
-            --security-groups "$SG_ID" \
-            --region "$AWS_REGION" || {
-            warning "Mount target creation failed in $INSTANCE_AZ, but continuing..."
-            return 0
-        }
-        success "Created EFS mount target in $INSTANCE_AZ"
-    else
-        error "No suitable subnet found in $INSTANCE_AZ"
-        return 1
-    fi
-}
-
-# Create main target group for n8n
-create_target_group() {
-    local SG_ID="$1"
-    local INSTANCE_ID="$2"
-    
-    log "Creating target group for n8n..."
-    
-    # Get VPC ID
-    VPC_ID=$(aws ec2 describe-vpcs --filters "Name=is-default,Values=true" --query 'Vpcs[0].VpcId' --output text --region "$AWS_REGION")
-    
-    TARGET_GROUP_ARN=$(aws elbv2 create-target-group \
-        --name "${STACK_NAME}-n8n-tg" \
-        --protocol HTTP \
-        --port 5678 \
-        --vpc-id "$VPC_ID" \
-        --health-check-protocol HTTP \
-        --health-check-port 5678 \
-        --health-check-path /healthz \
-        --health-check-interval-seconds 30 \
-        --health-check-timeout-seconds 10 \
-        --healthy-threshold-count 2 \
-        --unhealthy-threshold-count 2 \
-        --target-type instance \
-        --region "$AWS_REGION" \
-        --query 'TargetGroups[0].TargetGroupArn' \
-        --output text)
-    
-    # Register instance to target group
-    aws elbv2 register-targets \
-        --target-group-arn "$TARGET_GROUP_ARN" \
-        --targets Id="$INSTANCE_ID" Port=5678 \
-        --region "$AWS_REGION"
-    
-    success "Created n8n target group: $TARGET_GROUP_ARN"
-    echo "$TARGET_GROUP_ARN"
-}
-
-# Add qdrant target group creation after n8n target group
-create_qdrant_target_group() {
-    local SG_ID="$1"
-    local INSTANCE_ID="$2"
-    
-    log "Creating target group for qdrant..."
-    
-    # Get VPC ID
-    VPC_ID=$(aws ec2 describe-vpcs --filters "Name=is-default,Values=true" --query 'Vpcs[0].VpcId' --output text --region "$AWS_REGION")
-    
-    QDRANT_TG_ARN=$(aws elbv2 create-target-group \
-        --name "${STACK_NAME}-qdrant-tg" \
-        --protocol HTTP \
-        --port 6333 \
-        --vpc-id "$VPC_ID" \
-        --health-check-protocol HTTP \
-        --health-check-port 6333 \
-        --health-check-path /healthz \
-        --health-check-interval-seconds 30 \
-        --health-check-timeout-seconds 10 \
-        --healthy-threshold-count 2 \
-        --unhealthy-threshold-count 2 \
-        --target-type instance \
-        --region "$AWS_REGION" \
-        --query 'TargetGroups[0].TargetGroupArn' \
-        --output text)
-    
-    # Register instance to qdrant target group
-    aws elbv2 register-targets \
-        --target-group-arn "$QDRANT_TG_ARN" \
-        --targets Id="$INSTANCE_ID" Port=6333 \
-        --region "$AWS_REGION"
-    
-    success "Created qdrant target group: $QDRANT_TG_ARN"
-    echo "$QDRANT_TG_ARN"
-}
-
-# =============================================================================
-# SPOT INSTANCE MANAGEMENT
-# =============================================================================
-
-create_launch_template() {
-    local SG_ID="$1"
-    
-    log "Creating launch template for spot instances..."
-    
-    # Get latest Ubuntu AMI with GPU support
-    AMI_ID=$(aws ec2 describe-images \
-        --owners 099720109477 \
-        --filters \
-            "Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-*-amd64-server-*" \
-            "Name=state,Values=available" \
-        --region "$AWS_REGION" \
-        --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' \
-        --output text)
-    
-    info "Using AMI: $AMI_ID"
-    
-    # Create user data script
-    cat > user-data.sh << 'EOF'
-#!/bin/bash
-set -euo pipefail
-
-# Update system
-apt-get update && apt-get upgrade -y
-
-# Install Docker
-curl -fsSL https://get.docker.com -o get-docker.sh
-sh get-docker.sh
-usermod -aG docker ubuntu
-
-# Install Docker Compose
-curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-chmod +x /usr/local/bin/docker-compose
-
-# Install NVIDIA drivers and Docker GPU support
-apt-get install -y ubuntu-drivers-common
-ubuntu-drivers autoinstall
-
-# Install NVIDIA Container Toolkit
-distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
-curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | apt-key add -
-curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | tee /etc/apt/sources.list.d/nvidia-docker.list
-apt-get update && apt-get install -y nvidia-docker2
-
-# Configure Docker daemon for GPU
-cat > /etc/docker/daemon.json << 'EODAEMON'
-{
-    "default-runtime": "nvidia",
-    "runtimes": {
-        "nvidia": {
-            "path": "nvidia-container-runtime",
-            "runtimeArgs": []
-        }
-    }
-}
-EODAEMON
-
-# Install additional tools
-apt-get install -y jq curl wget git htop nvtop awscli nfs-common
-
-# Install CloudWatch agent
-wget https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
-dpkg -i amazon-cloudwatch-agent.deb
-
-# Restart services
-systemctl restart docker
-systemctl enable docker
-
-# Create mount point for EFS
-mkdir -p /mnt/efs
-
-# Signal that setup is complete
-touch /tmp/user-data-complete
-
-EOF
-
-    # Encode user data
-    # Use platform-specific base64 command
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        USER_DATA=$(base64 -i user-data.sh | tr -d '\n')
-    else
-        USER_DATA=$(base64 -w 0 user-data.sh)
-    fi
-    
-    # Create launch template
-    aws ec2 create-launch-template \
-        --launch-template-name "${STACK_NAME}-launch-template" \
-        --launch-template-data "{
-            \"ImageId\": \"$AMI_ID\",
-            \"InstanceType\": \"$INSTANCE_TYPE\",
-            \"KeyName\": \"$KEY_NAME\",
-            \"SecurityGroupIds\": [\"$SG_ID\"],
-            \"UserData\": \"$USER_DATA\",
-            \"IamInstanceProfile\": {
-                \"Name\": \"${STACK_NAME}-instance-profile\"
-            },
-            \"InstanceMarketOptions\": {
-                \"MarketType\": \"spot\",
-                \"SpotOptions\": {
-                    \"MaxPrice\": \"$MAX_SPOT_PRICE\",
-                    \"SpotInstanceType\": \"one-time\",
-                    \"InstanceInterruptionBehavior\": \"terminate\"
-                }
-            },
-            \"TagSpecifications\": [
-                {
-                    \"ResourceType\": \"instance\",
-                    \"Tags\": [
-                        {\"Key\": \"Name\", \"Value\": \"${STACK_NAME}-gpu-instance\"},
-                        {\"Key\": \"Project\", \"Value\": \"$PROJECT_NAME\"},
-                        {\"Key\": \"SpotInstance\", \"Value\": \"true\"},
-                        {\"Key\": \"CostOptimized\", \"Value\": \"true\"}
-                    ]
-                }
-            ]
-        }" \
-        --region "$AWS_REGION" > /dev/null
-    
-    success "Created launch template: ${STACK_NAME}-launch-template"
 }
 
 create_iam_role() {
@@ -676,261 +1610,205 @@ EOF
     success "Created IAM role and instance profile"
 }
 
-launch_spot_instance() {
+create_efs() {
     local SG_ID="$1"
-    local EFS_DNS="$2"
+    log "Setting up EFS (Elastic File System)..."
     
-    log "Launching spot instance with multi-AZ fallback..."
-    
-    # Create user data script
-    cat > user-data.sh << 'EOF'
-#!/bin/bash
-set -euo pipefail
-
-# Update system
-apt-get update && apt-get upgrade -y
-
-# Install Docker
-curl -fsSL https://get.docker.com -o get-docker.sh
-sh get-docker.sh
-usermod -aG docker ubuntu
-
-# Install Docker Compose
-curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-chmod +x /usr/local/bin/docker-compose
-
-# Install NVIDIA drivers and Docker GPU support
-apt-get install -y ubuntu-drivers-common
-ubuntu-drivers autoinstall
-
-# Install NVIDIA Container Toolkit
-distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
-curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | apt-key add -
-curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | tee /etc/apt/sources.list.d/nvidia-docker.list
-apt-get update && apt-get install -y nvidia-docker2
-
-# Configure Docker daemon for GPU
-cat > /etc/docker/daemon.json << 'EODAEMON'
-{
-    "default-runtime": "nvidia",
-    "runtimes": {
-        "nvidia": {
-            "path": "nvidia-container-runtime",
-            "runtimeArgs": []
-        }
-    }
-}
-EODAEMON
-
-# Install additional tools
-apt-get install -y jq curl wget git htop nvtop awscli nfs-common
-
-# Install CloudWatch agent
-wget https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
-dpkg -i amazon-cloudwatch-agent.deb
-
-# Restart services
-systemctl restart docker
-systemctl enable docker
-
-# Create mount point for EFS
-mkdir -p /mnt/efs
-
-# Signal that setup is complete
-touch /tmp/user-data-complete
-
-EOF
-
-    # Get AMI ID once for all attempts
-    AMI_ID=$(aws ec2 describe-images \
-        --owners 099720109477 \
-        --filters \
-            "Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-*-amd64-server-*" \
-            "Name=state,Values=available" \
+    # Check if EFS already exists by searching through all file systems
+    EFS_LIST=$(aws efs describe-file-systems \
         --region "$AWS_REGION" \
-        --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' \
-        --output text)
+        --query 'FileSystems[].FileSystemId' \
+        --output text 2>/dev/null || echo "")
     
-    info "Using AMI: $AMI_ID"
-    
-    # Get all available zones
-    AVAILABLE_ZONES=($(get_all_availability_zones))
-    info "Available AZs: ${AVAILABLE_ZONES[*]}"
-    
-    # Try each availability zone until one succeeds
-    for AZ in "${AVAILABLE_ZONES[@]}"; do
-        log "Attempting spot instance launch in AZ: $AZ"
-        
-        # Get subnet for this AZ
-        SUBNET_ID=$(get_subnet_for_az "$AZ")
-        if [[ "$SUBNET_ID" == "None" || -z "$SUBNET_ID" ]]; then
-            warning "No suitable subnet found in $AZ, skipping..."
-            continue
-        fi
-        
-        info "Using subnet $SUBNET_ID in $AZ"
-        
-        # Create spot instance request with specific subnet (which determines AZ)
-        REQUEST_ID=$(aws ec2 request-spot-instances \
-            --spot-price "$MAX_SPOT_PRICE" \
-            --instance-count 1 \
-            --type "one-time" \
-            --launch-specification "{
-                \"ImageId\": \"$AMI_ID\",
-                \"InstanceType\": \"$INSTANCE_TYPE\",
-                \"KeyName\": \"$KEY_NAME\",
-                \"SecurityGroupIds\": [\"$SG_ID\"],
-                \"SubnetId\": \"$SUBNET_ID\",
-                \"IamInstanceProfile\": {
-                    \"Name\": \"${STACK_NAME}-instance-profile\"
-                },
-                \"UserData\": \"$(if [[ "$OSTYPE" == "darwin"* ]]; then base64 -i user-data.sh | tr -d '\n'; else base64 -w 0 user-data.sh; fi)\"
-            }" \
-            --region "$AWS_REGION" \
-            --query 'SpotInstanceRequests[0].SpotInstanceRequestId' \
-            --output text 2>/dev/null) || {
-            warning "Failed to create spot instance request in $AZ, trying next AZ..."
-            continue
-        }
-        
-        # Check if REQUEST_ID is valid
-        if [[ -z "$REQUEST_ID" || "$REQUEST_ID" == "None" || "$REQUEST_ID" == "null" ]]; then
-            warning "Invalid spot instance request ID in $AZ: $REQUEST_ID, trying next AZ..."
-            continue
-        fi
-        
-        info "Spot instance request ID: $REQUEST_ID in $AZ"
-        
-        # Wait for spot request to be fulfilled with timeout
-        log "Waiting for spot instance to be launched in $AZ..."
-        if aws ec2 wait spot-instance-request-fulfilled \
-            --spot-instance-request-ids "$REQUEST_ID" \
-            --region "$AWS_REGION" \
-            --waiter-config maxAttempts=10,delay=30; then
-            
-            # Get instance ID with error checking
-            INSTANCE_ID=$(aws ec2 describe-spot-instance-requests \
-                --spot-instance-request-ids "$REQUEST_ID" \
+    # Check each EFS to see if it has our tag
+    for EFS_ID in $EFS_LIST; do
+        if [[ -n "$EFS_ID" && "$EFS_ID" != "None" ]]; then
+            EFS_TAGS=$(aws efs list-tags-for-resource \
+                --resource-id "$EFS_ID" \
                 --region "$AWS_REGION" \
-                --query 'SpotInstanceRequests[0].InstanceId' \
-                --output text)
+                --query "Tags[?Key=='Name'].Value" \
+                --output text 2>/dev/null || echo "")
             
-            if [[ -n "$INSTANCE_ID" && "$INSTANCE_ID" != "None" && "$INSTANCE_ID" != "null" ]]; then
-                # Wait for instance to be running
-                log "Waiting for instance to be running..."
-                aws ec2 wait instance-running --instance-ids "$INSTANCE_ID" --region "$AWS_REGION"
-                
-                # Get public IP and actual AZ
-                INSTANCE_INFO=$(aws ec2 describe-instances \
-                    --instance-ids "$INSTANCE_ID" \
-                    --region "$AWS_REGION" \
-                    --query 'Reservations[0].Instances[0].{PublicIp:PublicIpAddress,AZ:Placement.AvailabilityZone}' \
-                    --output json)
-                
-                PUBLIC_IP=$(echo "$INSTANCE_INFO" | jq -r '.PublicIp')
-                ACTUAL_AZ=$(echo "$INSTANCE_INFO" | jq -r '.AZ')
-                
-                # Tag instance
-                aws ec2 create-tags \
-                    --resources "$INSTANCE_ID" \
-                    --tags Key=Name,Value="${STACK_NAME}-gpu-instance" Key=Project,Value="$PROJECT_NAME" Key=AvailabilityZone,Value="$ACTUAL_AZ" \
-                    --region "$AWS_REGION"
-                
-                success "Spot instance launched: $INSTANCE_ID (IP: $PUBLIC_IP) in AZ: $ACTUAL_AZ"
-                
-                # Clean up temporary user data file
-                rm -f user-data.sh
-                
-                echo "$INSTANCE_ID:$PUBLIC_IP:$ACTUAL_AZ"
+            if [[ "$EFS_TAGS" == "${STACK_NAME}-efs" ]]; then
+                warning "EFS already exists: $EFS_ID"
+                # Get EFS DNS name
+                EFS_DNS="${EFS_ID}.efs.${AWS_REGION}.amazonaws.com"
+                export EFS_ID
+                echo "$EFS_DNS"
                 return 0
-            else
-                warning "Failed to get instance ID from spot request in $AZ, trying next AZ..."
-                continue
             fi
-        else
-            warning "Spot instance request timed out in $AZ, trying next AZ..."
-            # Cancel the failed request
-            aws ec2 cancel-spot-instance-requests --spot-instance-request-ids "$REQUEST_ID" --region "$AWS_REGION" 2>/dev/null || true
-            continue
         fi
     done
     
-    # If we get here, all AZs failed
-    error "Failed to launch spot instance in any availability zone. This may be due to:"
-    error "  1. Spot instance capacity constraints across all AZs"
-    error "  2. Service limits on spot instances"
-    error "  3. Instance type not available in this region"
-    error "  4. Spot price too low (current max: $MAX_SPOT_PRICE)"
+    # Create EFS
+    EFS_ID=$(aws efs create-file-system \
+        --creation-token "${STACK_NAME}-efs-$(date +%s)" \
+        --performance-mode generalPurpose \
+        --throughput-mode provisioned \
+        --provisioned-throughput-in-mibps 100 \
+        --encrypted \
+        --region "$AWS_REGION" \
+        --query 'FileSystemId' \
+        --output text)
     
-    # Clean up temporary file
-    rm -f user-data.sh
+    # Tag EFS
+    aws efs create-tags \
+        --file-system-id "$EFS_ID" \
+        --tags Key=Name,Value="${STACK_NAME}-efs" Key=Project,Value="$PROJECT_NAME" \
+        --region "$AWS_REGION"
     
-    return 1
+    # Wait for EFS to be available
+    log "Waiting for EFS to become available..."
+    while true; do
+        EFS_STATE=$(aws efs describe-file-systems \
+            --file-system-id "$EFS_ID" \
+            --region "$AWS_REGION" \
+            --query 'FileSystems[0].LifeCycleState' \
+            --output text 2>/dev/null || echo "")
+        
+        if [[ "$EFS_STATE" == "available" ]]; then
+            log "EFS is now available"
+            break
+        elif [[ "$EFS_STATE" == "creating" ]]; then
+            log "EFS is still creating... waiting 10 seconds"
+            sleep 10
+        else
+            warning "EFS state: $EFS_STATE"
+            sleep 10
+        fi
+    done
+    
+    # Get EFS DNS name
+    EFS_DNS="${EFS_ID}.efs.${AWS_REGION}.amazonaws.com"
+    # Export EFS_ID for cleanup function
+    export EFS_ID
+    success "Created EFS: $EFS_ID (DNS: $EFS_DNS)"
+    echo "$EFS_DNS"
 }
 
-# Add CloudFront setup after instance launch
-setup_cloudfront() {
-    local PUBLIC_IP="$1"
-    log "Setting up CloudFront distribution for geuse.io..."
+get_subnet_for_az() {
+    local AZ="$1"
+    aws ec2 describe-subnets \
+        --filters "Name=availability-zone,Values=$AZ" "Name=default-for-az,Values=true" \
+        --region "$AWS_REGION" \
+        --query 'Subnets[0].SubnetId' \
+        --output text
+}
+
+create_efs_mount_target() {
+    local SG_ID="$1"
+    local INSTANCE_AZ="$2"
     
-    # Create origin access identity
-    OAI_ID=$(aws cloudfront create-cloud-front-origin-access-identity --cloud-front-origin-access-identity-config CallerReference="$(date +%s)" Comment="AI Starter Kit OAI" --query 'CloudFrontOriginAccessIdentity.Id' --output text)
+    if [[ -z "$EFS_ID" ]]; then
+        error "EFS_ID not set. Cannot create mount target."
+        return 1
+    fi
     
-    # Create distribution
-    DISTRIBUTION_ID=$(aws cloudfront create-distribution --distribution-config '{
-        "CallerReference": "'"$(date +%s)"'",
-        "Comment": "AI Starter Kit Distribution",
-        "Enabled": true,
-        "Origins": {
-            "Quantity": 1,
-            "Items": [{
-                "Id": "EC2Origin",
-                "DomainName": "'"$PUBLIC_IP"'",
-                "CustomOriginConfig": {
-                    "HTTPPort": 80,
-                    "HTTPSPort": 443,
-                    "OriginProtocolPolicy": "http-only",
-                    "OriginSslProtocols": {"Quantity": 1, "Items": ["TLSv1.2"]},
-                    "OriginReadTimeout": 30,
-                    "OriginKeepaliveTimeout": 5
-                }
-            }]
-        },
-        "DefaultCacheBehavior": {
-            "TargetOriginId": "EC2Origin",
-            "ViewerProtocolPolicy": "redirect-to-https",
-            "AllowedMethods": {"Quantity": 7, "Items": ["HEAD", "DELETE", "POST", "GET", "OPTIONS", "PUT", "PATCH"], "CachedMethods": {"Quantity": 3, "Items": ["HEAD", "GET", "OPTIONS"]}},
-            "Compress": true,
-            "ForwardedValues": {
-                "QueryString": true,
-                "Cookies": {"Forward": "all"},
-                "Headers": {"Quantity": 1, "Items": ["*"]}
-            },
-            "MinTTL": 0,
-            "DefaultTTL": 3600,
-            "MaxTTL": 86400
-        },
-        "ViewerCertificate": {
-            "CloudFrontDefaultCertificate": true
-        },
-        "Aliases": {
-            "Quantity": 1,
-            "Items": ["geuse.io"]
+    log "Creating EFS mount target in $INSTANCE_AZ (where instance is running)..."
+    
+    # Check if mount target already exists in this AZ
+    EXISTING_MT=$(aws efs describe-mount-targets \
+        --file-system-id "$EFS_ID" \
+        --region "$AWS_REGION" \
+        --query "MountTargets[?AvailabilityZoneName=='$INSTANCE_AZ'].MountTargetId" \
+        --output text 2>/dev/null || echo "")
+    
+    if [[ -n "$EXISTING_MT" && "$EXISTING_MT" != "None" ]]; then
+        warning "EFS mount target already exists in $INSTANCE_AZ: $EXISTING_MT"
+        return 0
+    fi
+    
+    # Get subnet ID for the instance AZ
+    SUBNET_ID=$(get_subnet_for_az "$INSTANCE_AZ")
+    
+    if [[ "$SUBNET_ID" != "None" && -n "$SUBNET_ID" ]]; then
+        aws efs create-mount-target \
+            --file-system-id "$EFS_ID" \
+            --subnet-id "$SUBNET_ID" \
+            --security-groups "$SG_ID" \
+            --region "$AWS_REGION" || {
+            warning "Mount target creation failed in $INSTANCE_AZ, but continuing..."
+            return 0
         }
-    }' --query 'Distribution.Id' --output text)
-    
-    # Wait for distribution to deploy
-    aws cloudfront wait distribution-deployed --id "$DISTRIBUTION_ID"
-    
-    DISTRIBUTION_DOMAIN=$(aws cloudfront get-distribution --id "$DISTRIBUTION_ID" --query 'Distribution.DomainName' --output text)
-    
-    success "CloudFront distribution created: $DISTRIBUTION_DOMAIN"
-    echo "Point your CNAME record for geuse.io to $DISTRIBUTION_DOMAIN"
-    
-    export DISTRIBUTION_DOMAIN
+        success "Created EFS mount target in $INSTANCE_AZ"
+    else
+        error "No suitable subnet found in $INSTANCE_AZ"
+        return 1
+    fi
 }
 
-# Update create_alb function to add qdrant listener rule
+create_target_group() {
+    local SG_ID="$1"
+    local INSTANCE_ID="$2"
+    
+    log "Creating target group for n8n..."
+    
+    # Get VPC ID
+    VPC_ID=$(aws ec2 describe-vpcs --filters "Name=is-default,Values=true" --query 'Vpcs[0].VpcId' --output text --region "$AWS_REGION")
+    
+    TARGET_GROUP_ARN=$(aws elbv2 create-target-group \
+        --name "${STACK_NAME}-n8n-tg" \
+        --protocol HTTP \
+        --port 5678 \
+        --vpc-id "$VPC_ID" \
+        --health-check-protocol HTTP \
+        --health-check-port 5678 \
+        --health-check-path /healthz \
+        --health-check-interval-seconds 30 \
+        --health-check-timeout-seconds 10 \
+        --healthy-threshold-count 2 \
+        --unhealthy-threshold-count 2 \
+        --target-type instance \
+        --region "$AWS_REGION" \
+        --query 'TargetGroups[0].TargetGroupArn' \
+        --output text)
+    
+    # Register instance to target group
+    aws elbv2 register-targets \
+        --target-group-arn "$TARGET_GROUP_ARN" \
+        --targets Id="$INSTANCE_ID" Port=5678 \
+        --region "$AWS_REGION"
+    
+    success "Created n8n target group: $TARGET_GROUP_ARN"
+    echo "$TARGET_GROUP_ARN"
+}
+
+create_qdrant_target_group() {
+    local SG_ID="$1"
+    local INSTANCE_ID="$2"
+    
+    log "Creating target group for qdrant..."
+    
+    # Get VPC ID
+    VPC_ID=$(aws ec2 describe-vpcs --filters "Name=is-default,Values=true" --query 'Vpcs[0].VpcId' --output text --region "$AWS_REGION")
+    
+    QDRANT_TG_ARN=$(aws elbv2 create-target-group \
+        --name "${STACK_NAME}-qdrant-tg" \
+        --protocol HTTP \
+        --port 6333 \
+        --vpc-id "$VPC_ID" \
+        --health-check-protocol HTTP \
+        --health-check-port 6333 \
+        --health-check-path /healthz \
+        --health-check-interval-seconds 30 \
+        --health-check-timeout-seconds 10 \
+        --healthy-threshold-count 2 \
+        --unhealthy-threshold-count 2 \
+        --target-type instance \
+        --region "$AWS_REGION" \
+        --query 'TargetGroups[0].TargetGroupArn' \
+        --output text)
+    
+    # Register instance to target group
+    aws elbv2 register-targets \
+        --target-group-arn "$QDRANT_TG_ARN" \
+        --targets Id="$INSTANCE_ID" Port=6333 \
+        --region "$AWS_REGION"
+    
+    success "Created qdrant target group: $QDRANT_TG_ARN"
+    echo "$QDRANT_TG_ARN"
+}
+
 create_alb() {
     local SG_ID="$1"
     local TARGET_GROUP_ARN="$2"
@@ -938,251 +1816,118 @@ create_alb() {
     
     log "Creating Application Load Balancer..."
     
-    # Check if ALB exists
-    ALB_ARN=$(aws elbv2 describe-load-balancers \
-        --names "${STACK_NAME}-alb" \
-        --region "$AWS_REGION" \
-        --query 'LoadBalancers[0].LoadBalancerArn' \
-        --output text 2>/dev/null || echo "None")
-    
-    if [[ "$ALB_ARN" != "None" ]]; then
-        warning "ALB already exists: $ALB_ARN"
-        ALB_DNS=$(aws elbv2 describe-load-balancers \
-            --load-balancer-arns "$ALB_ARN" \
-            --region "$AWS_REGION" \
-            --query 'LoadBalancers[0].DNSName' \
-            --output text)
-        echo "$ALB_DNS"
-        return 0
-    fi
-    
     # Get subnets
-    SUBNET_IDS=$(aws ec2 describe-subnets \
+    SUBNETS=$(aws ec2 describe-subnets \
         --filters "Name=default-for-az,Values=true" \
         --region "$AWS_REGION" \
         --query 'Subnets[].SubnetId' \
         --output text)
     
-    # Create ALB
     ALB_ARN=$(aws elbv2 create-load-balancer \
         --name "${STACK_NAME}-alb" \
-        --type application \
-        --scheme internet-facing \
-        --subnets $SUBNET_IDS \
+        --subnets $SUBNETS \
         --security-groups "$SG_ID" \
+        --scheme internet-facing \
+        --type application \
+        --ip-address-type ipv4 \
         --region "$AWS_REGION" \
         --query 'LoadBalancers[0].LoadBalancerArn' \
         --output text)
     
-    # Create listener
-    LISTENER_ARN=$(aws elbv2 create-listener \
-        --load-balancer-arn "$ALB_ARN" \
-        --protocol HTTP \
-        --port 80 \
-        --default-actions Type=forward,TargetGroupArn="$TARGET_GROUP_ARN" \
-        --region "$AWS_REGION" \
-        --query 'Listeners[0].ListenerArn' \
-        --output text)
-    
-    # Add host-header rule for qdrant
-    aws elbv2 create-rule \
-        --listener-arn "$LISTENER_ARN" \
-        --priority 10 \
-        --conditions Field=host-header,Values=qdrant.geuse.io \
-        --actions Type=forward,TargetGroupArn="$QDRANT_TG_ARN" \
-        --region "$AWS_REGION"
-    
-    # Get ALB DNS
+    # Get ALB DNS name
     ALB_DNS=$(aws elbv2 describe-load-balancers \
         --load-balancer-arns "$ALB_ARN" \
         --region "$AWS_REGION" \
         --query 'LoadBalancers[0].DNSName' \
         --output text)
     
+    # Create listener for n8n (default)
+    aws elbv2 create-listener \
+        --load-balancer-arn "$ALB_ARN" \
+        --protocol HTTP \
+        --port 80 \
+        --default-actions Type=forward,TargetGroupArn="$TARGET_GROUP_ARN" \
+        --region "$AWS_REGION"
+    
+    # Create listener for qdrant
+    aws elbv2 create-listener \
+        --load-balancer-arn "$ALB_ARN" \
+        --protocol HTTP \
+        --port 6333 \
+        --default-actions Type=forward,TargetGroupArn="$QDRANT_TG_ARN" \
+        --region "$AWS_REGION"
+    
+    export ALB_ARN
     success "Created ALB: $ALB_DNS"
     echo "$ALB_DNS"
 }
 
-# Update setup_cloudfront to include qdrant subdomain and cache behavior
 setup_cloudfront() {
     local ALB_DNS="$1"
-    log "Setting up CloudFront distribution with subdomains..."
     
-    # Create origin access identity
-    OAI_ID=$(aws cloudfront create-cloud-front-origin-access-identity --cloud-front-origin-access-identity-config CallerReference="$(date +%s)" Comment="AI Starter Kit OAI" --query 'CloudFrontOriginAccessIdentity.Id' --output text)
+    log "Setting up CloudFront CDN..."
     
-    # Create distribution with multiple aliases and behaviors
-    DISTRIBUTION_ID=$(aws cloudfront create-distribution --distribution-config '{
-        "CallerReference": "'"$(date +%s)"'",
-        "Comment": "AI Starter Kit Distribution with subdomains",
-        "Enabled": true,
-        "Origins": {
-            "Quantity": 1,
-            "Items": [{
-                "Id": "ALBOrigin",
-                "DomainName": "'"$ALB_DNS"'",
-                "CustomOriginConfig": {
-                    "HTTPPort": 80,
-                    "HTTPSPort": 443,
-                    "OriginProtocolPolicy": "http-only",
-                    "OriginSslProtocols": {"Quantity": 1, "Items": ["TLSv1.2"]},
-                    "OriginReadTimeout": 30,
-                    "OriginKeepaliveTimeout": 5
-                }
-            }]
-        },
+    # Create CloudFront distribution
+    DISTRIBUTION_CONFIG='{
+        "CallerReference": "'${STACK_NAME}'-'$(date +%s)'",
+        "Comment": "CloudFront distribution for AI Starter Kit",
         "DefaultCacheBehavior": {
             "TargetOriginId": "ALBOrigin",
             "ViewerProtocolPolicy": "redirect-to-https",
-            "AllowedMethods": {"Quantity": 7, "Items": ["HEAD", "DELETE", "POST", "GET", "OPTIONS", "PUT", "PATCH"], "CachedMethods": {"Quantity": 3, "Items": ["HEAD", "GET", "OPTIONS"]}},
-            "Compress": true,
+            "AllowedMethods": {
+                "Quantity": 7,
+                "Items": ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"],
+                "CachedMethods": {
+                    "Quantity": 2,
+                    "Items": ["GET", "HEAD"]
+                }
+            },
             "ForwardedValues": {
                 "QueryString": true,
-                "Cookies": {"Forward": "all"},
-                "Headers": {"Quantity": 1, "Items": ["*"]},
-                "QueryStringCacheKeys": {"Quantity": 0}
+                "Headers": {
+                    "Quantity": 0
+                }
             },
-            "MinTTL": 0,
-            "DefaultTTL": 0,
-            "MaxTTL": 0
+            "TrustedSigners": {
+                "Enabled": false,
+                "Quantity": 0
+            },
+            "MinTTL": 0
         },
-        "CacheBehaviors": {
+        "Origins": {
             "Quantity": 1,
-            "Items": [{
-                "PathPattern": "*",
-                "TargetOriginId": "ALBOrigin",
-                "ViewerProtocolPolicy": "redirect-to-https",
-                "AllowedMethods": {"Quantity": 7, "Items": ["HEAD", "DELETE", "POST", "GET", "OPTIONS", "PUT", "PATCH"], "CachedMethods": {"Quantity": 3, "Items": ["HEAD", "GET", "OPTIONS"]}},
-                "Compress": true,
-                "ForwardedValues": {
-                    "QueryString": true,
-                    "Cookies": {"Forward": "all"},
-                    "Headers": {"Quantity": 2, "Items": ["Host", "*"]}
-                },
-                "MinTTL": 0,
-                "DefaultTTL": 0,
-                "MaxTTL": 0
-            }]
+            "Items": [
+                {
+                    "Id": "ALBOrigin",
+                    "DomainName": "'$ALB_DNS'",
+                    "CustomOriginConfig": {
+                        "HTTPPort": 80,
+                        "HTTPSPort": 443,
+                        "OriginProtocolPolicy": "http-only"
+                    }
+                }
+            ]
         },
-        "ViewerCertificate": {
-            "CloudFrontDefaultCertificate": true
-        },
-        "Aliases": {
-            "Quantity": 2,
-            "Items": ["n8n.geuse.io", "qdrant.geuse.io"]
-        }
-    }' --query 'Distribution.Id' --output text)
+        "Enabled": true,
+        "PriceClass": "PriceClass_100"
+    }'
     
-    # Wait for distribution to deploy
-    aws cloudfront wait distribution-deployed --id "$DISTRIBUTION_ID"
-    
-    DISTRIBUTION_DOMAIN=$(aws cloudfront get-distribution --id "$DISTRIBUTION_ID" --query 'Distribution.DomainName' --output text)
-    
-    success "CloudFront distribution created: $DISTRIBUTION_DOMAIN"
-    echo "Update DNS: Point n8n.geuse.io and qdrant.geuse.io CNAMEs to $DISTRIBUTION_DOMAIN"
-    
-    export DISTRIBUTION_DOMAIN
-}
-
-create_auto_scaling_group() {
-    local SG_ID="$1"
-    local EFS_DNS="$2"
-    
-    log "Creating Auto Scaling Group for cost optimization..."
-    
-    # Check if ASG already exists
-    if aws autoscaling describe-auto-scaling-groups \
-        --auto-scaling-group-names "${STACK_NAME}-asg" \
-        --region "$AWS_REGION" &> /dev/null; then
-        warning "Auto Scaling Group already exists"
-        echo "${STACK_NAME}-asg"
-        return 0
-    fi
-    
-    # Get subnets for ASG
-    SUBNET_IDS=$(aws ec2 describe-subnets \
-        --filters "Name=default-for-az,Values=true" \
+    DISTRIBUTION_ID=$(echo "$DISTRIBUTION_CONFIG" | aws cloudfront create-distribution \
+        --distribution-config file:///dev/stdin \
         --region "$AWS_REGION" \
-        --query 'Subnets[0:2].SubnetId' \
-        --output text | tr '\t' ',')
-    
-    # Create Auto Scaling Group
-    aws autoscaling create-auto-scaling-group \
-        --auto-scaling-group-name "${STACK_NAME}-asg" \
-        --launch-template "LaunchTemplateName=${STACK_NAME}-launch-template,Version=\$Latest" \
-        --min-size 1 \
-        --max-size 3 \
-        --desired-capacity 1 \
-        --vpc-zone-identifier "$SUBNET_IDS" \
-        --health-check-type EC2 \
-        --health-check-grace-period 300 \
-        --default-cooldown 300 \
-        --tags \
-            "Key=Name,Value=${STACK_NAME}-asg-instance,PropagateAtLaunch=true,ResourceId=${STACK_NAME}-asg,ResourceType=auto-scaling-group" \
-            "Key=Project,Value=$PROJECT_NAME,PropagateAtLaunch=true,ResourceId=${STACK_NAME}-asg,ResourceType=auto-scaling-group" \
-            "Key=CostOptimized,Value=true,PropagateAtLaunch=true,ResourceId=${STACK_NAME}-asg,ResourceType=auto-scaling-group" \
-        --region "$AWS_REGION"
-    
-    # Create scaling policies for cost optimization
-    
-    # Scale up policy (when GPU utilization > 80%)
-    SCALE_UP_POLICY_ARN=$(aws autoscaling put-scaling-policy \
-        --auto-scaling-group-name "${STACK_NAME}-asg" \
-        --policy-name "${STACK_NAME}-scale-up" \
-        --policy-type TargetTrackingScaling \
-        --target-tracking-configuration '{
-            "TargetValue": 75.0,
-            "CustomizedMetricSpecification": {
-                "MetricName": "GPUUtilization",
-                "Namespace": "GPU/Monitoring",
-                "Statistic": "Average"
-            },
-            "ScaleOutCooldown": 300,
-            "ScaleInCooldown": 300
-        }' \
-        --region "$AWS_REGION" \
-        --query 'PolicyARN' \
+        --query 'Distribution.Id' \
         --output text)
     
-    # Create CloudWatch alarm for high GPU utilization
-    aws cloudwatch put-metric-alarm \
-        --alarm-name "${STACK_NAME}-high-gpu-utilization" \
-        --alarm-description "Scale up when GPU utilization is high" \
-        --metric-name GPUUtilization \
-        --namespace GPU/Monitoring \
-        --statistic Average \
-        --period 300 \
-        --threshold 80 \
-        --comparison-operator GreaterThanThreshold \
-        --evaluation-periods 2 \
-        --alarm-actions "$SCALE_UP_POLICY_ARN" \
-        --region "$AWS_REGION"
+    DISTRIBUTION_DOMAIN=$(aws cloudfront get-distribution \
+        --id "$DISTRIBUTION_ID" \
+        --region "$AWS_REGION" \
+        --query 'Distribution.DomainName' \
+        --output text)
     
-    # Create CloudWatch alarm for low GPU utilization  
-    aws cloudwatch put-metric-alarm \
-        --alarm-name "${STACK_NAME}-low-gpu-utilization" \
-        --alarm-description "Scale down when GPU utilization is low" \
-        --metric-name GPUUtilization \
-        --namespace GPU/Monitoring \
-        --statistic Average \
-        --period 900 \
-        --threshold 20 \
-        --comparison-operator LessThanThreshold \
-        --evaluation-periods 3 \
-        --treat-missing-data notBreaching \
-        --region "$AWS_REGION"
-    
-    # Wait for ASG to stabilize
-    log "Waiting for Auto Scaling Group to stabilize..."
-    sleep 30
-    
-    success "Created Auto Scaling Group: ${STACK_NAME}-asg"
-    echo "${STACK_NAME}-asg"
+    export DISTRIBUTION_ID
+    export DISTRIBUTION_DOMAIN
+    success "Created CloudFront distribution: $DISTRIBUTION_DOMAIN"
 }
-
-# =============================================================================
-# APPLICATION DEPLOYMENT
-# =============================================================================
 
 wait_for_instance_ready() {
     local PUBLIC_IP="$1"
@@ -1207,12 +1952,9 @@ deploy_application() {
     local EFS_DNS="$2"
     local INSTANCE_ID="$3"
     
-    log "Deploying AI Starter Kit application with SSM parameters..."
+    log "Deploying AI Starter Kit application..."
     
-    # Fetch SSM params with error handling
-    fetch_ssm_params || { error "Failed to fetch SSM parameters"; return 1; }
-    
-    # Create deployment script using SSM vars
+    # Create deployment script
     cat > deploy-app.sh << EOF
 #!/bin/bash
 set -euo pipefail
@@ -1224,29 +1966,27 @@ sudo mkdir -p /mnt/efs
 sudo mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,fsc $EFS_DNS:/ /mnt/efs
 echo "$EFS_DNS:/ /mnt/efs nfs4 nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,fsc,_netdev 0 0" | sudo tee -a /etc/fstab
 
-# Clone repository
-git clone https://github.com/michael-pittman/001-starter-kit.git /home/ubuntu/ai-starter-kit || true
+# Clone repository if it doesn't exist
+if [ ! -d "/home/ubuntu/ai-starter-kit" ]; then
+    git clone https://github.com/michael-pittman/001-starter-kit.git /home/ubuntu/ai-starter-kit
+fi
 cd /home/ubuntu/ai-starter-kit
 
-# Create .env from SSM parameters
+# Create basic .env file
 cat > .env << 'EOFENV'
-POSTGRES_DB=$POSTGRES_DB
-POSTGRES_USER=$POSTGRES_USER
-POSTGRES_PASSWORD=$POSTGRES_PASSWORD
-N8N_ENCRYPTION_KEY=$N8N_ENCRYPTION_KEY
-N8N_USER_MANAGEMENT_JWT_SECRET=$N8N_USER_MANAGEMENT_JWT_SECRET
+POSTGRES_DB=n8n_db
+POSTGRES_USER=n8n_user
+POSTGRES_PASSWORD=n8n_password_$(openssl rand -hex 16)
+N8N_ENCRYPTION_KEY=\$(openssl rand -hex 32)
+N8N_USER_MANAGEMENT_JWT_SECRET=\$(openssl rand -hex 32)
 N8N_HOST=0.0.0.0
 N8N_PORT=5678
-WEBHOOK_URL=$WEBHOOK_URL
+N8N_CORS_ENABLE=true
+N8N_CORS_ALLOWED_ORIGINS=*
+N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true
 EFS_DNS=$EFS_DNS
 INSTANCE_ID=$INSTANCE_ID
-INSTANCE_TYPE=$INSTANCE_TYPE
 AWS_DEFAULT_REGION=$AWS_REGION
-OPENAI_API_KEY=$OPENAI_API_KEY
-N8N_CORS_ENABLE=$N8N_CORS_ENABLE
-N8N_CORS_ALLOWED_ORIGINS=$N8N_CORS_ALLOWED_ORIGINS
-N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=$N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE
-N8N_ID=$N8N_ID
 EOFENV
 
 # Start GPU-optimized services
@@ -1256,10 +1996,12 @@ sudo -E docker-compose -f docker-compose.gpu-optimized.yml up -d
 echo "Deployment completed!"
 EOF
 
-    # Copy application files and deploy
-    log "Copying application files..."
+    # Copy the deployment script and run it
+    log "Copying deployment script..."
+    scp -o StrictHostKeyChecking=no -i "${KEY_NAME}.pem" deploy-app.sh "ubuntu@$PUBLIC_IP:/tmp/"
     
     # Copy the entire repository
+    log "Copying application files..."
     rsync -avz --exclude '.git' --exclude 'node_modules' --exclude '*.log' \
         -e "ssh -o StrictHostKeyChecking=no -i ${KEY_NAME}.pem" \
         ./ "ubuntu@$PUBLIC_IP:/home/ubuntu/ai-starter-kit/"
@@ -1267,7 +2009,7 @@ EOF
     # Run deployment
     log "Running deployment script..."
     ssh -o StrictHostKeyChecking=no -i "${KEY_NAME}.pem" "ubuntu@$PUBLIC_IP" \
-        "chmod +x /home/ubuntu/ai-starter-kit/deploy-app.sh && /home/ubuntu/ai-starter-kit/deploy-app.sh"
+        "chmod +x /tmp/deploy-app.sh && /tmp/deploy-app.sh"
     
     success "Application deployment completed!"
 }
@@ -1277,56 +2019,28 @@ setup_monitoring() {
     
     log "Setting up monitoring and cost optimization..."
     
-    # Copy monitoring scripts
-    scp -o StrictHostKeyChecking=no -i "${KEY_NAME}.pem" \
-        "scripts/cost-optimization-automation.py" \
-        "ubuntu@$PUBLIC_IP:/home/ubuntu/cost-optimization.py"
+    # Create CloudWatch alarms
+    aws cloudwatch put-metric-alarm \
+        --alarm-name "${STACK_NAME}-high-gpu-utilization" \
+        --alarm-description "Alert when GPU utilization is high" \
+        --metric-name GPUUtilization \
+        --namespace AWS/EC2 \
+        --statistic Average \
+        --period 300 \
+        --threshold 90 \
+        --comparison-operator GreaterThanThreshold \
+        --evaluation-periods 2 \
+        --region "$AWS_REGION" || true
     
-    # Install monitoring script
-    ssh -o StrictHostKeyChecking=no -i "${KEY_NAME}.pem" "ubuntu@$PUBLIC_IP" << 'EOF'
-# Install Python dependencies
-sudo apt-get install -y python3-pip
-pip3 install boto3 schedule requests nvidia-ml-py3 psutil
-
-# Create systemd service for cost optimization
-sudo cat > /etc/systemd/system/cost-optimization.service << 'EOFSERVICE'
-[Unit]
-Description=AI Starter Kit Cost Optimization
-After=network.target
-
-[Service]
-Type=simple
-User=ubuntu
-WorkingDirectory=/home/ubuntu
-ExecStart=/usr/bin/python3 /home/ubuntu/cost-optimization.py --action schedule
-Restart=always
-RestartSec=30
-
-[Install]
-WantedBy=multi-user.target
-EOFSERVICE
-
-# Start cost optimization service
-sudo systemctl daemon-reload
-sudo systemctl enable cost-optimization.service
-sudo systemctl start cost-optimization.service
-
-echo "Monitoring setup completed!"
-EOF
-
-    success "Monitoring and cost optimization setup completed!"
+    success "Monitoring setup completed!"
 }
-
-# =============================================================================
-# VALIDATION AND HEALTH CHECKS
-# =============================================================================
 
 validate_deployment() {
     local PUBLIC_IP="$1"
     
     log "Validating deployment..."
     
-    # Wait with backoff
+    # Wait for services to fully start
     sleep 120
     
     local endpoints=(
@@ -1361,170 +2075,6 @@ validate_deployment() {
     success "Deployment validation completed!"
 }
 
-display_results() {
-    local PUBLIC_IP="$1"
-    local INSTANCE_ID="$2"
-    local EFS_DNS="$3"
-    local INSTANCE_AZ="$4"
-    
-    echo ""
-    echo -e "${CYAN}=================================${NC}"
-    echo -e "${GREEN}   AI STARTER KIT DEPLOYED!    ${NC}"
-    echo -e "${CYAN}=================================${NC}"
-    echo ""
-    echo -e "${BLUE}Instance Information:${NC}"
-    echo -e "  Instance ID: ${YELLOW}$INSTANCE_ID${NC}"
-    echo -e "  Public IP: ${YELLOW}$PUBLIC_IP${NC}"
-    echo -e "  Instance Type: ${YELLOW}$INSTANCE_TYPE${NC}"
-    echo -e "  Availability Zone: ${YELLOW}$INSTANCE_AZ${NC}"
-    echo -e "  EFS DNS: ${YELLOW}$EFS_DNS${NC}"
-    echo ""
-    echo -e "${BLUE}Service URLs:${NC}"
-    echo -e "  ${GREEN}n8n Workflow Editor:${NC}     http://$PUBLIC_IP:5678"
-    echo -e "  ${GREEN}Crawl4AI Web Scraper:${NC}    http://$PUBLIC_IP:11235"
-    echo -e "  ${GREEN}Qdrant Vector Database:${NC}  http://$PUBLIC_IP:6333"
-    echo -e "  ${GREEN}Ollama AI Models:${NC}        http://$PUBLIC_IP:11434"
-    echo ""
-    echo -e "${BLUE}SSH Access:${NC}"
-    echo -e "  ssh -i ${KEY_NAME}.pem ubuntu@$PUBLIC_IP"
-    echo ""
-    echo -e "${BLUE}Next Steps:${NC}"
-    echo -e "  1. Wait 5-10 minutes for all services to fully start"
-    echo -e "  2. Access n8n at http://$PUBLIC_IP:5678 to set up workflows"
-    echo -e "  3. Check service logs: ssh to instance and run 'docker-compose logs'"
-    echo -e "  4. Configure API keys in .env file for enhanced features"
-    echo ""
-    echo -e "${YELLOW}Cost Information:${NC}"
-    echo -e "  - Single spot instance saves ~70% vs on-demand"
-    echo -e "  - No auto-scaling to avoid spot instance limits"
-    echo -e "  - Expected cost: ~$6-8/day (single g4dn.xlarge spot)"
-    echo ""
-    echo -e "${YELLOW}Instance Details:${NC}"
-    echo -e "  - Single spot instance deployment with multi-AZ fallback"
-    echo -e "  - Deployed in $INSTANCE_AZ (automatically selected)"
-    echo -e "  - CloudWatch monitoring enabled"
-    echo -e "  - EFS shared storage available"
-    echo -e "  - SSM management access"
-    echo -e "  - Optimized for spot instance availability across all AZs"
-    echo ""
-}
-
-# =============================================================================
-# CLEANUP FUNCTION
-# =============================================================================
-
-cleanup_on_error() {
-    error "Deployment failed. Cleaning up resources..."
-    
-    # Terminate instance first
-    if [ ! -z "${INSTANCE_ID:-}" ]; then
-        log "Terminating instance $INSTANCE_ID..."
-        aws ec2 terminate-instances --instance-ids "$INSTANCE_ID" --region "$AWS_REGION" || true
-        aws ec2 wait instance-terminated --instance-ids "$INSTANCE_ID" --region "$AWS_REGION" || true
-    fi
-    
-    # Note: No Auto Scaling Group to delete (using single spot instance)
-    
-    # Delete CloudWatch alarms (if any were created)
-    log "Deleting CloudWatch alarms..."
-    aws cloudwatch delete-alarms \
-        --alarm-names "${STACK_NAME}-high-gpu-utilization" "${STACK_NAME}-low-gpu-utilization" \
-        --region "$AWS_REGION" 2>/dev/null || true
-    
-    # Delete CloudFront distribution (takes longest, do early)
-    if [ ! -z "${DISTRIBUTION_ID:-}" ]; then
-        log "Disabling and deleting CloudFront distribution..."
-        # Disable first
-        ETAG=$(aws cloudfront get-distribution-config --id "$DISTRIBUTION_ID" --query ETag --output text 2>/dev/null) || true
-        if [ ! -z "$ETAG" ] && [ "$ETAG" != "None" ]; then
-            CONFIG=$(aws cloudfront get-distribution-config --id "$DISTRIBUTION_ID" --query DistributionConfig --output json 2>/dev/null) || true
-            if [ ! -z "$CONFIG" ]; then
-                echo "$CONFIG" | jq '.Enabled = false' > disabled-config.json 2>/dev/null || true
-                aws cloudfront update-distribution --id "$DISTRIBUTION_ID" --distribution-config file://disabled-config.json --if-match "$ETAG" 2>/dev/null || true
-                aws cloudfront wait distribution-deployed --id "$DISTRIBUTION_ID" 2>/dev/null || true
-                NEW_ETAG=$(aws cloudfront get-distribution --id "$DISTRIBUTION_ID" --query ETag --output text 2>/dev/null) || true
-                aws cloudfront delete-distribution --id "$DISTRIBUTION_ID" --if-match "$NEW_ETAG" 2>/dev/null || true
-            fi
-        fi
-    fi
-    
-    # Wait for ALB dependencies to clear, then delete ALB
-    if [ ! -z "${ALB_ARN:-}" ]; then
-        log "Deleting Application Load Balancer..."
-        sleep 30  # Wait for connections to clear
-        aws elbv2 delete-load-balancer --load-balancer-arn "$ALB_ARN" --region "$AWS_REGION" || true
-        # Wait for ALB to be deleted before deleting target groups
-        sleep 60
-    fi
-    
-    # Delete target groups after ALB is gone
-    if [ ! -z "${TARGET_GROUP_ARN:-}" ]; then
-        log "Deleting n8n target group..."
-        aws elbv2 delete-target-group --target-group-arn "$TARGET_GROUP_ARN" --region "$AWS_REGION" || true
-    fi
-    if [ ! -z "${QDRANT_TG_ARN:-}" ]; then
-        log "Deleting qdrant target group..."
-        aws elbv2 delete-target-group --target-group-arn "$QDRANT_TG_ARN" --region "$AWS_REGION" || true
-    fi
-    
-    # Note: No launch template to delete (using direct spot instance)
-    
-    # Delete EFS mount targets and file system
-    if [ ! -z "${EFS_ID:-}" ]; then
-        log "Deleting EFS mount targets and file system..."
-        MOUNT_TARGETS=$(aws efs describe-mount-targets --file-system-id "$EFS_ID" --query 'MountTargets[].MountTargetId' --output text --region "$AWS_REGION" 2>/dev/null) || true
-        for MT in $MOUNT_TARGETS; do
-            if [ ! -z "$MT" ] && [ "$MT" != "None" ]; then
-                aws efs delete-mount-target --mount-target-id "$MT" --region "$AWS_REGION" || true
-            fi
-        done
-        sleep 30  # Wait for mount targets to be deleted
-        aws efs delete-file-system --file-system-id "$EFS_ID" --region "$AWS_REGION" || true
-    fi
-    
-    # Delete security group (wait for all dependencies to clear)
-    if [ ! -z "${SG_ID:-}" ]; then
-        log "Deleting security group..."
-        # Wait longer for EFS mount targets and other dependencies to fully detach
-        sleep 60
-        # Retry security group deletion with better error handling
-        local retry_count=0
-        while [ $retry_count -lt 3 ]; do
-            if aws ec2 delete-security-group --group-id "$SG_ID" --region "$AWS_REGION" 2>/dev/null; then
-                success "Security group deleted"
-                break
-            else
-                retry_count=$((retry_count + 1))
-                warning "Security group deletion attempt $retry_count failed, waiting 30s..."
-                sleep 30
-            fi
-        done
-        if [ $retry_count -eq 3 ]; then
-            warning "Security group $SG_ID could not be deleted due to dependencies. Please delete manually."
-        fi
-    fi
-    
-    # Delete IAM resources
-    log "Cleaning up IAM resources..."
-    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) || ""
-    aws iam remove-role-from-instance-profile --instance-profile-name "${STACK_NAME}-instance-profile" --role-name "${STACK_NAME}-role" 2>/dev/null || true
-    aws iam delete-instance-profile --instance-profile-name "${STACK_NAME}-instance-profile" 2>/dev/null || true
-    aws iam detach-role-policy --role-name "${STACK_NAME}-role" --policy-arn "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy" 2>/dev/null || true
-    aws iam detach-role-policy --role-name "${STACK_NAME}-role" --policy-arn "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore" 2>/dev/null || true
-    if [ ! -z "$ACCOUNT_ID" ]; then
-        aws iam detach-role-policy --role-name "${STACK_NAME}-role" --policy-arn "arn:aws:iam::${ACCOUNT_ID}:policy/${STACK_NAME}-custom-policy" 2>/dev/null || true
-        aws iam delete-policy --policy-arn "arn:aws:iam::${ACCOUNT_ID}:policy/${STACK_NAME}-custom-policy" 2>/dev/null || true
-    fi
-    aws iam delete-role --role-name "${STACK_NAME}-role" 2>/dev/null || true
-    
-    # Delete key pair and local files
-    log "Deleting key pair and temporary files..."
-    aws ec2 delete-key-pair --key-name "$KEY_NAME" --region "$AWS_REGION" || true
-    rm -f "${KEY_NAME}.pem" user-data.sh trust-policy.json custom-policy.json deploy-app.sh disabled-config.json
-    
-    warning "Cleanup completed. Please verify in AWS console that all resources are deleted."
-}
-
 # =============================================================================
 # MAIN DEPLOYMENT FLOW
 # =============================================================================
@@ -1532,15 +2082,17 @@ cleanup_on_error() {
 main() {
     echo -e "${CYAN}"
     cat << 'EOF'
- _____ _____   _____ _             _            _   _ _ _   
-|  _  |     | |   __| |_ ___ ___ _| |_ ___ ___  | | | |_| |_ 
-|     |-   -| |__   |  _| .'|  _|  _| -_|  _|  | |_| | |  _|
-|__|__|_____| |_____|_| |__,|_| |_| |___|_|    |___|_|_|_|  
-                                                           
+    ___    ____   _____ __             __              __ ____ __ 
+   /   |  /  _/  / ___// /_____ ______/ /____  _____  / //_  //_/_
+  / /| |  / /    \__ \/ __/ __ `/ ___/ __/ _ \/ ___/ / //_/ /_/ __/
+ / ___ |_/ /    ___/ / /_/ /_/ / /  / /_/  __/ /    / / _  __/ /_  
+/_/  |_/___/   /____/\__/\__,_/_/   \__/\___/_/    /_/ /_/ /\__/  
+                                                                  
+🤖 INTELLIGENT GPU DEPLOYMENT SYSTEM 🚀
 EOF
     echo -e "${NC}"
-    echo -e "${BLUE}AWS Deployment Automation${NC}"
-    echo -e "${BLUE}GPU-Optimized | Cost-Efficient | Production-Ready${NC}"
+    echo -e "${BLUE}Multi-Architecture | Cost-Optimized | AI-Powered Selection${NC}"
+    echo -e "${PURPLE}Automatic AMI & Instance Selection | Real-time Pricing Analysis${NC}"
     echo ""
     
     # Set error trap
@@ -1558,7 +2110,7 @@ EOF
     
     # Launch single spot instance directly (no ASG to avoid multiple instances)
     log "Launching single spot instance with multi-AZ fallback..."
-    INSTANCE_INFO=$(launch_spot_instance "$SG_ID" "$EFS_DNS")
+    INSTANCE_INFO=$(launch_spot_instance "$SG_ID" "$EFS_DNS" "$ENABLE_CROSS_REGION")
     INSTANCE_ID=$(echo "$INSTANCE_INFO" | cut -d: -f1)
     PUBLIC_IP=$(echo "$INSTANCE_INFO" | cut -d: -f2)
     INSTANCE_AZ=$(echo "$INSTANCE_INFO" | cut -d: -f3)
@@ -1592,19 +2144,71 @@ EOF
 show_usage() {
     echo "Usage: $0 [OPTIONS]"
     echo ""
+    echo "🚀 AI Starter Kit - Intelligent AWS GPU Deployment"
+    echo "================================================="
+    echo ""
+    echo "This script intelligently deploys GPU-optimized AI infrastructure on AWS"
+    echo "Features:"
+    echo "  🤖 Intelligent AMI and instance type selection"
+    echo "  💰 Cost optimization with spot pricing analysis"
+    echo "  🏗️  Multi-architecture support (Intel x86_64 & ARM64)"
+    echo "  📊 Real-time pricing comparison across configurations"
+    echo "  🎯 Automatic best price/performance selection"
+    echo ""
+    echo "Supported Configurations:"
+    echo "  📦 G4DN instances (Intel + NVIDIA T4):"
+    echo "      - g4dn.xlarge  (4 vCPUs, 16GB RAM, 1x T4)"
+    echo "      - g4dn.2xlarge (8 vCPUs, 32GB RAM, 1x T4)"
+    echo "  📦 G5G instances (ARM Graviton2 + NVIDIA T4G):"
+    echo "      - g5g.xlarge   (4 vCPUs, 8GB RAM, 1x T4G)"  
+    echo "      - g5g.2xlarge  (8 vCPUs, 16GB RAM, 1x T4G)"
+    echo ""
+    echo "AMI Sources:"
+    echo "  🔧 AWS Deep Learning AMIs with pre-installed:"
+    echo "      - NVIDIA drivers (optimized versions)"
+    echo "      - Docker with GPU container runtime"
+    echo "      - CUDA toolkit and libraries"
+    echo "      - Python ML frameworks"
+    echo ""
+    echo "Requirements:"
+    echo "  ✅ Valid AWS credentials configured"
+    echo "  ✅ Docker and AWS CLI installed"
+    echo "  ✅ jq and bc utilities (auto-installed if missing)"
+    echo ""
     echo "Options:"
     echo "  --region REGION         AWS region (default: us-east-1)"
-    echo "  --instance-type TYPE    Instance type (default: g4dn.xlarge)"
-    echo "  --max-spot-price PRICE  Maximum spot price (default: 0.75)"
+    echo "  --instance-type TYPE    Instance type or 'auto' for intelligent selection"
+    echo "                         Valid: auto, g4dn.xlarge, g4dn.2xlarge, g5g.xlarge, g5g.2xlarge"
+    echo "                         (default: auto)"
+    echo "  --max-spot-price PRICE  Maximum spot price budget (default: 2.00)"
+    echo "  --cross-region          Enable cross-region analysis for best pricing"
     echo "  --key-name NAME         SSH key name (default: ai-starter-kit-key)"
     echo "  --stack-name NAME       Stack name (default: ai-starter-kit)"
     echo "  --help                  Show this help message"
     echo ""
     echo "Examples:"
-    echo "  $0                                    # Deploy with defaults"
-    echo "  $0 --region us-west-2                # Deploy in different region"
-    echo "  $0 --instance-type g4dn.2xlarge      # Use larger instance"
-    echo "  $0 --max-spot-price 1.00             # Higher spot price limit"
+    echo "  🎯 Intelligent selection (recommended):"
+    echo "    $0                                    # Auto-select best config within budget"
+    echo "    $0 --max-spot-price 1.50             # Auto-select with \$1.50/hour budget"
+    echo ""
+    echo "  🎚️  Manual selection:"
+    echo "    $0 --instance-type g4dn.xlarge       # Force specific instance type"
+    echo "    $0 --instance-type g5g.2xlarge       # Use ARM-based instance"
+    echo ""
+    echo "  🌍 Regional deployment:"
+    echo "    $0 --region us-west-2                # Deploy in different region"
+    echo "    $0 --region eu-central-1             # Deploy in Europe"
+    echo "    $0 --cross-region                    # Find best region automatically"
+    echo ""
+    echo "Cost Optimization Features:"
+    echo "  💡 Automatic spot pricing analysis across all AZs"
+    echo "  💡 Price/performance ratio calculation"
+    echo "  💡 Multi-AZ fallback for instance availability"
+    echo "  💡 Real-time cost comparison display"
+    echo "  💡 Optimal configuration recommendations"
+    echo ""
+    echo "Note: Script automatically handles AMI availability and finds the best"
+    echo "      configuration based on current pricing and performance metrics."
 }
 
 # Parse command line arguments
@@ -1621,6 +2225,10 @@ while [[ $# -gt 0 ]]; do
         --max-spot-price)
             MAX_SPOT_PRICE="$2"
             shift 2
+            ;;
+        --cross-region)
+            ENABLE_CROSS_REGION="true"
+            shift
             ;;
         --key-name)
             KEY_NAME="$2"

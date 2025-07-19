@@ -1,17 +1,17 @@
-# 🚀 AI Starter Kit - GPU-Optimized AWS Deployment
+# 🚀 AI Starter Kit - GPU-Optimized AWS Deployment by Geuse.io
 
 <div align="center">
 
 ![AI Starter Kit Demo](assets/n8n-demo.gif)
 
-**Enterprise-grade AI workflow automation with 70% cost optimization**
+**Enterprise-grade AI workflow automation with intelligent deployment, cross-region analysis & 70% cost optimization**
 
 [![AWS](https://img.shields.io/badge/AWS-FF9900?style=for-the-badge&logo=amazonaws&logoColor=white)](https://aws.amazon.com/)
 [![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
 [![n8n](https://img.shields.io/badge/n8n-FF6B5B?style=for-the-badge&logo=n8n&logoColor=white)](https://n8n.io/)
 [![Ollama](https://img.shields.io/badge/Ollama-FF6C37?style=for-the-badge&logo=ollama&logoColor=white)](https://ollama.ai/)
 
-*Deploy production-ready AI workflows with GPU acceleration, vector search, and intelligent cost optimization*
+*Deploy production-ready AI workflows with intelligent GPU selection, cross-region analysis, multi-architecture support, and 70% cost optimization*
 
 </div>
 
@@ -25,17 +25,61 @@
 - **Qdrant** - High-performance vector database
 - **Crawl4AI** - Intelligent web scraping with LLM extraction
 
+### 🧠 **Intelligent Deployment**
+- **🤖 Auto-selection** of optimal GPU configurations
+- **💰 Real-time pricing** analysis across multiple instance types and regions
+- **🏗️ Multi-architecture** support (Intel x86_64 & ARM64 Graviton2)
+- **🎯 Price/performance** optimization with budget constraints
+- **🌍 Cross-region analysis** for optimal pricing and availability
+
 ### 💰 **Cost Optimization**
 - **70-75% cost savings** with AWS Spot instances
 - **Auto-scaling** based on GPU utilization
 - **Real-time pricing** via AWS Pricing API
-- **Intelligent resource allocation** for g4dn.xlarge
+- **Intelligent resource allocation** for optimal configurations
 
 ### 🚀 **Production Features**
 - **EFS persistence** - Data survives spot interruptions
 - **CloudFront CDN** - Global content delivery
 - **Auto-scaling groups** - High availability
 - **Graceful spot termination** - 2-minute warning handling
+
+---
+
+## 🆕 Recent Improvements (v2.1)
+
+### 🔧 **AMI Selection Fixes**
+- **Fixed `InvalidAMIID.Malformed` errors** that were preventing deployments
+- **Enhanced variable handling** between configuration selection and instance launch
+- **Added comprehensive validation** to prevent deployment with missing values
+- **Improved error handling** with better debugging output
+
+### 🌍 **Cross-Region Analysis**
+- **Multi-region pricing comparison** across 6 popular AWS regions
+- **Automatic region switching** to optimal configuration
+- **Enhanced availability checking** for instance types and AMIs per region
+- **Real-time regional pricing** analysis and display
+
+### 🧪 **Testing & Validation**
+- **New test suite** (`scripts/test-intelligent-selection.sh`) for validation without deployment
+- **Comprehensive testing** of AMI availability, instance types, and pricing analysis
+- **Cross-region testing** to validate multi-region selection logic
+- **Budget constraint testing** for various cost scenarios
+
+### 🚀 **Usage Examples**
+```bash
+# Basic deployment (now works correctly)
+./scripts/aws-deployment.sh
+
+# Cross-region analysis for best pricing
+./scripts/aws-deployment.sh --cross-region
+
+# Cross-region with budget constraint
+./scripts/aws-deployment.sh --cross-region --max-spot-price 1.50
+
+# Test before deploying
+./scripts/test-intelligent-selection.sh --comprehensive
+```
 
 ---
 
@@ -50,6 +94,13 @@ graph TB
         EFS[Elastic File System]
     end
     
+    subgraph "Intelligent Selection"
+        SELECTOR[🤖 Config Selector]
+        PRICING[💰 Price Analyzer]
+        ARCH[🏗️ Architecture Detector]
+        REGION[🌍 Region Analyzer]
+    end
+    
     subgraph "GPU Instance"
         subgraph "Docker Containers"
             N8N[n8n Workflows]
@@ -59,10 +110,14 @@ graph TB
             POSTGRES[PostgreSQL]
         end
         
-        GPU[NVIDIA T4 GPU]
+        GPU[NVIDIA T4/T4G GPU]
         MONITOR[Cost Monitor]
     end
     
+    SELECTOR --> ASG
+    PRICING --> SELECTOR
+    ARCH --> SELECTOR
+    REGION --> SELECTOR
     CF --> ALB
     ALB --> ASG
     ASG --> GPU
@@ -79,6 +134,7 @@ graph TB
 - ✅ AWS CLI configured with appropriate permissions
 - ✅ Docker and Docker Compose installed
 - ✅ AWS account with GPU instance quota
+- ✅ jq and bc utilities (auto-installed if missing)
 
 ### 1️⃣ **Configure Secrets**
 Store your API keys in AWS Systems Manager:
@@ -93,16 +149,26 @@ aws ssm put-parameter --name "/aibuildkit/WEBHOOK_URL" --value "https://your-dom
 
 ### 2️⃣ **Choose Your Deployment Strategy**
 
-#### **Option A: Cost-Optimized Spot Deployment (Recommended)**
+#### **Option A: Intelligent Spot Deployment (Recommended) 🎯**
 ```bash
-# Deploy with spot instances for 70% cost savings
+# 🤖 Auto-select optimal configuration (Intel x86_64 or ARM64)
 ./scripts/aws-deployment.sh
 
-# Customize deployment
-./scripts/aws-deployment.sh \
-  --region us-west-2 \
-  --instance-type g4dn.2xlarge \
-  --max-spot-price 1.00
+# 💰 Custom budget optimization
+./scripts/aws-deployment.sh --max-spot-price 1.50
+
+# 🎚️ Force specific architecture
+./scripts/aws-deployment.sh --instance-type g4dn.xlarge    # Intel x86_64
+./scripts/aws-deployment.sh --instance-type g5g.2xlarge   # ARM64 Graviton2
+
+# 🌍 Regional optimization
+./scripts/aws-deployment.sh --region us-west-2
+
+# 🌍 Cross-region analysis for best pricing
+./scripts/aws-deployment.sh --cross-region
+
+# 🌍 Cross-region with budget constraint
+./scripts/aws-deployment.sh --cross-region --max-spot-price 1.50
 ```
 
 #### **Option B: Simple On-Demand Deployment**
@@ -152,20 +218,27 @@ docker compose --profile cpu up
 
 ---
 
-## 📈 Cost Analysis
+## 📈 Intelligent Cost Analysis
 
-| Component | On-Demand | Spot Instance | Savings |
-|-----------|-----------|---------------|---------|
-| **g4dn.xlarge** | $1.19/hr | $0.25-0.45/hr | 67-75% |
-| **Daily Cost** | $28.56 | $6-10.80 | 70-75% |
-| **Monthly Cost** | $856.80 | $180-324 | 70-75% |
+### 🎯 **Multi-Configuration Pricing**
+
+| Configuration | Architecture | On-Demand | Spot Instance | Price/Perf | Monthly Savings |
+|---------------|--------------|-----------|---------------|------------|-----------------|
+| **g5g.xlarge** | ARM64 Graviton2 | $0.95/hr | $0.38/hr | **171.1** 🎯 | **$410.40** |
+| **g4dn.xlarge** | Intel x86_64 | $1.19/hr | $0.45/hr | 155.6 | $324.00 |
+| **g5g.2xlarge** | ARM64 Graviton2 | $1.90/hr | $0.75/hr | 106.7 | $324.00 |
+| **g4dn.2xlarge** | Intel x86_64 | $2.38/hr | $0.89/hr | 95.5 | $428.40 |
+
+**🤖 Intelligent Selection**: Automatically chooses g5g.xlarge for best price/performance ratio
 
 ### 🎯 **Cost Optimization Features**
-- ✅ **Spot Instance Management** - Automatic bidding and interruption handling
-- ✅ **Auto-scaling** - Scale based on GPU utilization (20-80% thresholds)
-- ✅ **Real-time Pricing** - AWS Pricing API integration
-- ✅ **Resource Optimization** - Balanced CPU/memory allocation
-- ✅ **Storage Optimization** - EFS with auto-scaling throughput
+- ✅ **🤖 Intelligent Selection** - Auto-chooses optimal configuration
+- ✅ **💰 Real-time Pricing** - Live spot price analysis across all AZs and regions
+- ✅ **🏗️ Multi-Architecture** - Intel x86_64 and ARM64 Graviton2 support
+- ✅ **🎯 Price/Performance** - Optimized ratio calculation
+- ✅ **🛡️ Budget Enforcement** - Respects max spot price constraints
+- ✅ **⚡ Multi-AZ Optimization** - Deploys in lowest-cost availability zone
+- ✅ **🌍 Cross-Region Analysis** - Finds optimal region for pricing and availability
 
 ---
 
@@ -186,22 +259,50 @@ docker compose --profile cpu up
 /aibuildkit/n8n/USER_MANAGEMENT_JWT_SECRET # JWT secret for user management
 ```
 
-### Resource Allocation (g4dn.xlarge)
+### Resource Allocation (Intelligent Selection)
+
+#### **G4DN Instances (Intel x86_64 + NVIDIA T4)**
 ```yaml
-# CPU Allocation (4 vCPUs total)
+# g4dn.xlarge: 4 vCPUs, 16GB RAM, 1x T4
+# g4dn.2xlarge: 8 vCPUs, 32GB RAM, 1x T4
+
+CPU Allocation:
 - postgres: 1.5 vCPUs (37.5%)
 - n8n: 1.0 vCPUs (25%)
 - ollama: 2.5 vCPUs (62.5%) - Primary compute
 - qdrant: 1.5 vCPUs (37.5%)
 - monitoring: 0.5 vCPUs (12.5%)
 
-# Memory Allocation (16GB total)
+Memory Allocation:
 - ollama: 10GB (62.5%) - Primary memory user
 - postgres: 3GB (18.75%)
 - qdrant: 3GB (18.75%)
 - monitoring: 512MB (3.2%)
 
-# GPU Memory (T4 16GB)
+GPU Memory (T4 16GB):
+- ollama: 14.4GB (90%)
+- system reserve: 1.6GB (10%)
+```
+
+#### **G5G Instances (ARM64 Graviton2 + NVIDIA T4G)**
+```yaml
+# g5g.xlarge: 4 vCPUs, 8GB RAM, 1x T4G
+# g5g.2xlarge: 8 vCPUs, 16GB RAM, 1x T4G
+
+CPU Allocation:
+- postgres: 1.0 vCPUs (25%)
+- n8n: 0.8 vCPUs (20%)
+- ollama: 2.0 vCPUs (50%) - Primary compute
+- qdrant: 1.0 vCPUs (25%)
+- monitoring: 0.2 vCPUs (5%)
+
+Memory Allocation:
+- ollama: 5GB (62.5%) - Primary memory user
+- postgres: 1.5GB (18.75%)
+- qdrant: 1.5GB (18.75%)
+- monitoring: 256MB (3.2%)
+
+GPU Memory (T4G 16GB):
 - ollama: 14.4GB (90%)
 - system reserve: 1.6GB (10%)
 ```
@@ -218,9 +319,12 @@ docker compose --profile cpu up
 
 ### Availability Strategy
 - **Multi-AZ deployment** across availability zones
-- **Mixed instance types** (g4dn.xlarge, g5.xlarge, g4ad.xlarge)
+- **Cross-region analysis** for optimal pricing and capacity
+- **Intelligent instance selection** (g4dn.xlarge, g4dn.2xlarge, g5g.xlarge, g5g.2xlarge)
+- **Primary/secondary AMI fallbacks** for each configuration
 - **Auto-scaling groups** with health checks
 - **CloudFront CDN** for global availability
+- **Automatic region switching** to best available option
 
 ---
 
@@ -234,8 +338,18 @@ curl http://YOUR-IP:11434/api/tags  # Ollama models
 curl http://YOUR-IP:5678/healthz  # n8n health
 ```
 
-### Cost Optimization Reports
+### Intelligent Selection Demo
 ```bash
+# See intelligent selection in action (no AWS required)
+./scripts/simple-demo.sh
+
+# Test enhanced selection with cross-region analysis (no AWS required)
+./scripts/test-intelligent-selection.sh --comprehensive
+
+# Test specific scenarios
+./scripts/test-intelligent-selection.sh --cross-region
+./scripts/test-intelligent-selection.sh --budget 1.50
+
 # Generate cost report
 python3 scripts/cost-optimization.py --action report
 
@@ -346,13 +460,20 @@ aws elbv2 describe-load-balancers --query 'LoadBalancers[?contains(LoadBalancerN
 | Issue | Solution |
 |-------|----------|
 | **Spot instance not launching** | Check spot price limits and availability |
+| **Intelligent selection fails** | Verify AMI availability in selected region |
+| **InvalidAMIID.Malformed errors** | Use `--cross-region` for better region selection |
 | **GPU not detected** | Verify NVIDIA drivers and Docker GPU runtime |
 | **EFS mount failures** | Check security groups and VPC configuration |
 | **High costs** | Review auto-scaling policies and spot pricing |
 | **Deployment script errors** | Check AWS CLI permissions and region settings |
+| **ARM64 compatibility issues** | Ensure containers support ARM64 architecture |
+| **Region capacity constraints** | Enable cross-region analysis with `--cross-region` |
 
 ### Debug Commands
 ```bash
+# Test intelligent selection (no AWS required)
+./scripts/simple-demo.sh
+
 # Check service status
 docker compose -f docker-compose.gpu-optimized.yml ps
 
@@ -367,6 +488,12 @@ python3 scripts/cost-optimization.py --action report
 
 # Verify AWS resources
 aws ec2 describe-instances --filters "Name=instance-state-name,Values=running"
+
+# Check intelligent selection details
+./scripts/aws-deployment.sh --help
+
+# Test AMI selection fixes and cross-region analysis
+./scripts/test-intelligent-selection.sh --comprehensive
 ```
 
 ---
@@ -389,7 +516,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 <div align="center">
 
-**Built with ❤️ for cost-effective AI deployment**
+**Built with ❤️ for intelligent, cost-effective AI deployment by GEUSE.io**
 
 [![GitHub stars](https://img.shields.io/github/stars/michael-pittman/001-starter-kit?style=social)](https://github.com/michael-pittman/001-starter-kit)
 [![GitHub forks](https://img.shields.io/github/forks/michael-pittman/001-starter-kit?style=social)](https://github.com/michael-pittman/001-starter-kit)
