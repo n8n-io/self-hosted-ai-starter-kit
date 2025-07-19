@@ -516,7 +516,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 <div align="center">
 
-**Built with ❤️ for intelligent, cost-effective AI deployment by GEUSE.io**
+**Built with ❤️ for intelligent, cost-effective AI deployment by [G E U S E](HTTPS://geuse.io)**
 
 [![GitHub stars](https://img.shields.io/github/stars/michael-pittman/001-starter-kit?style=social)](https://github.com/michael-pittman/001-starter-kit)
 [![GitHub forks](https://img.shields.io/github/forks/michael-pittman/001-starter-kit?style=social)](https://github.com/michael-pittman/001-starter-kit)
