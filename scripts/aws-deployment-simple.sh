@@ -307,7 +307,7 @@ cd /home/ubuntu/ai-starter-kit
 cat > .env << 'EOFENV'
 POSTGRES_DB=n8n
 POSTGRES_USER=n8n
-POSTGRES_PASSWORD=n8n_password_$(openssl rand -hex 12)
+POSTGRES_PASSWORD=n8n_password_$(openssl rand -hex 32)
 N8N_ENCRYPTION_KEY=$(openssl rand -hex 32)
 N8N_USER_MANAGEMENT_JWT_SECRET=$(openssl rand -hex 32)
 N8N_HOST=0.0.0.0

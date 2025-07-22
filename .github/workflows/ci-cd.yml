@@ -1,0 +1,469 @@
+name: AI Starter Kit CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Run security scan daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+env:
+  # Global environment variables
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '20'
+
+jobs:
+  # =============================================================================
+  # CODE QUALITY AND SECURITY CHECKS
+  # =============================================================================
+  code-quality:
+    name: Code Quality & Security
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for better analysis
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit safety pytest pytest-cov flake8 black isort
+      
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck yamllint jq bc
+      
+      - name: Python code formatting check
+        run: |
+          black --check --diff scripts/*.py tests/**/*.py
+        continue-on-error: true
+      
+      - name: Python import sorting check
+        run: |
+          isort --check-only --diff scripts/*.py tests/**/*.py
+        continue-on-error: true
+      
+      - name: Python linting
+        run: |
+          flake8 scripts/*.py tests/**/*.py --max-line-length=120 --ignore=E203,W503
+        continue-on-error: true
+      
+      - name: Shell script linting
+        run: |
+          find scripts/ -name "*.sh" -exec shellcheck {} \;
+        continue-on-error: true
+      
+      - name: YAML linting
+        run: |
+          yamllint -d relaxed docker-compose*.yml config/
+        continue-on-error: true
+      
+      - name: Python security scan (Bandit)
+        run: |
+          bandit -r scripts/ -f json -o bandit-report.json
+        continue-on-error: true
+      
+      - name: Python dependency security scan
+        run: |
+          # Create a requirements file from scripts that import packages
+          echo "boto3>=1.34.0" > requirements-scan.txt
+          echo "requests>=2.31.0" >> requirements-scan.txt
+          echo "schedule>=1.2.0" >> requirements-scan.txt
+          safety check -r requirements-scan.txt --json --output safety-report.json
+        continue-on-error: true
+      
+      - name: Upload security reports
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: security-reports
+          path: |
+            bandit-report.json
+            safety-report.json
+          retention-days: 30
+
+  # =============================================================================
+  # UNIT AND INTEGRATION TESTS
+  # =============================================================================
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: code-quality
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-cov pyyaml
+      
+      - name: Run unit tests
+        run: |
+          python -m pytest tests/unit/ -v --cov=scripts --cov-report=xml --cov-report=html
+      
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: coverage-report
+          path: |
+            coverage.xml
+            htmlcov/
+          retention-days: 30
+      
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: unit-tests
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install Docker Compose
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y docker-compose
+      
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pyyaml
+      
+      - name: Run integration tests
+        run: |
+          python -m pytest tests/integration/ -v
+      
+      - name: Test Docker Compose configuration
+        run: |
+          docker-compose -f docker-compose.gpu-optimized.yml config > /dev/null
+          echo "✅ Docker Compose configuration is valid"
+
+  # =============================================================================
+  # SECURITY SCANNING
+  # =============================================================================
+  security-scan:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.event_name == 'schedule' || contains(github.event.head_commit.message, '[security-scan]')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install security tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc jq
+      
+      - name: Run custom security audit
+        run: |
+          chmod +x scripts/security-check.sh
+          ./scripts/security-check.sh || true  # Don't fail the build on security findings
+      
+      - name: Container image security scan
+        run: |
+          # Install Trivy
+          sudo apt-get install wget apt-transport-https gnupg lsb-release
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install trivy
+          
+          # Scan container images from docker-compose file
+          trivy config docker-compose.gpu-optimized.yml --format json --output trivy-report.json
+        continue-on-error: true
+      
+      - name: Upload security scan results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: security-scan-results
+          path: |
+            trivy-report.json
+          retention-days: 90
+
+  # =============================================================================
+  # CONFIGURATION VALIDATION
+  # =============================================================================
+  config-validation:
+    name: Configuration Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    strategy:
+      matrix:
+        environment: [development, production]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install yq for YAML processing
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+      
+      - name: Validate environment configuration
+        run: |
+          # Test YAML syntax
+          yq eval 'keys' config/environments/${{ matrix.environment }}.yml > /dev/null
+          echo "✅ ${{ matrix.environment }} configuration YAML is valid"
+          
+          # Test required fields
+          yq eval '.global.environment' config/environments/${{ matrix.environment }}.yml | grep -q "${{ matrix.environment }}"
+          echo "✅ Environment field matches filename"
+          
+          # Test resource limits
+          chmod +x scripts/config-manager.sh
+          ./scripts/config-manager.sh validate ${{ matrix.environment }} || true
+      
+      - name: Generate configuration files
+        run: |
+          ./scripts/config-manager.sh env ${{ matrix.environment }}
+          ./scripts/config-manager.sh override ${{ matrix.environment }}
+          echo "✅ Configuration files generated successfully"
+      
+      - name: Upload generated configs
+        uses: actions/upload-artifact@v3
+        with:
+          name: generated-configs-${{ matrix.environment }}
+          path: |
+            .env.${{ matrix.environment }}
+            docker-compose.override.yml
+          retention-days: 7
+
+  # =============================================================================
+  # DEPLOYMENT VALIDATION (NO ACTUAL DEPLOYMENT)
+  # =============================================================================
+  deployment-validation:
+    name: Deployment Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [unit-tests, integration-tests, config-validation]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install AWS CLI
+        run: |
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          sudo ./aws/install
+      
+      - name: Validate deployment scripts
+        run: |
+          # Test script syntax
+          bash -n scripts/aws-deployment.sh
+          bash -n scripts/aws-deployment-simple.sh
+          bash -n scripts/aws-deployment-ondemand.sh
+          echo "✅ Deployment scripts have valid syntax"
+      
+      - name: Test security validation integration
+        run: |
+          chmod +x scripts/security-validation.sh
+          source scripts/security-validation.sh
+          
+          # Test validation functions
+          validate_aws_region "us-east-1"
+          validate_instance_type "g4dn.xlarge"
+          validate_stack_name "test-stack"
+          echo "✅ Security validation functions work correctly"
+      
+      - name: Test configuration generation
+        run: |
+          chmod +x scripts/config-manager.sh
+          ./scripts/config-manager.sh generate development
+          echo "✅ Configuration generation works"
+      
+      - name: Validate infrastructure requirements
+        run: |
+          # Test that all required AMIs and instance types are valid
+          echo "✅ Infrastructure validation would run here in real deployment"
+          
+          # This would include:
+          # - AMI availability check
+          # - Instance type availability
+          # - Region validation
+          # - Quota checks
+
+  # =============================================================================
+  # DOCUMENTATION AND COMPLIANCE
+  # =============================================================================
+  documentation:
+    name: Documentation Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Check README completeness
+        run: |
+          # Check that README has required sections
+          grep -q "## Quick Start" README.md
+          grep -q "## Security" README.md || grep -q "## Security Features" CLAUDE.md
+          grep -q "## Troubleshooting" README.md
+          echo "✅ README has required sections"
+      
+      - name: Check CLAUDE.md completeness
+        run: |
+          if [[ -f CLAUDE.md ]]; then
+            grep -q "## Development Commands" CLAUDE.md
+            grep -q "## Security Features" CLAUDE.md
+            grep -q "## Key Components" CLAUDE.md
+            echo "✅ CLAUDE.md has required sections"
+          fi
+      
+      - name: Check for security warnings in demo files
+        run: |
+          # Check that demo credential files have warnings
+          if [[ -d n8n/demo-data/credentials ]]; then
+            for file in n8n/demo-data/credentials/*.json; do
+              if [[ -f "$file" ]]; then
+                grep -q "_WARNING" "$file" || grep -q "DEMO" "$file"
+              fi
+            done
+            echo "✅ Demo files have security warnings"
+          fi
+
+  # =============================================================================
+  # RELEASE PREPARATION (MAIN BRANCH ONLY)
+  # =============================================================================
+  release-preparation:
+    name: Release Preparation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [deployment-validation, documentation]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Generate changelog
+        run: |
+          # Simple changelog generation
+          echo "# Changelog" > CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "## Latest Changes" >> CHANGELOG.md
+          git log --oneline --since="7 days ago" >> CHANGELOG.md
+      
+      - name: Update container versions lock file
+        run: |
+          # Update the lock file with current versions
+          echo "# Container versions updated on $(date)" >> container-versions.lock
+          echo "# CI/CD Pipeline: ${{ github.run_id }}" >> container-versions.lock
+      
+      - name: Create release artifacts
+        run: |
+          # Create a release package
+          mkdir -p release-artifacts
+          tar -czf release-artifacts/ai-starter-kit-$(date +%Y%m%d-%H%M%S).tar.gz \
+            --exclude='.git' \
+            --exclude='release-artifacts' \
+            --exclude='tests' \
+            .
+      
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: release-package
+          path: release-artifacts/
+          retention-days: 90
+
+  # =============================================================================
+  # NOTIFICATION AND REPORTING
+  # =============================================================================
+  notify-results:
+    name: Notify Results
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [code-quality, unit-tests, integration-tests, security-scan, deployment-validation]
+    
+    steps:
+      - name: Determine overall status
+        id: status
+        run: |
+          if [[ "${{ needs.code-quality.result }}" == "success" && \
+                "${{ needs.unit-tests.result }}" == "success" && \
+                "${{ needs.integration-tests.result }}" == "success" && \
+                "${{ needs.deployment-validation.result }}" == "success" ]]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+          else
+            echo "status=failure" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Create status badge
+        run: |
+          if [[ "${{ steps.status.outputs.status }}" == "success" ]]; then
+            echo "![CI Status](https://img.shields.io/badge/CI-passing-brightgreen)" > ci-status.md
+          else
+            echo "![CI Status](https://img.shields.io/badge/CI-failing-red)" > ci-status.md
+          fi
+      
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const status = '${{ steps.status.outputs.status }}';
+            const body = status === 'success' 
+              ? '✅ All CI checks passed! Ready for review.'
+              : '❌ Some CI checks failed. Please review the failing jobs.';
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            })
+
+# =============================================================================
+# WORKFLOW CONFIGURATION
+# =============================================================================
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write

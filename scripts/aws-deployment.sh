@@ -22,6 +22,14 @@ fi
 
 set -euo pipefail
 
+# Load security validation library
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/security-validation.sh" ]]; then
+    source "$SCRIPT_DIR/security-validation.sh"
+else
+    echo "Warning: Security validation library not found at $SCRIPT_DIR/security-validation.sh"
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -1976,13 +1984,13 @@ cd /home/ubuntu/ai-starter-kit
 cat > .env << 'EOFENV'
 POSTGRES_DB=n8n_db
 POSTGRES_USER=n8n_user
-POSTGRES_PASSWORD=n8n_password_$(openssl rand -hex 16)
+POSTGRES_PASSWORD=n8n_password_$(openssl rand -hex 32)
 N8N_ENCRYPTION_KEY=\$(openssl rand -hex 32)
 N8N_USER_MANAGEMENT_JWT_SECRET=\$(openssl rand -hex 32)
 N8N_HOST=0.0.0.0
 N8N_PORT=5678
 N8N_CORS_ENABLE=true
-N8N_CORS_ALLOWED_ORIGINS=*
+N8N_CORS_ALLOWED_ORIGINS=https://n8n.geuse.io,https://localhost:5678
 N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true
 EFS_DNS=$EFS_DNS
 INSTANCE_ID=$INSTANCE_ID

@@ -1,4 +1,7 @@
 {
+  "_WARNING": "THIS IS A DEMO CREDENTIAL FILE - DO NOT USE IN PRODUCTION!",
+  "_SECURITY_NOTICE": "Replace with proper credentials management in production environments",
+  "_USAGE": "This file is for demonstration purposes only and should be regenerated with your actual credentials",
   "createdAt": "2024-02-23T16:26:54.475Z",
   "updatedAt": "2024-02-23T16:26:58.928Z",
   "id": "xHuYe0MDGOs9IpBW",

@@ -1,0 +1,269 @@
+# Centralized Logging Stack for AI Starter Kit
+# Add this as an override to enable centralized logging
+
+version: '3.8'
+
+services:
+  # =============================================================================
+  # CENTRALIZED LOGGING SERVICES
+  # =============================================================================
+  
+  fluentd:
+    image: fluent/fluentd:v1.16-debian-1
+    container_name: fluentd-centralized
+    hostname: fluentd
+    user: "104:107"  # fluentd user
+    networks:
+      - ai_network
+    ports:
+      - "24224:24224"
+      - "24220:24220"  # Monitoring
+      - "9880:9880"    # Health check
+    volumes:
+      - ./config/logging/fluentd.conf:/fluentd/etc/fluent.conf:ro
+      - /var/log/ai-starter-kit:/var/log/ai-starter-kit
+      - fluentd_buffer:/var/log/fluentd-buffer
+    environment:
+      - FLUENTD_CONF=fluent.conf
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - STACK_NAME=${STACK_NAME:-ai-starter-kit}
+      - INSTANCE_ID=${INSTANCE_ID:-local}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - ELASTICSEARCH_HOST=${ELASTICSEARCH_HOST:-elasticsearch}
+      - ELASTICSEARCH_PORT=${ELASTICSEARCH_PORT:-9200}
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9880/api/plugins.json"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Optional: Elasticsearch for log storage
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.3
+    container_name: elasticsearch-logs
+    hostname: elasticsearch
+    user: "1000:1000"
+    networks:
+      - ai_network
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+      - cluster.name=ai-starter-kit-logs
+      - node.name=log-node-1
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: localhost:24224
+        tag: elasticsearch.logs
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # Optional: Kibana for log visualization
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.3
+    container_name: kibana-logs
+    hostname: kibana
+    user: "1000:1000"
+    networks:
+      - ai_network
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - SERVER_NAME=kibana.local
+      - SERVER_HOST=0.0.0.0
+      - XPACK_SECURITY_ENABLED=false
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: localhost:24224
+        tag: kibana.logs
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5601/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
+  # Log aggregation and forwarding service
+  log-forwarder:
+    image: fluent/fluent-bit:2.2.0
+    container_name: fluent-bit-forwarder
+    hostname: fluent-bit
+    user: "1000:1000"
+    networks:
+      - ai_network
+    volumes:
+      - /var/log:/var/log:ro
+      - /proc:/host/proc:ro
+      - /sys/fs/cgroup:/host/sys/fs/cgroup:ro
+      - ./config/logging/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+    environment:
+      - FLUENTD_HOST=fluentd
+      - FLUENTD_PORT=24224
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    depends_on:
+      - fluentd
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+
+# =============================================================================
+# LOGGING CONFIGURATION FOR EXISTING SERVICES
+# =============================================================================
+
+  # Update existing services to use centralized logging
+  postgres:
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: localhost:24224
+        tag: postgres.logs
+        labels: "service,environment"
+        env: "POSTGRES_DB,POSTGRES_USER"
+
+  n8n:
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: localhost:24224
+        tag: n8n.logs
+        labels: "service,environment"
+        env: "N8N_HOST,N8N_PORT"
+
+  ollama:
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: localhost:24224
+        tag: ollama.logs
+        labels: "service,environment"
+        env: "OLLAMA_HOST"
+
+  qdrant:
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: localhost:24224
+        tag: qdrant.logs
+        labels: "service,environment"
+
+  crawl4ai:
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: localhost:24224
+        tag: crawl4ai.logs
+        labels: "service,environment"
+
+  gpu-monitor:
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: localhost:24224
+        tag: gpu-monitor.logs
+        labels: "service,environment"
+
+# =============================================================================
+# VOLUMES
+# =============================================================================
+
+volumes:
+  fluentd_buffer:
+    driver: local
+  elasticsearch_data:
+    driver: local
+
+# =============================================================================
+# USAGE INSTRUCTIONS
+# =============================================================================
+
+# To enable centralized logging:
+# 1. Copy this file to docker-compose.logging.yml
+# 2. Run: docker-compose -f docker-compose.gpu-optimized.yml -f docker-compose.logging.yml up
+# 3. Access Kibana at http://localhost:5601 (if enabled)
+# 4. View logs in Elasticsearch or CloudWatch (depending on configuration)
+# 
+# Environment variables to set:
+# - ENVIRONMENT: Current environment (development/staging/production)
+# - STACK_NAME: Stack identifier
+# - INSTANCE_ID: Instance identifier for AWS
+# - AWS_REGION: AWS region for CloudWatch logs
+# - ELASTICSEARCH_HOST: Elasticsearch hostname (if using external Elasticsearch)
+# 
+# Log levels and tags:
+# - postgres.logs: PostgreSQL database logs
+# - n8n.logs: n8n workflow automation logs
+# - ollama.logs: Ollama AI model server logs
+# - qdrant.logs: Qdrant vector database logs
+# - crawl4ai.logs: Crawl4AI web scraping logs
+# - gpu-monitor.logs: GPU monitoring and metrics logs
+# 
+# Features:
+# - Centralized log collection with Fluentd
+# - Optional Elasticsearch storage
+# - Optional Kibana visualization
+# - CloudWatch integration for AWS
+# - Structured JSON logging
+# - Log retention policies
+# - Health monitoring
+# - Security-hardened containers

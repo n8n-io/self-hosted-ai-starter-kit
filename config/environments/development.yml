@@ -1,0 +1,200 @@
+# Development Environment Configuration
+# AI Starter Kit - Development Settings
+
+global:
+  environment: development
+  region: us-east-1
+  stack_name: ai-starter-kit-dev
+  project_name: ai-starter-kit
+
+# Infrastructure Configuration
+infrastructure:
+  instance_types:
+    preferred: ["g4dn.xlarge"]
+    fallback: ["t3.medium"]  # Fallback to non-GPU for development
+  
+  auto_scaling:
+    min_capacity: 1
+    max_capacity: 2
+    target_utilization: 80  # Higher utilization for cost savings
+  
+  networking:
+    vpc_cidr: "10.1.0.0/16"
+    public_subnets: ["10.1.1.0/24"]
+    private_subnets: ["10.1.10.0/24"]
+  
+  storage:
+    efs_performance_mode: generalPurpose
+    efs_encryption: false  # Disabled for development
+    backup_retention_days: 7
+
+# Application Configuration
+applications:
+  postgres:
+    image: postgres:16.1-alpine3.19
+    resources:
+      cpu_limit: "0.5"
+      memory_limit: "1G"
+      cpu_reservation: "0.25"
+      memory_reservation: "512M"
+    config:
+      max_connections: 50
+      shared_buffers: "256MB"
+      effective_cache_size: "512MB"
+    backup:
+      enabled: false  # Disabled for development
+  
+  n8n:
+    image: n8nio/n8n:1.19.4
+    resources:
+      cpu_limit: "0.5"
+      memory_limit: "1G"
+      cpu_reservation: "0.25"
+      memory_reservation: "256M"
+    config:
+      cors_enable: true
+      cors_allowed_origins: "*"  # Relaxed for development
+      payload_size_max: 16
+      metrics: true
+      log_level: debug
+    scaling:
+      replicas: 1
+      max_replicas: 1
+  
+  ollama:
+    image: ollama/ollama:0.1.17
+    resources:
+      cpu_limit: "1.0"
+      memory_limit: "4G"
+      cpu_reservation: "0.5"
+      memory_reservation: "2G"
+      gpu_memory_fraction: 0.70  # Lower for development
+    models:
+      - name: "llama2:7b"  # Smaller model for development
+        preload: true
+    config:
+      max_loaded_models: 1
+      concurrent_requests: 2
+  
+  qdrant:
+    image: qdrant/qdrant:v1.7.3
+    resources:
+      cpu_limit: "0.5"
+      memory_limit: "1G"
+      cpu_reservation: "0.25"
+      memory_reservation: "512M"
+    config:
+      max_search_threads: 2
+      max_optimization_threads: 1
+      wal_capacity_mb: 64
+    collections:
+      default_vector_size: 384
+      default_distance: "Cosine"
+  
+  crawl4ai:
+    image: unclecode/crawl4ai:0.2.77
+    resources:
+      cpu_limit: "0.5"
+      memory_limit: "1G"
+      cpu_reservation: "0.25"
+      memory_reservation: "512M"
+    config:
+      rate_limiting_enabled: false  # Disabled for development
+      max_concurrent_sessions: 1
+      browser_pool_size: 1
+
+# Security Configuration
+security:
+  container_security:
+    run_as_non_root: false  # Relaxed for development
+    read_only_root_filesystem: false
+    no_new_privileges: false  # Relaxed for development
+  
+  network_security:
+    cors_strict_mode: false  # Relaxed for development
+    trusted_hosts_restriction: false
+    internal_communication_only: false
+  
+  secrets_management:
+    use_aws_secrets_manager: false  # Use local secrets for development
+    rotate_secrets: false
+    encryption_at_rest: false
+
+# Monitoring Configuration
+monitoring:
+  metrics:
+    enabled: true
+    retention_days: 7
+    scrape_interval: 60s
+  
+  logging:
+    level: debug
+    centralized: false  # Local logging for development
+    retention_days: 7
+    format: text  # Easier to read during development
+  
+  alerting:
+    enabled: false  # Disabled for development
+  
+  health_checks:
+    enabled: true
+    interval: 60s  # Less frequent for development
+    timeout: 15s
+    retries: 3
+    
+  dashboards:
+    grafana_enabled: false  # Disabled for development
+
+# Cost Optimization Configuration
+cost_optimization:
+  spot_instances:
+    enabled: false  # Use on-demand for development stability
+    max_price: 1.00
+    interruption_handling: false
+  
+  auto_scaling:
+    scale_down_enabled: true
+    scale_down_threshold: 10  # Aggressive scaling for cost savings
+    idle_timeout_minutes: 10  # Quick scale down
+  
+  resource_optimization:
+    right_sizing_enabled: false
+    unused_resource_detection: false
+    cost_alerts_enabled: false
+
+# Backup and Recovery Configuration
+backup:
+  automated_backups: false  # Disabled for development
+  backup_schedule: "0 6 * * 0"  # Weekly on Sunday at 6 AM
+  backup_retention_days: 7
+  cross_region_replication: false
+  point_in_time_recovery: false
+
+# Compliance Configuration
+compliance:
+  audit_logging: false  # Disabled for development
+  encryption_in_transit: false
+  encryption_at_rest: false
+  access_logging: false
+  data_retention_policy: 7  # days
+
+# Development-specific Configuration
+development:
+  hot_reload: true
+  debug_mode: true
+  test_data_enabled: true
+  mock_services_enabled: true
+  local_development_mode: true
+  
+  # Development tools
+  tools:
+    enable_debug_endpoints: true
+    enable_metrics_endpoint: true
+    enable_profiling: true
+    
+  # Testing configuration
+  testing:
+    unit_tests_enabled: true
+    integration_tests_enabled: true
+    e2e_tests_enabled: false  # Can be resource intensive
+    test_data_reset: true

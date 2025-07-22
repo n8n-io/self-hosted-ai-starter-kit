@@ -1,0 +1,1752 @@
+---
+description: Core AWS cloud-native architecture principles
+globs: ["**/*.{ts,js,py,go,yaml,yml,json}"]
+alwaysApply: true
+---
+
+# AWS Cloud-Native Architecture Principles
+
+You are an expert AWS Solutions Architect with all major AWS certifications. Follow these core principles:
+
+## Well-Architected Framework (6 Pillars)
+1. **Operational Excellence**: Automate operations, monitor systems, continuously improve
+2. **Security**: Apply defense-in-depth, least privilege access, encrypt everything
+3. **Reliability**: Design for failure, implement multi-AZ deployments, backup strategies
+4. **Performance Efficiency**: Right-size resources, use managed services, monitor performance
+5. **Cost Optimization**: Pay only for what you use, right-size continuously, leverage pricing models
+6. **Sustainability**: Maximize utilization, use efficient architectures, minimize environmental impact
+
+## Service Selection Decision Framework
+**Compute Selection Logic:**
+- **Serverless First**: Start with AWS Lambda for event-driven workloads
+- **Containers**: Use ECS Fargate for containerized applications needing control
+- **Kubernetes**: Choose EKS for complex microservices requiring advanced orchestration
+- **Virtual Machines**: Use EC2 only when specific OS/hardware requirements exist
+
+**Database Selection Matrix:**
+- **Relational + High Performance**: Amazon Aurora (MySQL/PostgreSQL compatible)
+- **Relational + Traditional**: RDS for existing applications
+- **NoSQL + High Scale**: DynamoDB for key-value/document workloads
+- **Graph Data**: Amazon Neptune for connected data relationships
+- **Time-Series**: Amazon Timestream for IoT and monitoring data
+- **In-Memory**: ElastiCache (Redis/Memcached) for caching and session storage
+
+**Storage Decision Tree:**
+- **Object Storage**: S3 for backups, static content, data archiving
+- **Block Storage**: EBS for EC2 instance storage with persistence
+- **File Storage**: EFS for shared file systems across instances
+- **Content Delivery**: CloudFront for global content distribution
+
+## Architecture Patterns by Scale
+
+### Startup/Small Business (< 10 engineers)
+- **Single AWS Account**: Separate environments by VPC or resource naming
+- **Serverless-First**: Lambda, API Gateway, DynamoDB, S3
+- **Managed Services**: RDS, ElastiCache, CloudFront
+- **Simple Monitoring**: CloudWatch basic metrics and alarms
+- **Cost Focus**: Pay-as-you-go, Spot instances for dev/test
+
+### Mid-Size (10-100 engineers)  
+- **Multi-Account Strategy**: Separate accounts for prod/staging/dev
+- **Container Platform**: ECS Fargate or EKS for applications
+- **Event-Driven**: EventBridge, SQS, SNS for service communication
+- **Advanced Monitoring**: X-Ray tracing, custom CloudWatch metrics
+- **Cost Optimization**: Reserved Instances, Savings Plans
+
+### Enterprise (100+ engineers)
+- **AWS Organizations**: Account hierarchy with Control Tower
+- **Multi-Region**: Active-active or disaster recovery architectures  
+- **Service Mesh**: App Mesh or Istio for complex microservices
+- **Data Platform**: Data lakes with S3, Glue, Athena, QuickSight
+- **Advanced Security**: GuardDuty, Security Hub, Config Rules
+- **FinOps**: Comprehensive cost allocation, chargeback models
+
+## Core Services Integration Patterns
+```typescript
+// Event-driven architecture with EventBridge
+const eventPattern = {
+  source: ['myapp.orders'],
+  'detail-type': ['Order Placed'],
+  detail: {
+    amount: [{ numeric: ['>', 100] }]
+  }
+};
+
+// Lambda with proper error handling and observability
+export const handler = async (event: APIGatewayEvent): Promise<APIGatewayResponse> => {
+  const traceId = event.headers['X-Amzn-Trace-Id'];
+  logger.addContext({ traceId });
+  
+  try {
+    // Business logic here
+    return { statusCode: 200, body: JSON.stringify(result) };
+  } catch (error) {
+    logger.error('Handler error', { error });
+    return { statusCode: 500, body: 'Internal server error' };
+  }
+};
+```
+
+@security-standards.mdc
+@cost-optimization.mdc
+@monitoring-patterns.mdc
+```
+
+## Infrastructure as Code Rules (.cursor/rules/iac-patterns.mdc)
+
+```markdown
+---
+description: Infrastructure as Code best practices for CloudFormation, CDK, Terraform, Pulumi
+globs: ["**/*.{ts,tf,yaml,yml}", "**/cdk.json", "**/terraform.tfvars", "**/Pulumi.yaml"]
+alwaysApply: false
+---
+
+# Infrastructure as Code Best Practices
+
+Support all major IaC tools without preference. Choose based on requirements:
+
+## Tool Selection Guidance
+- **AWS CDK**: TypeScript/Python teams, complex logic, AWS-native projects
+- **Terraform**: Multi-cloud, mature ecosystem, declarative preference
+- **CloudFormation**: AWS-only, simple deployments, tight AWS integration
+- **Pulumi**: General-purpose languages, shared logic between infra/app code
+
+## CDK Best Practices
+```typescript
+// Proper CDK stack organization
+export class MyAppStack extends Stack {
+  constructor(scope: Construct, id: string, props: StackProps) {
+    super(scope, id, props);
+    
+    // Environment-specific configuration
+    const config = this.node.tryGetContext('config') || {};
+    const environment = this.node.tryGetContext('environment') || 'dev';
+    
+    // VPC with proper CIDR planning
+    const vpc = new Vpc(this, 'Vpc', {
+      maxAzs: 3,
+      cidr: config.vpcCidr || '10.0.0.0/16',
+      subnetConfiguration: [
+        { cidrMask: 24, name: 'public', subnetType: SubnetType.PUBLIC },
+        { cidrMask: 24, name: 'private', subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+        { cidrMask: 28, name: 'isolated', subnetType: SubnetType.PRIVATE_ISOLATED }
+      ]
+    });
+    
+    // Construct pattern for reusability
+    new WebServiceConstruct(this, 'WebService', {
+      vpc,
+      environment,
+      ...config.webService
+    });
+  }
+}
+
+// Custom construct for reusable patterns
+export class WebServiceConstruct extends Construct {
+  constructor(scope: Construct, id: string, props: WebServiceProps) {
+    super(scope, id);
+    
+    // ECS Fargate service with ALB
+    const cluster = new Cluster(scope, 'Cluster', { vpc: props.vpc });
+    const taskDefinition = new FargateTaskDefinition(scope, 'TaskDef', {
+      memoryLimitMiB: props.memory || 512,
+      cpu: props.cpu || 256
+    });
+    
+    // Apply security best practices
+    taskDefinition.addToExecutionRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents'],
+        resources: [`arn:aws:logs:${Stack.of(this).region}:${Stack.of(this).account}:*`]
+      })
+    );
+  }
+}
+```
+
+## Terraform Best Practices
+```hcl
+# Module organization and reusability
+terraform {
+  required_version = ">= 1.7"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+  
+  backend "s3" {
+    bucket         = "company-terraform-state"
+    key            = "environments/${var.environment}/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "terraform-locks"
+    encrypt        = true
+  }
+}
+
+# Environment-specific variable patterns
+variable "environment" {
+  description = "Environment name"
+  type        = string
+  validation {
+    condition     = contains(["dev", "staging", "prod"], var.environment)
+    error_message = "Environment must be dev, staging, or prod."
+  }
+}
+
+# Locals for computed values
+locals {
+  common_tags = {
+    Environment = var.environment
+    Project     = var.project_name
+    Terraform   = "true"
+    CostCenter  = var.cost_center
+  }
+  
+  # Environment-specific sizing
+  instance_config = {
+    dev = {
+      instance_type = "t3.micro"
+      desired_capacity = 1
+    }
+    staging = {
+      instance_type = "t3.small" 
+      desired_capacity = 2
+    }
+    prod = {
+      instance_type = "t3.large"
+      desired_capacity = 3
+    }
+  }
+}
+
+# VPC module usage
+module "vpc" {
+  source = "terraform-aws-modules/vpc/aws"
+  version = "~> 5.0"
+  
+  name = "${var.project_name}-${var.environment}"
+  cidr = var.vpc_cidr
+  
+  azs             = data.aws_availability_zones.available.names
+  private_subnets = var.private_subnet_cidrs
+  public_subnets  = var.public_subnet_cidrs
+  
+  enable_nat_gateway = true
+  enable_vpn_gateway = false
+  enable_dns_hostnames = true
+  enable_dns_support = true
+  
+  tags = local.common_tags
+}
+```
+
+## CloudFormation Templates
+```yaml
+# Parameter-driven templates with conditions
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Multi-environment web application stack'
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [dev, staging, prod]
+    Default: dev
+    
+  VpcCIDR:
+    Type: String
+    Default: 10.0.0.0/16
+    AllowedPattern: '^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\/([0-9]|[1-2][0-9]|3[0-2])$'
+
+Mappings:
+  EnvironmentMap:
+    dev:
+      InstanceType: t3.micro
+      MinSize: 1
+      MaxSize: 2
+    staging:
+      InstanceType: t3.small
+      MinSize: 2
+      MaxSize: 4
+    prod:
+      InstanceType: t3.large
+      MinSize: 3
+      MaxSize: 10
+
+Conditions:
+  IsProduction: !Equals [!Ref Environment, prod]
+  
+Resources:
+  # VPC with proper tagging
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-vpc'
+        - Key: Environment
+          Value: !Ref Environment
+```
+
+## Multi-Environment Deployment Patterns
+```bash
+#!/bin/bash
+# CLI deployment automation script
+
+set -euo pipefail
+
+ENVIRONMENT=${1:-dev}
+AWS_PROFILE=${2:-default}
+REGION=${3:-us-east-1}
+
+echo "🚀 Deploying to $ENVIRONMENT environment"
+
+# Function to deploy CDK
+deploy_cdk() {
+    echo "📦 Installing dependencies..."
+    npm install
+    
+    echo "🔍 Running CDK diff..."
+    npx cdk diff --profile $AWS_PROFILE --context environment=$ENVIRONMENT
+    
+    echo "🚢 Deploying CDK stack..."
+    npx cdk deploy --require-approval never \
+        --profile $AWS_PROFILE \
+        --context environment=$ENVIRONMENT \
+        --tags Environment=$ENVIRONMENT,DeployedBy=$USER,Timestamp=$(date -u +%Y%m%d%H%M%S)
+}
+
+# Function to deploy Terraform
+deploy_terraform() {
+    echo "🔧 Initializing Terraform..."
+    terraform init -backend-config="key=environments/$ENVIRONMENT/terraform.tfstate"
+    
+    echo "📋 Planning Terraform changes..."
+    terraform plan -var="environment=$ENVIRONMENT" -out=planfile
+    
+    echo "✅ Applying Terraform changes..."
+    terraform apply -auto-approve planfile
+    
+    # Cleanup
+    rm planfile
+}
+
+# Environment-specific validations
+validate_environment() {
+    case $ENVIRONMENT in
+        prod)
+            echo "⚠️  Production deployment - manual approval required"
+            read -p "Continue with production deployment? (yes/no): " confirm
+            [[ $confirm != "yes" ]] && exit 1
+            ;;
+        staging)
+            echo "🔄 Staging deployment - running additional tests"
+            npm run test:integration
+            ;;
+        dev)
+            echo "🛠️  Development deployment"
+            ;;
+        *)
+            echo "❌ Invalid environment: $ENVIRONMENT"
+            exit 1
+            ;;
+    esac
+}
+
+# Main deployment logic
+main() {
+    validate_environment
+    
+    # Detect IaC tool
+    if [[ -f "cdk.json" ]]; then
+        deploy_cdk
+    elif [[ -f "main.tf" ]]; then
+        deploy_terraform
+    elif [[ -f "template.yaml" || -f "template.yml" ]]; then
+        deploy_cloudformation
+    else
+        echo "❌ No supported IaC tool detected"
+        exit 1
+    fi
+    
+    echo "✅ Deployment completed successfully"
+}
+
+main "$@"
+```
+
+@cli-workflows.mdc
+@environment-configs.mdc
+```
+
+## Security and Cost Optimization Rules (.cursor/rules/security-cost.mdc)
+
+```markdown
+---
+description: AWS security best practices and cost optimization strategies
+globs: ["**/*.{ts,tf,py,go,yaml,yml}"]
+alwaysApply: true
+---
+
+# Security-First Architecture with Cost Optimization
+
+## Security Best Practices
+
+### Identity and Access Management (IAM)
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject"
+      ],
+      "Resource": "arn:aws:s3:::my-bucket/specific-path/*",
+      "Condition": {
+        "StringEquals": {
+          "s3:x-amz-server-side-encryption": "aws:kms"
+        },
+        "DateLessThan": {
+          "aws:TokenIssueTime": "2024-01-01T00:00:00Z"
+        }
+      }
+    }
+  ]
+}
+```
+
+**IAM Policy Patterns:**
+- **Least Privilege**: Grant minimum permissions required
+- **Condition-Based Access**: Restrict by time, IP, MFA, encryption
+- **Resource-Specific**: Use ARNs instead of wildcard permissions  
+- **Temporary Credentials**: Use roles instead of access keys
+- **Regular Auditing**: Review permissions quarterly
+
+### Network Security Architecture
+```typescript
+// Security group with minimal access
+const webSecurityGroup = new SecurityGroup(this, 'WebSG', {
+  vpc,
+  description: 'Web tier security group',
+  allowAllOutbound: false
+});
+
+// Only allow specific ports from ALB
+webSecurityGroup.addIngressRule(
+  albSecurityGroup,
+  Port.tcp(3000),
+  'HTTP traffic from ALB only'
+);
+
+// Egress to database tier only
+webSecurityGroup.addEgressRule(
+  dbSecurityGroup,
+  Port.tcp(5432),
+  'Database access'
+);
+
+// HTTPS outbound for API calls
+webSecurityGroup.addEgressRule(
+  Peer.anyIpv4(),
+  Port.tcp(443),
+  'HTTPS outbound'
+);
+```
+
+### Encryption Implementation
+```typescript
+// KMS key with proper key policy
+const kmsKey = new Key(this, 'AppKey', {
+  description: 'Application encryption key',
+  enableKeyRotation: true,
+  keyPolicy: new PolicyDocument({
+    statements: [
+      new PolicyStatement({
+        sid: 'Enable administration',
+        effect: Effect.ALLOW,
+        principals: [new AccountRootPrincipal()],
+        actions: ['kms:*'],
+        resources: ['*']
+      }),
+      new PolicyStatement({
+        sid: 'Allow application use',
+        effect: Effect.ALLOW,
+        principals: [appRole],
+        actions: [
+          'kms:Decrypt',
+          'kms:DescribeKey',
+          'kms:GenerateDataKey'
+        ],
+        resources: ['*']
+      })
+    ]
+  })
+});
+
+// S3 bucket with encryption
+const bucket = new Bucket(this, 'SecureBucket', {
+  encryption: BucketEncryption.KMS,
+  encryptionKey: kmsKey,
+  bucketKeyEnabled: true, // Cost optimization
+  versioned: true,
+  blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+  enforceSSL: true
+});
+```
+
+## Cost Optimization Strategies
+
+### Rightsizing and Instance Selection
+```typescript
+// Environment-based instance sizing
+const instanceConfig = {
+  dev: { 
+    instanceType: InstanceType.of(InstanceClass.T4G, InstanceSize.MICRO),
+    minCapacity: 1,
+    maxCapacity: 2
+  },
+  staging: { 
+    instanceType: InstanceType.of(InstanceClass.T4G, InstanceSize.SMALL),
+    minCapacity: 2,
+    maxCapacity: 4
+  },
+  prod: { 
+    instanceType: InstanceType.of(InstanceClass.C6G, InstanceSize.LARGE),
+    minCapacity: 3,
+    maxCapacity: 20
+  }
+};
+
+// Auto Scaling with cost optimization
+const autoScalingGroup = new AutoScalingGroup(this, 'ASG', {
+  vpc,
+  instanceType: instanceConfig[environment].instanceType,
+  minCapacity: instanceConfig[environment].minCapacity,
+  maxCapacity: instanceConfig[environment].maxCapacity,
+  
+  // Mixed instances for cost optimization
+  mixedInstancesPolicy: {
+    instancesDistribution: {
+      onDemandPercentageAboveBaseCapacity: environment === 'prod' ? 50 : 0,
+      spotAllocationStrategy: SpotAllocationStrategy.DIVERSIFIED
+    },
+    launchTemplateOverrides: [
+      { instanceType: InstanceType.of(InstanceClass.C6G, InstanceSize.LARGE) },
+      { instanceType: InstanceType.of(InstanceClass.C5, InstanceSize.LARGE) },
+      { instanceType: InstanceType.of(InstanceClass.M6I, InstanceSize.LARGE) }
+    ]
+  }
+});
+```
+
+### Database Cost Optimization
+```typescript
+// Aurora Serverless v2 for variable workloads  
+const cluster = new ServerlessCluster(this, 'Database', {
+  engine: DatabaseClusterEngine.auroraPostgres({
+    version: AuroraPostgresEngineVersion.VER_15_4
+  }),
+  vpc,
+  scaling: {
+    minCapacity: AuroraCapacityUnit.ACU_0_5,
+    maxCapacity: environment === 'prod' ? AuroraCapacityUnit.ACU_16 : AuroraCapacityUnit.ACU_4,
+    autoPause: environment !== 'prod' ? Duration.minutes(10) : undefined
+  },
+  
+  // Cost optimization features
+  backupRetention: environment === 'prod' ? Duration.days(30) : Duration.days(7),
+  deletionProtection: environment === 'prod',
+  
+  // Performance Insights for optimization
+  performanceInsightEncryptionKey: kmsKey,
+  performanceInsightRetention: PerformanceInsightRetention.DEFAULT
+});
+```
+
+### S3 Storage Class Optimization
+```typescript
+const bucket = new Bucket(this, 'DataBucket', {
+  lifecycleRules: [
+    {
+      id: 'CostOptimization',
+      enabled: true,
+      
+      // Transition to IA after 30 days
+      transitions: [
+        {
+          storageClass: StorageClass.INFREQUENT_ACCESS,
+          transitionAfter: Duration.days(30)
+        },
+        {
+          storageClass: StorageClass.GLACIER,
+          transitionAfter: Duration.days(90)
+        },
+        {
+          storageClass: StorageClass.DEEP_ARCHIVE,
+          transitionAfter: Duration.days(365)
+        }
+      ],
+      
+      // Delete incomplete uploads
+      abortIncompleteMultipartUploadAfter: Duration.days(7),
+      
+      // Delete old versions
+      noncurrentVersionExpiration: Duration.days(90)
+    }
+  ],
+  
+  // Enable S3 Intelligent Tiering
+  intelligentTieringConfigurations: [
+    {
+      id: 'IntelligentTiering',
+      status: IntelligentTieringStatus.ENABLED,
+      includeFilters: {
+        prefix: 'data/'
+      }
+    }
+  ]
+});
+```
+
+### Lambda Cost Optimization
+```typescript
+const lambdaFunction = new Function(this, 'OptimizedFunction', {
+  runtime: Runtime.NODEJS_20_X,
+  architecture: Architecture.ARM_64, // Better price-performance
+  memorySize: 1769, // 1 vCPU equivalent for CPU-bound tasks
+  timeout: Duration.seconds(30),
+  
+  // Reserved concurrency to control costs
+  reservedConcurrentExecutions: environment === 'prod' ? 100 : 10,
+  
+  // Environment variables for configuration
+  environment: {
+    NODE_OPTIONS: '--enable-source-maps',
+    LOG_LEVEL: environment === 'prod' ? 'info' : 'debug'
+  },
+  
+  // Dead letter queue for failed invocations
+  deadLetterQueue: dlq,
+  
+  // Tracing for performance optimization
+  tracing: Tracing.ACTIVE
+});
+```
+
+## Monitoring and Cost Alerting
+```typescript
+// Cost budget with alerts
+const budget = new Budget(this, 'MonthlyBudget', {
+  amount: environment === 'prod' ? 1000 : 100,
+  timeUnit: TimeUnit.MONTHLY,
+  budgetName: `${stackName}-monthly-budget`,
+  
+  costFilters: {
+    dimensions: {
+      SERVICE: ['Amazon Elastic Compute Cloud - Compute']
+    },
+    tags: {
+      Environment: [environment]
+    }
+  },
+  
+  notifications: [
+    {
+      threshold: 80,
+      type: NotificationType.ACTUAL,
+      address: 'alerts@company.com'
+    },
+    {
+      threshold: 100,
+      type: NotificationType.FORECASTED,
+      address: 'alerts@company.com'
+    }
+  ]
+});
+
+// CloudWatch dashboard for cost and performance
+const dashboard = new Dashboard(this, 'CostDashboard', {
+  dashboardName: `${stackName}-cost-performance`
+});
+
+dashboard.addWidgets(
+  new GraphWidget({
+    title: 'Lambda Duration and Memory',
+    left: [lambdaFunction.metricDuration()],
+    right: [lambdaFunction.metricErrors()]
+  }),
+  new NumberWidget({
+    title: 'Estimated Monthly Cost',
+    metrics: [
+      new Metric({
+        namespace: 'AWS/Billing',
+        metricName: 'EstimatedCharges',
+        dimensions: { Currency: 'USD' }
+      })
+    ]
+  })
+);
+```
+
+@compliance-patterns.mdc
+@disaster-recovery.mdc
+```
+
+## CLI Workflows and Automation (.cursor/rules/cli-workflows.mdc)
+
+```markdown
+---
+description: AWS CLI automation patterns and deployment workflows
+globs: ["**/*.{sh,bash,ps1}", "**/package.json", "**/Makefile"]
+alwaysApply: false
+---
+
+# CLI-Based Deployment Workflows
+
+## AWS CLI Configuration Management
+```bash
+#!/bin/bash
+# Multi-environment AWS CLI setup
+
+setup_aws_profiles() {
+    echo "🔧 Setting up AWS profiles..."
+    
+    # Development environment
+    aws configure set profile.dev.region us-east-1
+    aws configure set profile.dev.output json
+    aws configure set profile.dev.cli_pager ""
+    
+    # Staging environment  
+    aws configure set profile.staging.region us-east-1
+    aws configure set profile.staging.output json
+    aws configure set profile.staging.source_profile dev
+    aws configure set profile.staging.role_arn arn:aws:iam::STAGING-ACCOUNT:role/CrossAccountDeploymentRole
+    
+    # Production environment
+    aws configure set profile.prod.region us-east-1
+    aws configure set profile.prod.output json
+    aws configure set profile.prod.source_profile dev
+    aws configure set profile.prod.role_arn arn:aws:iam::PROD-ACCOUNT:role/CrossAccountDeploymentRole
+}
+
+# Function to validate AWS credentials
+validate_credentials() {
+    local profile=$1
+    echo "🔍 Validating credentials for profile: $profile"
+    
+    if ! aws sts get-caller-identity --profile $profile >/dev/null 2>&1; then
+        echo "❌ Invalid credentials for profile: $profile"
+        exit 1
+    fi
+    
+    echo "✅ Credentials validated for profile: $profile"
+}
+```
+
+## CloudFormation CLI Patterns
+```bash
+#!/bin/bash
+# Advanced CloudFormation deployment script
+
+deploy_cloudformation() {
+    local template_file=$1
+    local stack_name=$2
+    local environment=$3
+    local aws_profile=$4
+    
+    echo "📋 Deploying CloudFormation stack: $stack_name"
+    
+    # Validate template
+    echo "🔍 Validating template..."
+    aws cloudformation validate-template \
+        --template-body file://$template_file \
+        --profile $aws_profile
+    
+    # Check if stack exists
+    if aws cloudformation describe-stacks \
+        --stack-name $stack_name \
+        --profile $aws_profile >/dev/null 2>&1; then
+        
+        echo "🔄 Updating existing stack..."
+        
+        # Create change set
+        change_set_name="changeset-$(date +%Y%m%d%H%M%S)"
+        aws cloudformation create-change-set \
+            --stack-name $stack_name \
+            --change-set-name $change_set_name \
+            --template-body file://$template_file \
+            --parameters ParameterKey=Environment,ParameterValue=$environment \
+            --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+            --profile $aws_profile
+        
+        # Wait for change set creation
+        aws cloudformation wait change-set-create-complete \
+            --stack-name $stack_name \
+            --change-set-name $change_set_name \
+            --profile $aws_profile
+        
+        # Show changes
+        echo "📊 Proposed changes:"
+        aws cloudformation describe-change-set \
+            --stack-name $stack_name \
+            --change-set-name $change_set_name \
+            --profile $aws_profile \
+            --query 'Changes[].{Action:Action,Resource:ResourceChange.LogicalResourceId,Type:ResourceChange.ResourceType}'
+        
+        # Confirm deployment
+        if [[ $environment == "prod" ]]; then
+            read -p "Continue with production deployment? (yes/no): " confirm
+            [[ $confirm != "yes" ]] && exit 1
+        fi
+        
+        # Execute change set
+        aws cloudformation execute-change-set \
+            --stack-name $stack_name \
+            --change-set-name $change_set_name \
+            --profile $aws_profile
+        
+    else
+        echo "🆕 Creating new stack..."
+        aws cloudformation create-stack \
+            --stack-name $stack_name \
+            --template-body file://$template_file \
+            --parameters ParameterKey=Environment,ParameterValue=$environment \
+            --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+            --tags Key=Environment,Value=$environment Key=DeployedBy,Value=$USER \
+            --profile $aws_profile
+    fi
+    
+    # Wait for stack completion
+    echo "⏳ Waiting for stack operation to complete..."
+    aws cloudformation wait stack-update-complete \
+        --stack-name $stack_name \
+        --profile $aws_profile 2>/dev/null || \
+    aws cloudformation wait stack-create-complete \
+        --stack-name $stack_name \
+        --profile $aws_profile
+    
+    # Get stack outputs
+    echo "📊 Stack outputs:"
+    aws cloudformation describe-stacks \
+        --stack-name $stack_name \
+        --profile $aws_profile \
+        --query 'Stacks[0].Outputs[].{Key:OutputKey,Value:OutputValue}' \
+        --output table
+}
+```
+
+## CDK CLI Automation
+```bash
+#!/bin/bash
+# CDK deployment automation with best practices
+
+deploy_cdk_stack() {
+    local app_name=$1
+    local environment=$2
+    local aws_profile=$3
+    local region=${4:-us-east-1}
+    
+    echo "🚀 Deploying CDK application: $app_name to $environment"
+    
+    # Install dependencies
+    echo "📦 Installing dependencies..."
+    npm ci
+    
+    # Build TypeScript
+    echo "🔨 Building TypeScript..."
+    npm run build
+    
+    # Run tests
+    echo "🧪 Running tests..."
+    npm test
+    
+    # Bootstrap CDK (if needed)
+    echo "🔧 Checking CDK bootstrap..."
+    npx cdk bootstrap aws://$(aws sts get-caller-identity --profile $aws_profile --query Account --output text)/$region \
+        --profile $aws_profile
+    
+    # Synthesize templates
+    echo "📝 Synthesizing CloudFormation templates..."
+    npx cdk synth \
+        --profile $aws_profile \
+        --context environment=$environment \
+        --context region=$region
+    
+    # Security scan
+    echo "🔒 Running security scan..."
+    npx cdk diff \
+        --profile $aws_profile \
+        --context environment=$environment \
+        --security-only
+    
+    # Deploy with approval
+    if [[ $environment == "prod" ]]; then
+        echo "⚠️  Production deployment requires manual approval"
+        npx cdk deploy \
+            --profile $aws_profile \
+            --context environment=$environment \
+            --require-approval broadening \
+            --tags Environment=$environment,DeployedBy=$USER,Timestamp=$(date -u +%Y%m%d%H%M%S)
+    else
+        npx cdk deploy \
+            --profile $aws_profile \
+            --context environment=$environment \
+            --require-approval never \
+            --tags Environment=$environment,DeployedBy=$USER,Timestamp=$(date -u +%Y%m%d%H%M%S)
+    fi
+    
+    # Output stack information
+    echo "📊 Stack outputs:"
+    npx cdk deploy \
+        --profile $aws_profile \
+        --context environment=$environment \
+        --outputs-file cdk-outputs.json
+}
+```
+
+## Terraform CLI Automation
+```bash
+#!/bin/bash
+# Terraform deployment with remote state management
+
+deploy_terraform() {
+    local environment=$1
+    local aws_profile=$2
+    local region=${3:-us-east-1}
+    
+    echo "🔧 Deploying Terraform for environment: $environment"
+    
+    # Set up environment variables
+    export AWS_PROFILE=$aws_profile
+    export AWS_DEFAULT_REGION=$region
+    export TF_VAR_environment=$environment
+    export TF_VAR_region=$region
+    
+    # Initialize Terraform with backend configuration
+    echo "🔄 Initializing Terraform..."
+    terraform init \
+        -backend-config="key=environments/$environment/terraform.tfstate" \
+        -backend-config="region=$region" \
+        -reconfigure
+    
+    # Validate configuration
+    echo "✅ Validating Terraform configuration..."
+    terraform validate
+    
+    # Security and compliance checks
+    echo "🔒 Running security scan..."
+    if command -v tfsec &> /dev/null; then
+        tfsec .
+    fi
+    
+    if command -v checkov &> /dev/null; then
+        checkov -d . --framework terraform
+    fi
+    
+    # Create workspace if it doesn't exist
+    terraform workspace select $environment 2>/dev/null || terraform workspace new $environment
+    
+    # Plan changes
+    echo "📋 Planning Terraform changes..."
+    terraform plan \
+        -var-file="environments/$environment.tfvars" \
+        -out=tfplan-$environment
+    
+    # Show plan summary
+    terraform show -json tfplan-$environment | jq -r '.planned_values.root_module.resources[]?.type' | sort | uniq -c
+    
+    # Apply with approval
+    if [[ $environment == "prod" ]]; then
+        echo "⚠️  Production deployment requires manual approval"
+        read -p "Apply changes to production? (yes/no): " confirm
+        [[ $confirm != "yes" ]] && exit 1
+    fi
+    
+    echo "✨ Applying Terraform changes..."
+    terraform apply tfplan-$environment
+    
+    # Clean up plan file
+    rm tfplan-$environment
+    
+    # Output values
+    echo "📊 Terraform outputs:"
+    terraform output
+}
+```
+
+## Multi-Environment Deployment Pipeline
+```bash
+#!/bin/bash
+# Complete CI/CD pipeline script
+
+set -euo pipefail
+
+# Configuration
+ENVIRONMENTS=("dev" "staging" "prod")
+AWS_REGION="us-east-1"
+SLACK_WEBHOOK="${SLACK_WEBHOOK:-}"
+
+# Logging functions
+log() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1"
+}
+
+error() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - ERROR: $1" >&2
+}
+
+# Slack notifications
+notify_slack() {
+    local message=$1
+    local color=${2:-"good"}
+    
+    if [[ -n "$SLACK_WEBHOOK" ]]; then
+        curl -X POST -H 'Content-type: application/json' \
+            --data "{'attachments':[{'color':'$color','text':'$message'}]}" \
+            $SLACK_WEBHOOK
+    fi
+}
+
+# Pre-deployment checks
+pre_deployment_checks() {
+    local environment=$1
+    
+    log "Running pre-deployment checks for $environment"
+    
+    # Check AWS credentials
+    if ! aws sts get-caller-identity --profile $environment >/dev/null 2>&1; then
+        error "Invalid AWS credentials for $environment"
+        return 1
+    fi
+    
+    # Check for required files
+    local required_files=("package.json" "tsconfig.json")
+    for file in "${required_files[@]}"; do
+        if [[ ! -f "$file" ]]; then
+            error "Required file $file not found"
+            return 1
+        fi
+    done
+    
+    # Run linting
+    log "Running code quality checks..."
+    npm run lint
+    npm run test
+    
+    log "✅ Pre-deployment checks passed"
+}
+
+# Deploy to environment
+deploy_environment() {
+    local environment=$1
+    local skip_tests=${2:-false}
+    
+    log "🚀 Starting deployment to $environment"
+    
+    # Pre-deployment checks
+    if [[ "$skip_tests" != "true" ]]; then
+        if ! pre_deployment_checks $environment; then
+            error "Pre-deployment checks failed for $environment"
+            notify_slack "❌ Deployment to $environment failed - pre-checks failed" "danger"
+            return 1
+        fi
+    fi
+    
+    # Deploy based on detected IaC tool
+    if [[ -f "cdk.json" ]]; then
+        deploy_cdk_stack "myapp" $environment $environment $AWS_REGION
+    elif [[ -f "main.tf" ]]; then
+        deploy_terraform $environment $environment $AWS_REGION
+    elif [[ -f "template.yaml" ]]; then
+        deploy_cloudformation "template.yaml" "myapp-$environment" $environment $environment
+    else
+        error "No supported IaC tool detected"
+        return 1
+    fi
+    
+    # Post-deployment verification
+    if ! post_deployment_verification $environment; then
+        error "Post-deployment verification failed"
+        notify_slack "⚠️ Deployment to $environment completed but verification failed" "warning"
+        return 1
+    fi
+    
+    log "✅ Deployment to $environment completed successfully"
+    notify_slack "✅ Successfully deployed to $environment"
+}
+
+# Post-deployment verification
+post_deployment_verification() {
+    local environment=$1
+    
+    log "🔍 Running post-deployment verification for $environment"
+    
+    # Health check
+    if command -v curl &> /dev/null; then
+        local health_url="https://api-$environment.example.com/health"
+        if curl -f -s $health_url >/dev/null; then
+            log "✅ Health check passed"
+        else
+            error "Health check failed for $health_url"
+            return 1
+        fi
+    fi
+    
+    # Smoke tests
+    if [[ -f "scripts/smoke-tests.sh" ]]; then
+        bash scripts/smoke-tests.sh $environment
+    fi
+    
+    return 0
+}
+
+# Main deployment pipeline
+main() {
+    local target_env=${1:-all}
+    local skip_tests=${2:-false}
+    
+    log "🎯 Starting deployment pipeline"
+    
+    if [[ "$target_env" == "all" ]]; then
+        # Deploy to all environments in sequence
+        for env in "${ENVIRONMENTS[@]}"; do
+            if ! deploy_environment $env $skip_tests; then
+                error "Deployment failed at $env environment"
+                exit 1
+            fi
+            
+            # Wait between environments (except dev)
+            if [[ "$env" != "prod" ]]; then
+                log "⏳ Waiting 30 seconds before next environment..."
+                sleep 30
+            fi
+        done
+    else
+        # Deploy to specific environment
+        if [[ " ${ENVIRONMENTS[@]} " =~ " ${target_env} " ]]; then
+            deploy_environment $target_env $skip_tests
+        else
+            error "Invalid environment: $target_env"
+            exit 1
+        fi
+    fi
+    
+    log "🎉 Deployment pipeline completed successfully"
+}
+
+# Script execution
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
+```
+
+## Makefile for Automation
+```makefile
+# AWS project automation Makefile
+
+.PHONY: help install test lint security deploy clean
+
+# Default environment
+ENV ?= dev
+PROFILE ?= $(ENV)
+REGION ?= us-east-1
+
+help: ## Show this help message
+	@echo 'Usage: make [target] [ENV=environment]'
+	@echo ''
+	@echo 'Targets:'
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
+install: ## Install dependencies
+	npm ci
+	@if command -v terraform >/dev/null 2>&1; then terraform init; fi
+
+test: ## Run tests
+	npm test
+	@if [ -f "main.tf" ]; then terraform validate; fi
+
+lint: ## Run linting
+	npm run lint
+	@if command -v tflint >/dev/null 2>&1; then tflint; fi
+
+security: ## Run security scans
+	@if command -v tfsec >/dev/null 2>&1; then tfsec .; fi
+	@if command -v checkov >/dev/null 2>&1; then checkov -d .; fi
+	npm audit
+
+plan: ## Plan infrastructure changes
+	@if [ -f "cdk.json" ]; then \
+		npx cdk diff --profile $(PROFILE) --context environment=$(ENV); \
+	elif [ -f "main.tf" ]; then \
+		terraform plan -var="environment=$(ENV)" -out=tfplan; \
+	fi
+
+deploy: ## Deploy to environment
+	@bash scripts/deploy.sh $(ENV) $(PROFILE) $(REGION)
+
+destroy: ## Destroy infrastructure
+	@echo "⚠️  This will destroy all resources in $(ENV) environment"
+	@read -p "Are you sure? (yes/no): " confirm && [ "$$confirm" = "yes" ]
+	@if [ -f "cdk.json" ]; then \
+		npx cdk destroy --profile $(PROFILE) --context environment=$(ENV); \
+	elif [ -f "main.tf" ]; then \
+		terraform destroy -var="environment=$(ENV)" -auto-approve; \
+	fi
+
+clean: ## Clean build artifacts
+	rm -rf node_modules dist build cdk.out .terraform terraform.tfstate*
+	npm cache clean --force
+
+logs: ## View application logs
+	aws logs tail /aws/lambda/myapp-$(ENV) --profile $(PROFILE) --follow
+
+monitoring: ## Open monitoring dashboard
+	@echo "Opening CloudWatch dashboard..."
+	open "https://$(REGION).console.aws.amazon.com/cloudwatch/home?region=$(REGION)#dashboards:name=myapp-$(ENV)"
+```
+
+@deployment-automation.mdc
+@monitoring-cli.mdc
+```
+
+## Project Scale Adaptation (.cursor/rules/scale-adaptation.mdc)
+
+```markdown
+---
+description: Scale-adaptive AWS recommendations
+globs: ["**/*.{ts,tf,yaml,yml,json}"]
+alwaysApply: true
+---
+
+# Scale-Adaptive AWS Architecture Recommendations
+
+Adapt recommendations based on project scale indicators:
+- Team size
+- Expected traffic/load
+- Budget constraints  
+- Compliance requirements
+- Geographic distribution
+
+## Startup/Small Business (< 10 engineers, < $10K monthly AWS spend)
+
+### Service Selection Priority
+1. **Serverless First**: Lambda, API Gateway, DynamoDB
+2. **Managed Services**: RDS, ElastiCache, S3, CloudFront
+3. **Simple Architecture**: Monolith or simple microservices
+4. **Single Region**: Cost-effective, simple management
+
+```typescript
+// Startup-optimized architecture
+const startupStack = {
+  // Serverless API
+  api: new Function(this, 'API', {
+    runtime: Runtime.NODEJS_20_X,
+    architecture: Architecture.ARM_64, // Better price-performance
+    memorySize: 512, // Start small, optimize later
+    timeout: Duration.seconds(30),
+    environment: {
+      DYNAMODB_TABLE: table.tableName
+    }
+  }),
+  
+  // Simple database
+  database: new Table(this, 'Database', {
+    partitionKey: { name: 'id', type: AttributeType.STRING },
+    billingMode: BillingMode.PAY_PER_REQUEST, // No capacity planning needed
+    pointInTimeRecovery: false, // Cost optimization
+    removalPolicy: RemovalPolicy.DESTROY // Dev-friendly
+  }),
+  
+  // CDN for static assets
+  distribution: new Distribution(this, 'CDN', {
+    defaultBehavior: {
+      origin: new S3Origin(staticBucket),
+      viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+      cachePolicy: CachePolicy.CACHING_OPTIMIZED
+    }
+  })
+};
+```
+
+### Cost Optimization Patterns
+```bash
+# Startup cost management script
+#!/bin/bash
+
+# Turn off non-production resources during off-hours
+manage_dev_resources() {
+    local action=$1 # start or stop
+    
+    if [[ "$action" == "stop" ]]; then
+        echo "💰 Stopping development resources to save costs"
+        
+        # Stop EC2 instances
+        aws ec2 stop-instances \
+            --instance-ids $(aws ec2 describe-instances \
+                --filters "Name=tag:Environment,Values=dev" "Name=instance-state-name,Values=running" \
+                --query 'Reservations[].Instances[].InstanceId' --output text) \
+            --profile dev
+        
+        # Scale down ECS services
+        aws ecs update-service \
+            --cluster dev-cluster \
+            --service dev-service \
+            --desired-count 0 \
+            --profile dev
+            
+    elif [[ "$action" == "start" ]]; then
+        echo "🚀 Starting development resources"
+        
+        # Start EC2 instances
+        aws ec2 start-instances \
+            --instance-ids $(aws ec2 describe-instances \
+                --filters "Name=tag:Environment,Values=dev" "Name=instance-state-name,Values=stopped" \
+                --query 'Reservations[].Instances[].InstanceId' --output text) \
+            --profile dev
+        
+        # Scale up ECS services
+        aws ecs update-service \
+            --cluster dev-cluster \
+            --service dev-service \
+            --desired-count 2 \
+            --profile dev
+    fi
+}
+
+# Schedule via cron
+# 0 18 * * 1-5 /path/to/script.sh stop   # Stop at 6 PM weekdays
+# 0 8 * * 1-5 /path/to/script.sh start   # Start at 8 AM weekdays
+```
+
+## Mid-Size Business (10-100 engineers, $10K-$100K monthly AWS spend)
+
+### Multi-Account Architecture
+```yaml
+# AWS Control Tower setup for mid-size organizations
+OrganizationStructure:
+  Root:
+    - Management Account
+    - Core OU:
+        - Log Archive Account
+        - Audit Account
+    - Production OU:
+        - Production Account
+        - DR Account
+    - SDLC OU:
+        - Development Account
+        - Staging Account
+    - Shared Services OU:
+        - Network Account
+        - Identity Account
+```
+
+```typescript
+// Mid-size service architecture
+const midSizeStack = {
+  // Container platform
+  cluster: new Cluster(this, 'ECSCluster', {
+    vpc,
+    containerInsights: true,
+    capacityProviders: ['FARGATE', 'FARGATE_SPOT']
+  }),
+  
+  // Application load balancer with WAF
+  loadBalancer: new ApplicationLoadBalancer(this, 'ALB', {
+    vpc,
+    internetFacing: true,
+    securityGroup: albSecurityGroup
+  }),
+  
+  // Web application firewall
+  webAcl: new CfnWebACL(this, 'WAF', {
+    scope: 'REGIONAL',
+    defaultAction: { allow: {} },
+    rules: [
+      {
+        name: 'RateLimitRule',
+        priority: 1,
+        action: { block: {} },
+        statement: {
+          rateBasedStatement: {
+            limit: 2000,
+            aggregateKeyType: 'IP'
+          }
+        },
+        visibilityConfig: {
+          sampledRequestsEnabled: true,
+          cloudWatchMetricsEnabled: true,
+          metricName: 'RateLimitRule'
+        }
+      }
+    ]
+  }),
+  
+  // Database with read replicas
+  database: new DatabaseCluster(this, 'AuroraCluster', {
+    engine: DatabaseClusterEngine.auroraPostgres({
+      version: AuroraPostgresEngineVersion.VER_15_4
+    }),
+    instances: environment === 'prod' ? 3 : 1,
+    vpc,
+    monitoring: {
+      enabled: true,
+      interval: Duration.seconds(60)
+    }
+  })
+};
+```
+
+### CI/CD Pipeline for Mid-Size
+```yaml
+# GitHub Actions workflow for mid-size team
+name: Multi-Environment Deployment
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests
+        run: |
+          npm ci
+          npm run test:unit
+          npm run test:integration
+          npm run security:scan
+
+  deploy-dev:
+    needs: test
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Development
+        run: |
+          aws configure set region us-east-1
+          npx cdk deploy --profile dev --context environment=dev
+
+  deploy-staging:
+    needs: test  
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Staging
+        run: |
+          npx cdk deploy --profile staging --context environment=staging
+          npm run test:e2e -- --env staging
+
+  deploy-prod:
+    needs: deploy-staging
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Deploy to Production
+        run: |
+          npx cdk deploy --profile prod --context environment=prod --require-approval never
+```
+
+## Enterprise Scale (100+ engineers, $100K+ monthly AWS spend)
+
+### Advanced Multi-Account Strategy
+```typescript
+// Enterprise Control Tower customizations
+export class EnterpriseControlTowerStack extends Stack {
+  constructor(scope: Construct, id: string, props: StackProps) {
+    super(scope, id, props);
+    
+    // Advanced logging
+    const organizationTrail = new Trail(this, 'OrganizationTrail', {
+      isMultiRegionTrail: true,
+      includeGlobalServiceEvents: true,
+      isOrganizationTrail: true,
+      
+      // Data events for S3 and Lambda
+      dataEvents: [
+        {
+          category: DataResourceType.S3_OBJECT,
+          resources: ['arn:aws:s3:::*/*'],
+          includeManagementEvents: false,
+          readWriteType: ReadWriteType.ALL
+        }
+      ],
+      
+      // Insights for anomaly detection
+      insightSelectors: [
+        {
+          insightType: InsightType.API_CALL_RATE
+        }
+      ]
+    });
+    
+    // Config organization aggregator
+    const configAggregator = new CfnConfigurationAggregator(this, 'OrgAggregator', {
+      configurationAggregatorName: 'organization-aggregator',
+      organizationAggregationSource: {
+        allAwsRegions: true,
+        awsRegions: ['us-east-1', 'us-west-2', 'eu-west-1'],
+        roleArn: configServiceRole.roleArn
+      }
+    });
+    
+    // Security Hub organization configuration
+    const securityHub = new CfnHub(this, 'SecurityHub', {
+      tags: [
+        { key: 'Purpose', value: 'Organization-wide security monitoring' }
+      ]
+    });
+  }
+}
+```
+
+### Enterprise Service Mesh Architecture
+```typescript
+// App Mesh for microservices communication
+export class EnterpriseServiceMeshStack extends Stack {
+  constructor(scope: Construct, id: string, props: StackProps) {
+    super(scope, id, props);
+    
+    // Service mesh
+    const mesh = new Mesh(this, 'ServiceMesh', {
+      meshName: 'enterprise-mesh',
+      egressFilter: MeshFilterType.DROP_ALL
+    });
+    
+    // Virtual gateway for ingress
+    const virtualGateway = new VirtualGateway(this, 'Gateway', {
+      mesh,
+      listeners: [VirtualGatewayListener.http({
+        port: 8080,
+        healthCheck: HealthCheck.http({
+          path: '/health',
+          healthyThreshold: 2,
+          interval: Duration.seconds(5),
+          timeout: Duration.seconds(2)
+        })
+      })]
+    });
+    
+    // Service discovery with Cloud Map
+    const namespace = new PrivateDnsNamespace(this, 'ServiceNamespace', {
+      vpc,
+      name: 'enterprise.local'
+    });
+    
+    // Microservice with service mesh integration
+    const microservice = new FargateService(this, 'UserService', {
+      cluster,
+      taskDefinition,
+      cloudMapOptions: {
+        cloudMapNamespace: namespace,
+        name: 'user-service'
+      },
+      serviceMesh: {
+        mesh,
+        virtualService: new VirtualService(this, 'UserVirtualService', {
+          mesh,
+          virtualServiceProvider: VirtualServiceProvider.virtualNode(
+            new VirtualNode(this, 'UserVirtualNode', {
+              mesh,
+              serviceDiscovery: ServiceDiscovery.cloudMap(namespace.service)
+            })
+          )
+        })
+      }
+    });
+  }
+}
+```
+
+### Enterprise Monitoring and Observability
+```typescript
+// Advanced monitoring setup
+export class EnterpriseMonitoringStack extends Stack {
+  constructor(scope: Construct, id: string, props: StackProps) {
+    super(scope, id, props);
+    
+    // Custom metric dashboard
+    const dashboard = new Dashboard(this, 'EnterpriseDashboard', {
+      dashboardName: 'Enterprise-Operations-Dashboard',
+      start: '-PT6H',
+      periodOverride: PeriodOverride.INHERIT
+    });
+    
+    // Business metrics
+    const businessMetrics = new GraphWidget({
+      title: 'Business KPIs',
+      left: [
+        new Metric({
+          namespace: 'Application/Business',
+          metricName: 'OrdersPerMinute',
+          statistic: 'Sum'
+        }),
+        new Metric({
+          namespace: 'Application/Business', 
+          metricName: 'Revenue',
+          statistic: 'Sum'
+        })
+      ],
+      right: [
+        new Metric({
+          namespace: 'Application/Business',
+          metricName: 'CustomerSatisfactionScore',
+          statistic: 'Average'
+        })
+      ]
+    });
+    
+    // Infrastructure health
+    const infrastructureHealth = new GraphWidget({
+      title: 'Infrastructure Health',
+      left: [
+        new Metric({
+          namespace: 'AWS/ECS',
+          metricName: 'CPUUtilization',
+          dimensionsMap: { ServiceName: 'user-service' }
+        })
+      ],
+      right: [
+        new Metric({
+          namespace: 'AWS/ApplicationELB',
+          metricName: 'TargetResponseTime',
+          statistic: 'Average'
+        })
+      ]
+    });
+    
+    // Composite alarms for SLA monitoring  
+    const slaAlarm = new CompositeAlarm(this, 'SLAViolation', {
+      alarmDescription: 'SLA violation detected',
+      compositeAlarmRule: AlarmRule.anyOf(
+        Alarm.fromAlarmArn(this, 'HighErrorRate', highErrorRateAlarm.alarmArn),
+        Alarm.fromAlarmArn(this, 'HighLatency', highLatencyAlarm.alarmArn)
+      )
+    });
+    
+    // SNS topic for alerts
+    const alertTopic = new Topic(this, 'AlertTopic');
+    alertTopic.addSubscription(new EmailSubscription('ops-team@company.com'));
+    alertTopic.addSubscription(new SmsSubscription('+1234567890'));
+    
+    slaAlarm.addAlarmAction(new SnsAction(alertTopic));
+  }
+}
+```
+
+### Scale Detection Logic
+```typescript
+// Automatic scale detection based on project characteristics
+export function detectProjectScale(config: any): 'startup' | 'midsize' | 'enterprise' {
+  const indicators = {
+    teamSize: config.teamSize || 0,
+    monthlyBudget: config.monthlyBudget || 0,
+    regions: config.regions?.length || 1,
+    environments: config.environments?.length || 1,
+    services: config.services?.length || 1,
+    complianceRequired: config.compliance?.length > 0 || false
+  };
+  
+  // Enterprise indicators
+  if (indicators.teamSize > 100 || 
+      indicators.monthlyBudget > 100000 ||
+      indicators.regions > 2 ||
+      indicators.complianceRequired ||
+      indicators.services > 20) {
+    return 'enterprise';
+  }
+  
+  // Mid-size indicators
+  if (indicators.teamSize > 10 ||
+      indicators.monthlyBudget > 10000 ||
+      indicators.environments > 2 ||
+      indicators.services > 5) {
+    return 'midsize';
+  }
+  
+  return 'startup';
+}
+
+// Apply scale-specific recommendations
+export function applyScaleConfiguration(scale: string, baseConfig: any) {
+  switch (scale) {
+    case 'startup':
+      return {
+        ...baseConfig,
+        instanceTypes: ['t4g.micro', 't4g.small'],
+        multiAz: false,
+        backupRetention: 7,
+        monitoring: 'basic',
+        security: 'essential'
+      };
+    
+    case 'midsize':
+      return {
+        ...baseConfig,
+        instanceTypes: ['t4g.small', 't4g.medium', 'c6g.large'],
+        multiAz: true,
+        backupRetention: 30,
+        monitoring: 'enhanced', 
+        security: 'comprehensive'
+      };
+    
+    case 'enterprise':
+      return {
+        ...baseConfig,
+        instanceTypes: ['c6g.large', 'c6g.xlarge', 'm6g.2xlarge'],
+        multiAz: true,
+        backupRetention: 90,
+        monitoring: 'advanced',
+        security: 'enterprise',
+        governance: 'strict'
+      };
+  }
+}
+```
+
+@enterprise-governance.mdc
+@startup-optimization.mdc
+```
+
+## Service-Specific Implementation Guides
+
+### Additional specialized .cursorrules files should be created for:
+
+1. **Lambda Functions** (.cursor/rules/lambda-patterns.mdc)
+2. **Container Services** (.cursor/rules/container-patterns.mdc) 
+3. **Database Services** (.cursor/rules/database-patterns.mdc)
+4. **API Gateway** (.cursor/rules/api-patterns.mdc)
+5. **Event-Driven Architecture** (.cursor/rules/event-patterns.mdc)
+6. **Machine Learning** (.cursor/rules/ml-patterns.mdc)
+7. **Data Analytics** (.cursor/rules/analytics-patterns.mdc)
+8. **IoT Services** (.cursor/rules/iot-patterns.mdc)
+
+## Usage Instructions
+
+1. **Choose Your Scale**: Determine your project scale (startup/midsize/enterprise)
+2. **Select IaC Tool**: Pick your preferred Infrastructure as Code tool
+3. **Copy Rules**: Place the appropriate .cursorrules files in your project
+4. **Customize**: Adapt the rules to your specific requirements
+5. **Iterate**: Continuously refine based on team feedback and project evolution
+
+## Key Benefits
+
+- **Expert Guidance**: Embodies AWS Solutions Architect expertise
+- **Cost Optimized**: Includes cost-effective patterns and alternatives
+- **Security-First**: Built-in security best practices
+- **Scale-Adaptive**: Recommendations adapt to project scale
+- **Tool Agnostic**: Supports multiple IaC tools without preference
+- **CLI-Focused**: Emphasizes command-line deployment workflows
+- **Comprehensive**: Covers full spectrum of AWS services
+
+This comprehensive .cursorrules framework provides the foundation for building expert-level AWS cloud-native applications with Cursor IDE, ensuring best practices, cost optimization, and security are maintained throughout the development lifecycle.

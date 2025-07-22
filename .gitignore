@@ -1,15 +1,70 @@
-<<<<<<< HEAD
-# Ignore environment variables
+# Environment variables and secrets
 .env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+
+# OS and IDE files
 .DS_Store
-.vscode
-.yaml
-.json
-.md
-.txt
-.sh
-.bash
-.zsh
-=======
-.env
->>>>>>> 06319a57af662810230c1a63175baaf312b427a9
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Credential and sensitive files
+**/credentials/*.json
+**/credentials/*.yml
+**/credentials/*.yaml
+*.credentials
+*secret*
+*token*
+*password*
+*api-key*
+*private-key*
+*cert*
+*certificate*
+config.production.*
+.secrets
+.vault
+
+# AWS specific
+.aws/
+aws-config/
+*.aws
+
+# Temporary and backup files
+*.tmp
+*.backup
+*.bak
+*.log
+logs/
+
+# Docker and build artifacts
+.docker/
+docker-compose.override.yml
+Dockerfile.local
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# Node.js (if any)
+node_modules/
+npm-debug.log*
+
+# Terraform (if migrated)
+.terraform/
+*.tfstate
+*.tfstate.backup
+.terraform.lock.hcl
+terraform.tfvars
+
+# Local development overrides
+*local*
+*dev-override*

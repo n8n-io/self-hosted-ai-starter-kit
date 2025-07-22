@@ -1,0 +1,193 @@
+# Production Environment Configuration
+# AI Starter Kit - Production Settings
+
+global:
+  environment: production
+  region: us-east-1
+  stack_name: ai-starter-kit-prod
+  project_name: ai-starter-kit
+
+# Infrastructure Configuration
+infrastructure:
+  instance_types:
+    preferred: ["g4dn.xlarge", "g5g.xlarge"]
+    fallback: ["g4dn.2xlarge", "g5g.2xlarge"]
+  
+  auto_scaling:
+    min_capacity: 2
+    max_capacity: 10
+    target_utilization: 70
+  
+  networking:
+    vpc_cidr: "10.0.0.0/16"
+    public_subnets: ["10.0.1.0/24", "10.0.2.0/24"]
+    private_subnets: ["10.0.10.0/24", "10.0.20.0/24"]
+  
+  storage:
+    efs_performance_mode: generalPurpose
+    efs_encryption: true
+    backup_retention_days: 30
+
+# Application Configuration
+applications:
+  postgres:
+    image: postgres:16.1-alpine3.19
+    resources:
+      cpu_limit: "1.0"
+      memory_limit: "3G"
+      cpu_reservation: "0.5"
+      memory_reservation: "1.5G"
+    config:
+      max_connections: 200
+      shared_buffers: "2GB"
+      effective_cache_size: "6GB"
+    backup:
+      enabled: true
+      schedule: "0 2 * * *"  # Daily at 2 AM
+  
+  n8n:
+    image: n8nio/n8n:1.19.4
+    resources:
+      cpu_limit: "0.8"
+      memory_limit: "2G"
+      cpu_reservation: "0.4"
+      memory_reservation: "512M"
+    config:
+      cors_enable: true
+      cors_allowed_origins: "https://n8n.geuse.io,https://localhost:5678"
+      payload_size_max: 16
+      metrics: true
+    scaling:
+      replicas: 2
+      max_replicas: 5
+  
+  ollama:
+    image: ollama/ollama:0.1.17
+    resources:
+      cpu_limit: "1.8"
+      memory_limit: "8G"
+      cpu_reservation: "1.0"
+      memory_reservation: "4G"
+      gpu_memory_fraction: 0.90
+    models:
+      - name: "deepseek-r1:8b"
+        preload: true
+      - name: "qwen2.5:7b"
+        preload: true
+    config:
+      max_loaded_models: 3
+      concurrent_requests: 6
+  
+  qdrant:
+    image: qdrant/qdrant:v1.7.3
+    resources:
+      cpu_limit: "1.0"
+      memory_limit: "3G"
+      cpu_reservation: "0.5"
+      memory_reservation: "1G"
+    config:
+      max_search_threads: 8
+      max_optimization_threads: 4
+      wal_capacity_mb: 256
+    collections:
+      default_vector_size: 384
+      default_distance: "Cosine"
+  
+  crawl4ai:
+    image: unclecode/crawl4ai:0.2.77
+    resources:
+      cpu_limit: "1.0"
+      memory_limit: "2G"
+      cpu_reservation: "0.5"
+      memory_reservation: "1G"
+    config:
+      rate_limiting_enabled: true
+      default_limit: "2000/minute"
+      max_concurrent_sessions: 4
+      browser_pool_size: 2
+
+# Security Configuration
+security:
+  container_security:
+    run_as_non_root: true
+    read_only_root_filesystem: false  # Some services need write access
+    no_new_privileges: true
+    drop_capabilities: ["ALL"]
+    add_capabilities: []  # Only add specific capabilities if needed
+  
+  network_security:
+    cors_strict_mode: true
+    trusted_hosts_restriction: true
+    internal_communication_only: true
+  
+  secrets_management:
+    use_aws_secrets_manager: true
+    rotate_secrets: true
+    encryption_at_rest: true
+
+# Monitoring Configuration
+monitoring:
+  metrics:
+    enabled: true
+    retention_days: 90
+    scrape_interval: 30s
+  
+  logging:
+    level: info
+    centralized: true
+    retention_days: 30
+    format: json
+  
+  alerting:
+    enabled: true
+    channels:
+      - type: email
+        address: "ops-team@company.com"
+      - type: slack
+        webhook: "${SLACK_WEBHOOK_URL}"
+  
+  health_checks:
+    enabled: true
+    interval: 30s
+    timeout: 10s
+    retries: 5
+    
+  dashboards:
+    grafana_enabled: true
+    custom_dashboards:
+      - ai_workload_performance
+      - cost_optimization_metrics
+      - security_monitoring
+
+# Cost Optimization Configuration
+cost_optimization:
+  spot_instances:
+    enabled: true
+    max_price: 2.00
+    interruption_handling: true
+  
+  auto_scaling:
+    scale_down_enabled: true
+    scale_down_threshold: 20
+    idle_timeout_minutes: 30
+  
+  resource_optimization:
+    right_sizing_enabled: true
+    unused_resource_detection: true
+    cost_alerts_enabled: true
+
+# Backup and Recovery Configuration
+backup:
+  automated_backups: true
+  backup_schedule: "0 2 * * *"  # Daily at 2 AM
+  backup_retention_days: 30
+  cross_region_replication: false  # Enable for production
+  point_in_time_recovery: true
+
+# Compliance Configuration
+compliance:
+  audit_logging: true
+  encryption_in_transit: true
+  encryption_at_rest: true
+  access_logging: true
+  data_retention_policy: 90  # days

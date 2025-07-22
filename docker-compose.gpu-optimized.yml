@@ -101,11 +101,17 @@ services:
   postgres:
     <<: *logging-config
     <<: *restart-policy
-    image: postgres:16-alpine
+    image: postgres:16.1-alpine3.19
     container_name: postgres-gpu
     hostname: postgres
+    user: "70:70"  # postgres user in alpine
     networks:
       - ai_network
+    security_opt:
+      - no-new-privileges:true
+    read_only: false  # PostgreSQL needs write access
+    tmpfs:
+      - /tmp:noexec,nosuid,size=1g
     ports:
       - "5432:5432"
     environment:
@@ -156,7 +162,7 @@ services:
       - shared_storage:/shared
     
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h localhost -U ${POSTGRES_USER:-n8n} -d ${POSTGRES_DB:-n8n}"]
+      test: ["CMD-SHELL", "pg_isready -h localhost -U ${POSTGRES_USER:-n8n} -d ${POSTGRES_DB:-n8n} && psql -U ${POSTGRES_USER:-n8n} -d ${POSTGRES_DB:-n8n} -c 'SELECT 1;' > /dev/null"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -166,10 +172,10 @@ services:
       resources:
         limits:
           memory: 3G
-          cpus: '1.5'
+          cpus: '1.0'  # Reduced from 1.5 to prevent over-allocation
         reservations:
           memory: 1.5G
-          cpus: '0.75'
+          cpus: '0.5'  # Reduced from 0.75
 
   # ---------------------------------------------------------------------------
   # n8n - Workflow Automation Platform
@@ -177,11 +183,17 @@ services:
   n8n:
     <<: *logging-config
     <<: *restart-policy
-    image: n8nio/n8n:latest
+    image: n8nio/n8n:1.19.4
     container_name: n8n-gpu
     hostname: n8n
+    user: "1000:1000"  # n8n user
     networks:
       - ai_network
+    security_opt:
+      - no-new-privileges:true
+    read_only: false  # n8n needs write access for workflows
+    tmpfs:
+      - /tmp:noexec,nosuid,size=512m
     ports:
       - "5678:5678"
     environment:
@@ -203,9 +215,9 @@ services:
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
       - N8N_USER_MANAGEMENT_JWT_SECRET=${N8N_USER_MANAGEMENT_JWT_SECRET}
       
-      # CORS and community packages
+      # CORS and community packages (SECURITY: Do not use wildcard in production)
       - N8N_CORS_ENABLE=${N8N_CORS_ENABLE:-true}
-      - N8N_CORS_ALLOWED_ORIGINS=${N8N_CORS_ALLOWED_ORIGINS:-*}
+      - N8N_CORS_ALLOWED_ORIGINS=${N8N_CORS_ALLOWED_ORIGINS:-https://n8n.geuse.io,https://localhost:5678}
       - N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=${N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE:-true}
       
       # Performance optimizations
@@ -233,7 +245,7 @@ services:
         condition: service_healthy
     
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:5678/healthz || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:5678/healthz && curl -f http://localhost:5678/api/v1/workflows > /dev/null || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -243,10 +255,10 @@ services:
       resources:
         limits:
           memory: 2G
-          cpus: '1.5'
+          cpus: '0.8'  # Reduced from 1.5 to prevent over-allocation
         reservations:
           memory: 512M
-          cpus: '0.5'
+          cpus: '0.4'  # Reduced from 0.5
 
   # ---------------------------------------------------------------------------
   # Qdrant - Vector Database with GPU Optimizations
@@ -254,7 +266,7 @@ services:
   qdrant:
     <<: *logging-config
     <<: *restart-policy
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:v1.7.3
     container_name: qdrant-gpu
     hostname: qdrant
     networks:
@@ -291,7 +303,7 @@ services:
       - qdrant_storage:/qdrant/storage
       - shared_storage:/qdrant/shared:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      test: ["CMD-SHELL", "curl -f http://localhost:6333/healthz && curl -f http://localhost:6333/collections > /dev/null || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -299,11 +311,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 4G
-          cpus: '2.0'
+          memory: 3G  # Reduced from 4G to prevent over-allocation
+          cpus: '1.0'  # Reduced from 2.0 to prevent over-allocation
         reservations:
           memory: 1G
-          cpus: '1.0'
+          cpus: '0.5'  # Reduced from 1.0
 
   # ---------------------------------------------------------------------------
   # Ollama - GPU-Optimized AI Model Server
@@ -312,7 +324,7 @@ services:
     <<: *gpu-config
     <<: *logging-config
     <<: *restart-policy
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.1.17
     container_name: ollama-gpu
     hostname: ollama
     networks:
@@ -366,7 +378,7 @@ services:
     tmpfs:
       - /tmp:size=2G
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags && curl -f http://localhost:11434/api/version > /dev/null || exit 1"]
       interval: 30s
       timeout: 15s
       retries: 5
@@ -374,11 +386,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 12G
-          cpus: '3.5'
+          memory: 8G  # Reduced from 12G to prevent over-allocation
+          cpus: '1.8'  # Reduced from 3.5 to prevent over-allocation (main service gets most CPU)
         reservations:
-          memory: 6G
-          cpus: '2.5'
+          memory: 4G  # Reduced from 6G
+          cpus: '1.0'  # Reduced from 2.5
 
   # ---------------------------------------------------------------------------
   # Model Initialization Service - Downloads and optimizes AI models
@@ -386,7 +398,7 @@ services:
   ollama-model-init:
     <<: *gpu-config
     <<: *logging-config
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.1.17
     container_name: ollama-model-init
     networks:
       - ai_network
@@ -586,7 +598,7 @@ services:
     <<: *gpu-config
     <<: *logging-config
     <<: *restart-policy
-    image: nvidia/cuda:12.4-devel-ubuntu22.04
+    image: nvidia/cuda:12.4.1-devel-ubuntu22.04
     container_name: gpu-monitor
     hostname: gpu-monitor
     networks:
@@ -678,7 +690,7 @@ services:
   health-check:
     <<: *logging-config
     <<: *restart-policy
-    image: curlimages/curl:latest
+    image: curlimages/curl:8.5.0
     container_name: health-check
     hostname: health-check
     networks:
@@ -733,7 +745,7 @@ services:
   crawl4ai:
     <<: *logging-config
     <<: *restart-policy
-    image: unclecode/crawl4ai:latest
+    image: unclecode/crawl4ai:0.2.77
     container_name: crawl4ai-gpu
     hostname: crawl4ai
     networks:
@@ -771,7 +783,7 @@ services:
       - CRAWL4AI_SECURITY_ENABLED=false
       - CRAWL4AI_JWT_ENABLED=false
       - CRAWL4AI_HTTPS_REDIRECT=false
-      - CRAWL4AI_TRUSTED_HOSTS=["*"]
+      - CRAWL4AI_TRUSTED_HOSTS=["localhost","127.0.0.1","n8n","qdrant","ollama"]
       
       # Rate limiting for high-throughput scenarios
       - CRAWL4AI_RATE_LIMITING_ENABLED=true
