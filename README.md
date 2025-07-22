@@ -103,6 +103,8 @@ If you're running OLLAMA locally on your Mac (not in Docker), you need to modify
 
 #### For everyone else
 
+Note: The specific Postgres container in this kit might not work on ARM 64-bit, specifically this is known for Ampere Altra Systems running Ubuntu 24.04.
+
 ```bash
 git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
 cd self-hosted-ai-starter-kit
