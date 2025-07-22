@@ -5,6 +5,21 @@
 # =============================================================================
 
 # =============================================================================
+# COLOR DEFINITIONS (fallback if not already defined)
+# =============================================================================
+
+# Only define colors if not already set (to avoid conflicts with common library)
+if [[ -z "${RED:-}" ]]; then
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[0;33m'
+    BLUE='\033[0;34m'
+    PURPLE='\033[0;35m'
+    CYAN='\033[0;36m'
+    NC='\033[0m'
+fi
+
+# =============================================================================
 # ERROR HANDLING CONFIGURATION
 # =============================================================================
 
@@ -364,10 +379,14 @@ register_cleanup_function() {
     local description="${2:-Cleanup function}"
     
     if [ -z "${CLEANUP_FUNCTIONS:-}" ]; then
-        declare -ga CLEANUP_FUNCTIONS=()
+        CLEANUP_FUNCTIONS=""
     fi
     
-    CLEANUP_FUNCTIONS+=("$cleanup_function")
+    if [ -z "$CLEANUP_FUNCTIONS" ]; then
+        CLEANUP_FUNCTIONS="$cleanup_function"
+    else
+        CLEANUP_FUNCTIONS="$CLEANUP_FUNCTIONS $cleanup_function"
+    fi
     log_debug "Registered cleanup function: $cleanup_function ($description)"
 }
 
@@ -377,9 +396,10 @@ cleanup_on_exit() {
     log_debug "Cleanup on exit triggered (exit code: $exit_code)"
     
     if [ "$ERROR_CLEANUP_ENABLED" = "true" ] && [ -n "${CLEANUP_FUNCTIONS:-}" ]; then
-        log_debug "Running ${#CLEANUP_FUNCTIONS[@]} cleanup functions..."
+        local func_count=$(echo "$CLEANUP_FUNCTIONS" | wc -w)
+        log_debug "Running $func_count cleanup functions..."
         
-        for cleanup_func in "${CLEANUP_FUNCTIONS[@]}"; do
+        for cleanup_func in $CLEANUP_FUNCTIONS; do
             log_debug "Running cleanup function: $cleanup_func"
             if ! "$cleanup_func"; then
                 log_warning "Cleanup function failed: $cleanup_func"

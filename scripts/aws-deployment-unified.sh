@@ -131,6 +131,7 @@ EOF
 # =============================================================================
 
 parse_arguments() {
+    
     # Initialize variables
     DEPLOYMENT_TYPE="$DEFAULT_DEPLOYMENT_TYPE"
     ENVIRONMENT="$DEFAULT_ENVIRONMENT"
@@ -209,11 +210,12 @@ parse_arguments() {
                 exit 1
                 ;;
             *)
+                # If STACK_NAME is already set via environment variable, ignore positional arguments
                 if [ -z "${STACK_NAME:-}" ]; then
                     STACK_NAME="$1"
                 else
-                    error "Multiple stack names provided. Use only one."
-                    exit 1
+                    # STACK_NAME already set by environment variable, skip this argument
+                    echo "DEBUG: STACK_NAME already set by environment variable: $STACK_NAME, ignoring argument: $1"
                 fi
                 shift
                 ;;
@@ -350,6 +352,20 @@ setup_infrastructure() {
         fi
         
         info "Using subnet: $SUBNET_ID"
+        
+        # Get the availability zone of the subnet
+        SUBNET_AZ=$(aws ec2 describe-subnets \
+            --subnet-ids "$SUBNET_ID" \
+            --query 'Subnets[0].AvailabilityZone' \
+            --output text \
+            --region "$AWS_REGION")
+        
+        if [ "$SUBNET_AZ" = "None" ] || [ -z "$SUBNET_AZ" ]; then
+            error "Failed to get availability zone for subnet: $SUBNET_ID"
+            return 1
+        fi
+        
+        info "Subnet availability zone: $SUBNET_AZ"
     fi
     
     # Create key pair
@@ -364,7 +380,7 @@ setup_infrastructure() {
         additional_ports=(80 443 8080)  # Additional ports for load balancer deployments
     fi
     
-    SECURITY_GROUP_ID=$(create_standard_security_group "$STACK_NAME" "$VPC_ID" "${additional_ports[@]}")
+    SECURITY_GROUP_ID=$(create_standard_security_group "$STACK_NAME" "$VPC_ID" "${additional_ports[@]+"${additional_ports[@]}"}")
     if [ -z "$SECURITY_GROUP_ID" ]; then
         error "Failed to create security group"
         return 1
@@ -377,7 +393,7 @@ setup_infrastructure() {
             additional_policies=("arn:aws:iam::aws:policy/ElasticLoadBalancingFullAccess")
         fi
         
-        IAM_INSTANCE_PROFILE=$(create_standard_iam_role "$STACK_NAME" "${additional_policies[@]}")
+        IAM_INSTANCE_PROFILE=$(create_standard_iam_role "$STACK_NAME" "${additional_policies[@]+"${additional_policies[@]}"}")
         if [ -z "$IAM_INSTANCE_PROFILE" ]; then
             error "Failed to create IAM resources"
             return 1
@@ -411,7 +427,7 @@ deploy_instance() {
         "spot")
             INSTANCE_ID=$(launch_spot_instance_with_failover \
                 "$STACK_NAME" "$INSTANCE_TYPE" "$SPOT_PRICE" "$user_data" \
-                "$SECURITY_GROUP_ID" "$SUBNET_ID" "${STACK_NAME}-key" "$IAM_INSTANCE_PROFILE")
+                "$SECURITY_GROUP_ID" "$SUBNET_ID" "${STACK_NAME}-key" "$IAM_INSTANCE_PROFILE" "$SUBNET_AZ")
             ;;
         "ondemand")
             INSTANCE_ID=$(launch_ondemand_instance \
@@ -455,7 +471,8 @@ deploy_application() {
     fi
     
     # Deploy application stack
-    if ! deploy_application_stack "$INSTANCE_IP" "$KEY_FILE" "$STACK_NAME" "$COMPOSE_FILE" "$ENVIRONMENT"; then
+    local follow_logs="${FOLLOW_LOGS:-false}"
+    if ! deploy_application_stack "$INSTANCE_IP" "$KEY_FILE" "$STACK_NAME" "$COMPOSE_FILE" "$ENVIRONMENT" "$follow_logs"; then
         error "Application deployment failed"
         return 1
     fi
@@ -709,15 +726,21 @@ main() {
         exit 0
     fi
     
-    # Confirm deployment
+    # Confirm deployment (skip confirmation if non-interactive)
     echo
     warning "Ready to deploy $DEPLOYMENT_TYPE instance"
     display_configuration_summary "$DEPLOYMENT_TYPE" "$STACK_NAME"
     echo
-    read -p "Proceed with deployment? (y/N): " -r
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        info "Deployment cancelled"
-        exit 0
+    
+    # Check if running in interactive mode
+    if [ -t 0 ] && [ "${FORCE_YES:-false}" != "true" ]; then
+        read -p "Proceed with deployment? (y/N): " -r
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            info "Deployment cancelled"
+            exit 0
+        fi
+    else
+        info "Non-interactive mode or FORCE_YES=true - proceeding with deployment"
     fi
     
     # Execute deployment steps

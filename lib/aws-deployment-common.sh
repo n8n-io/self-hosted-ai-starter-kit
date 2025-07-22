@@ -242,7 +242,7 @@ create_standard_iam_role() {
         done
         
         # Attach additional policies
-        for policy in "${additional_policies[@]}"; do
+        for policy in "${additional_policies[@]+"${additional_policies[@]}"}"; do
             aws iam attach-role-policy \
                 --role-name "$role_name" \
                 --policy-arn "$policy" \
@@ -269,6 +269,34 @@ create_standard_iam_role() {
     fi
 
     echo "$profile_name"
+    return 0
+}
+
+# =============================================================================
+# INSTANCE UTILITIES
+# =============================================================================
+
+get_instance_public_ip() {
+    local instance_id="$1"
+    
+    if [ -z "$instance_id" ]; then
+        error "get_instance_public_ip requires instance_id parameter"
+        return 1
+    fi
+    
+    local public_ip
+    public_ip=$(aws ec2 describe-instances \
+        --instance-ids "$instance_id" \
+        --query 'Reservations[0].Instances[0].PublicIpAddress' \
+        --output text \
+        --region "$AWS_REGION")
+    
+    if [ "$public_ip" = "None" ] || [ -z "$public_ip" ]; then
+        error "No public IP found for instance: $instance_id"
+        return 1
+    fi
+    
+    echo "$public_ip"
     return 0
 }
 
@@ -423,12 +451,88 @@ tag_instance_with_metadata() {
 # SHARED APPLICATION DEPLOYMENT
 # =============================================================================
 
+stream_provisioning_logs() {
+    local instance_ip="$1"
+    local key_file="$2"
+    local log_prefix="${3:-[INSTANCE]}"
+    
+    if [ -z "$instance_ip" ] || [ -z "$key_file" ]; then
+        error "stream_provisioning_logs requires instance_ip and key_file parameters"
+        return 1
+    fi
+    
+    info "Starting real-time provisioning logs from $instance_ip..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "📋 REAL-TIME INSTANCE LOGS (press Ctrl+C to stop deployment)"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    # Stream multiple log sources simultaneously  
+    ssh -i "$key_file" -o StrictHostKeyChecking=no ubuntu@"$instance_ip" "
+        # Function to prefix and stream logs
+        stream_log() {
+            local logfile=\"\$1\"
+            local prefix=\"\$2\"
+            if [ -f \"\$logfile\" ]; then
+                tail -F \"\$logfile\" 2>/dev/null | while read -r line; do
+                    echo \"$log_prefix [\$prefix] \$line\"
+                done &
+            fi
+        }
+        
+        # Create deployment log if it doesn't exist
+        sudo touch /var/log/deployment.log
+        sudo chmod 644 /var/log/deployment.log
+        
+        # Stream various log sources
+        stream_log \"/var/log/cloud-init-output.log\" \"INIT\"
+        stream_log \"/var/log/deployment.log\" \"DEPLOY\"
+        stream_log \"/var/log/docker.log\" \"DOCKER\"
+        
+        # Stream syslog but filter for relevant messages only
+        if [ -f \"/var/log/syslog\" ]; then
+            tail -F /var/log/syslog 2>/dev/null | grep -E \"(docker|systemd|cloud-init)\" | while read -r line; do
+                echo \"$log_prefix [SYSTEM] \$line\"
+            done &
+        fi
+        
+        # Also stream any existing docker-compose logs
+        if [ -d \"/home/ubuntu/ai-starter-kit\" ]; then
+            cd /home/ubuntu/ai-starter-kit
+            if command -v docker-compose >/dev/null 2>&1; then
+                docker-compose logs --tail=50 -f 2>/dev/null | while read -r line; do
+                    echo \"$log_prefix [COMPOSE] \$line\"
+                done &
+            fi
+        fi
+        
+        # Keep the connection alive and wait for termination
+        wait
+    " &
+    
+    # Store the SSH PID for cleanup
+    STREAM_PID=$!
+    
+    # Give logs a moment to start flowing
+    sleep 2
+}
+
+stop_provisioning_logs() {
+    if [ -n "${STREAM_PID:-}" ]; then
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        info "📋 Stopping log stream - deployment phase completed"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        kill $STREAM_PID 2>/dev/null || true
+        unset STREAM_PID
+    fi
+}
+
 deploy_application_stack() {
     local instance_ip="$1"
     local key_file="$2"
     local stack_name="$3"
     local compose_file="${4:-docker-compose.gpu-optimized.yml}"
     local environment="${5:-development}"
+    local follow_logs="${6:-true}"
     
     if [ -z "$instance_ip" ] || [ -z "$key_file" ] || [ -z "$stack_name" ]; then
         error "deploy_application_stack requires instance_ip, key_file, and stack_name parameters"
@@ -436,6 +540,13 @@ deploy_application_stack() {
     fi
 
     log "Deploying application stack to $instance_ip..."
+    
+    # Start log streaming if requested
+    if [ "$follow_logs" = "true" ]; then
+        stream_provisioning_logs "$instance_ip" "$key_file"
+        # Register cleanup function
+        trap 'stop_provisioning_logs' EXIT INT TERM
+    fi
 
     # Copy project files
     info "Copying project files..."
@@ -449,25 +560,57 @@ deploy_application_stack() {
 
     # Generate environment configuration
     info "Generating environment configuration..."
+    if [ "$follow_logs" = "true" ]; then
+        info "Watch the [INSTANCE] logs below for detailed progress..."
+        sleep 3  # Give user time to see the message
+    fi
+    
     ssh -i "$key_file" -o StrictHostKeyChecking=no ubuntu@"$instance_ip" << EOF
 cd /home/ubuntu/ai-starter-kit
+echo "\$(date): Starting environment configuration..." | tee -a /var/log/deployment.log
 chmod +x scripts/config-manager.sh
-./scripts/config-manager.sh generate $environment
-./scripts/config-manager.sh env $environment
+echo "\$(date): Generating $environment configuration..." | tee -a /var/log/deployment.log
+./scripts/config-manager.sh generate $environment 2>&1 | tee -a /var/log/deployment.log
+echo "\$(date): Setting up environment variables..." | tee -a /var/log/deployment.log
+./scripts/config-manager.sh env $environment 2>&1 | tee -a /var/log/deployment.log
+echo "\$(date): Environment configuration completed" | tee -a /var/log/deployment.log
 EOF
 
     # Deploy application
     info "Starting application stack..."
     ssh -i "$key_file" -o StrictHostKeyChecking=no ubuntu@"$instance_ip" << EOF
 cd /home/ubuntu/ai-starter-kit
+echo "\$(date): Starting application deployment..." | tee -a /var/log/deployment.log
+
+# Install missing dependencies first
+echo "\$(date): Installing missing dependencies..." | tee -a /var/log/deployment.log
+sudo apt-get update -qq
+sudo apt-get install -y docker-compose yq jq gettext-base 2>&1 | tee -a /var/log/deployment.log
+
 # Pull latest images
-docker-compose -f $compose_file pull
+echo "\$(date): Pulling Docker images..." | tee -a /var/log/deployment.log
+docker-compose -f $compose_file pull 2>&1 | tee -a /var/log/deployment.log
+
 # Start services
-docker-compose -f $compose_file up -d
-# Check service status
+echo "\$(date): Starting Docker services..." | tee -a /var/log/deployment.log
+docker-compose -f $compose_file up -d 2>&1 | tee -a /var/log/deployment.log
+
+# Wait for services to stabilize
+echo "\$(date): Waiting for services to stabilize..." | tee -a /var/log/deployment.log
 sleep 30
-docker-compose -f $compose_file ps
+
+# Check service status
+echo "\$(date): Checking service status..." | tee -a /var/log/deployment.log
+docker-compose -f $compose_file ps 2>&1 | tee -a /var/log/deployment.log
+
+echo "\$(date): Application deployment completed" | tee -a /var/log/deployment.log
 EOF
+
+    # Stop log streaming
+    if [ "$follow_logs" = "true" ]; then
+        sleep 5  # Allow final logs to flow
+        stop_provisioning_logs
+    fi
 
     success "Application stack deployed successfully"
     return 0

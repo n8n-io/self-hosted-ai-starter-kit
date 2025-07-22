@@ -99,8 +99,7 @@ services:
   # PostgreSQL - Optimized for g4dn.xlarge (16GB RAM, 4 vCPUs)
   # ---------------------------------------------------------------------------
   postgres:
-    <<: *logging-config
-    <<: *restart-policy
+    <<: [*logging-config, *restart-policy]
     image: postgres:16.1-alpine3.19
     container_name: postgres-gpu
     hostname: postgres
@@ -181,8 +180,7 @@ services:
   # n8n - Workflow Automation Platform
   # ---------------------------------------------------------------------------
   n8n:
-    <<: *logging-config
-    <<: *restart-policy
+    <<: [*logging-config, *restart-policy]
     image: n8nio/n8n:1.19.4
     container_name: n8n-gpu
     hostname: n8n
@@ -264,8 +262,7 @@ services:
   # Qdrant - Vector Database with GPU Optimizations
   # ---------------------------------------------------------------------------
   qdrant:
-    <<: *logging-config
-    <<: *restart-policy
+    <<: [*logging-config, *restart-policy]
     image: qdrant/qdrant:v1.7.3
     container_name: qdrant-gpu
     hostname: qdrant
@@ -321,9 +318,7 @@ services:
   # Ollama - GPU-Optimized AI Model Server
   # ---------------------------------------------------------------------------
   ollama:
-    <<: *gpu-config
-    <<: *logging-config
-    <<: *restart-policy
+    <<: [*gpu-config, *logging-config, *restart-policy]
     image: ollama/ollama:0.1.17
     container_name: ollama-gpu
     hostname: ollama
@@ -396,8 +391,7 @@ services:
   # Model Initialization Service - Downloads and optimizes AI models
   # ---------------------------------------------------------------------------
   ollama-model-init:
-    <<: *gpu-config
-    <<: *logging-config
+    <<: [*gpu-config, *logging-config]
     image: ollama/ollama:0.1.17
     container_name: ollama-model-init
     networks:
@@ -595,9 +589,7 @@ services:
   # GPU Monitoring Service
   # ---------------------------------------------------------------------------
   gpu-monitor:
-    <<: *gpu-config
-    <<: *logging-config
-    <<: *restart-policy
+    <<: [*gpu-config, *logging-config, *restart-policy]
     image: nvidia/cuda:12.4.1-devel-ubuntu22.04
     container_name: gpu-monitor
     hostname: gpu-monitor
@@ -688,8 +680,7 @@ services:
   # Health Check Service
   # ---------------------------------------------------------------------------
   health-check:
-    <<: *logging-config
-    <<: *restart-policy
+    <<: [*logging-config, *restart-policy]
     image: curlimages/curl:8.5.0
     container_name: health-check
     hostname: health-check
@@ -743,8 +734,7 @@ services:
   # Crawl4AI - Web Crawling with LLM-based Extraction
   # ---------------------------------------------------------------------------
   crawl4ai:
-    <<: *logging-config
-    <<: *restart-policy
+    <<: [*logging-config, *restart-policy]
     image: unclecode/crawl4ai:0.2.77
     container_name: crawl4ai-gpu
     hostname: crawl4ai
@@ -764,8 +754,8 @@ services:
       - GEMINI_API_TOKEN=${GEMINI_API_TOKEN}
       
       # Ollama integration for local LLM processing
-      - OLLAMA_BASE_URL=http://ollama-gpu:11434
-      - OLLAMA_HOST=ollama-gpu
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_HOST=ollama
       - OLLAMA_PORT=11434
       
       # Database connection
@@ -850,8 +840,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      ollama-gpu:
-        condition: service_started
+      ollama:
+        condition: service_healthy
 
 # =============================================================================
 # SERVICE STARTUP ORDER AND DEPENDENCIES

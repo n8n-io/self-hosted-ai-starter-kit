@@ -22,10 +22,13 @@ analyze_spot_pricing() {
 
     # Get all AZs if none specified
     if [ ${#availability_zones[@]} -eq 0 ]; then
-        mapfile -t availability_zones < <(aws ec2 describe-availability-zones \
+        # Use compatible method instead of mapfile for bash 3.2
+        local az_output
+        az_output=$(aws ec2 describe-availability-zones \
             --region "$region" \
             --query 'AvailabilityZones[].ZoneName' \
-            --output text | tr '\t' '\n')
+            --output text | tr '\t' ' ')
+        read -ra availability_zones <<< "$az_output"
     fi
 
     local best_az=""
@@ -33,7 +36,7 @@ analyze_spot_pricing() {
     local current_prices=()
 
     # Check pricing in each AZ
-    for az in "${availability_zones[@]}"; do
+    for az in "${availability_zones[@]+"${availability_zones[@]}"}"; do
         local price_info
         price_info=$(aws ec2 describe-spot-price-history \
             --instance-types "$instance_type" \
@@ -146,7 +149,7 @@ suggest_alternative_instance_types() {
     esac
 
     info "Checking alternative instance types:"
-    for alt_type in "${alternatives[@]}"; do
+    for alt_type in "${alternatives[@]+"${alternatives[@]}"}"; do
         local pricing_result
         pricing_result=$(analyze_spot_pricing "$alt_type" "$region" 2>/dev/null)
         
@@ -174,6 +177,7 @@ launch_spot_instance_with_failover() {
     local subnet_id="$6"
     local key_name="$7"
     local iam_instance_profile="$8"
+    local target_az="${9:-}"
     
     if [ -z "$stack_name" ] || [ -z "$instance_type" ] || [ -z "$spot_price" ]; then
         error "launch_spot_instance_with_failover requires stack_name, instance_type, and spot_price parameters"
@@ -182,17 +186,45 @@ launch_spot_instance_with_failover() {
 
     log "Launching spot instance with failover strategy..."
 
-    # Get optimal spot configuration
-    local optimal_config
-    optimal_config=$(get_optimal_spot_configuration "$instance_type" "$spot_price")
+    local bid_price="$spot_price"
     
-    if [ $? -ne 0 ]; then
-        error "Failed to get optimal spot configuration"
-        return 1
-    fi
+    # Use provided AZ or find optimal configuration
+    if [ -n "$target_az" ]; then
+        log "Using specified availability zone: $target_az"
+        
+        # Get current spot price for the specified AZ
+        local current_price
+        current_price=$(aws ec2 describe-spot-price-history \
+            --instance-types "$instance_type" \
+            --availability-zone "$target_az" \
+            --max-items 1 \
+            --query 'SpotPriceHistory[0].SpotPrice' \
+            --output text \
+            --region "$AWS_REGION")
+            
+        if [ "$current_price" != "None" ] && [ -n "$current_price" ]; then
+            info "Current spot price in $target_az: \$${current_price}/hour"
+            # Use current price if it's lower than our max
+            if command -v bc >/dev/null 2>&1; then
+                if (( $(echo "$current_price < $spot_price" | bc -l) )); then
+                    bid_price="$current_price"
+                    info "Using current market price: \$${bid_price}/hour"
+                fi
+            fi
+        fi
+    else
+        # Get optimal spot configuration
+        local optimal_config
+        optimal_config=$(get_optimal_spot_configuration "$instance_type" "$spot_price")
+        
+        if [ $? -ne 0 ]; then
+            error "Failed to get optimal spot configuration"
+            return 1
+        fi
 
-    local target_az="${optimal_config%:*}"
-    local bid_price="${optimal_config#*:}"
+        target_az="${optimal_config%:*}"
+        bid_price="${optimal_config#*:}"
+    fi
 
     # Get AMI for the instance type
     local ami_id
@@ -342,7 +374,7 @@ launch_spot_instance_fallback() {
         --query 'AvailabilityZones[].ZoneName' \
         --output text | tr '\t' '\n')
 
-    for az in "${azs[@]}"; do
+    for az in "${azs[@]+"${azs[@]}"}"; do
         log "Trying availability zone: $az"
         
         # Get subnet for this AZ
@@ -410,7 +442,7 @@ launch_spot_instance_fallback() {
             ;;
     esac
 
-    for alt_type in "${alternative_types[@]}"; do
+    for alt_type in "${alternative_types[@]+"${alternative_types[@]}"}"; do
         log "Trying alternative instance type: $alt_type"
         
         local optimal_config

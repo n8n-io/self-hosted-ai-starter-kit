@@ -84,19 +84,21 @@ plan: ## Show deployment plan
 deploy: validate ## Deploy infrastructure (requires STACK_NAME)
 	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required. Use: make deploy STACK_NAME=my-stack"; exit 1; fi
 	@echo "Deploying stack: $(STACK_NAME)"
-	@./scripts/aws-deployment-unified.sh $(STACK_NAME)
+	@FORCE_YES=true ./scripts/aws-deployment-unified.sh $(STACK_NAME)
 
-deploy-spot: validate ## Deploy with spot instances (requires STACK_NAME)
+deploy-spot: ## Deploy with spot instances (requires STACK_NAME)
 	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
-	@./scripts/aws-deployment-unified.sh -t spot $(STACK_NAME)
+	@echo "Deploying spot instance with stack name: $(STACK_NAME)"
+	@echo "📋 Real-time provisioning logs will be shown during deployment"
+	@FORCE_YES=true FOLLOW_LOGS=true ./scripts/aws-deployment-unified.sh -t spot $(STACK_NAME)
 
 deploy-ondemand: validate ## Deploy with on-demand instances (requires STACK_NAME)
 	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
-	@./scripts/aws-deployment-unified.sh -t ondemand $(STACK_NAME)
+	@FORCE_YES=true ./scripts/aws-deployment-unified.sh -t ondemand $(STACK_NAME)
 
 deploy-simple: validate ## Deploy simple development instance (requires STACK_NAME)
 	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
-	@./scripts/aws-deployment-unified.sh -t simple $(STACK_NAME)
+	@FORCE_YES=true ./scripts/aws-deployment-unified.sh -t simple $(STACK_NAME)
 
 destroy: ## Destroy infrastructure (requires STACK_NAME)
 	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
