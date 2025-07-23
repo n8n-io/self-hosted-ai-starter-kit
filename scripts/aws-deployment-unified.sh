@@ -8,6 +8,41 @@
 set -euo pipefail
 
 # =============================================================================
+# CLEANUP ON FAILURE HANDLER
+# =============================================================================
+
+# Global flag to track if cleanup should run
+CLEANUP_ON_FAILURE="${CLEANUP_ON_FAILURE:-true}"
+RESOURCES_CREATED=false
+
+cleanup_on_failure() {
+    local exit_code=$?
+    if [ "$CLEANUP_ON_FAILURE" = "true" ] && [ "$RESOURCES_CREATED" = "true" ] && [ $exit_code -ne 0 ]; then
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        error "🚨 Deployment failed! Running automatic cleanup for stack: ${STACK_NAME:-unknown}"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        
+        # Use cleanup script if available, otherwise use library functions
+        if [ -f "$PROJECT_ROOT/cleanup-stack.sh" ]; then
+            log "Using cleanup script to remove resources..."
+            "$PROJECT_ROOT/cleanup-stack.sh" "${STACK_NAME:-unknown}" || true
+        else
+            log "Running manual cleanup using library functions..."
+            cleanup_instances "${STACK_NAME:-unknown}" || true
+            cleanup_security_groups "${STACK_NAME:-unknown}" || true
+            cleanup_key_pairs "${STACK_NAME:-unknown}" || true
+        fi
+        
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        warning "💡 To disable automatic cleanup, set CLEANUP_ON_FAILURE=false"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    fi
+}
+
+# Register cleanup handler
+trap cleanup_on_failure EXIT
+
+# =============================================================================
 # SCRIPT CONFIGURATION
 # =============================================================================
 
@@ -41,6 +76,57 @@ fi
 
 # Register cleanup functions
 register_cleanup_function "cleanup_on_error" "Emergency cleanup on script failure"
+
+# =============================================================================
+# PRE-DEPLOYMENT VALIDATION
+# =============================================================================
+
+perform_pre_deployment_validation() {
+    local deployment_type="$1"
+    local stack_name="$2"
+    
+    log "Starting pre-deployment validation..."
+    
+    # Run security validation
+    if command -v run_security_validation &>/dev/null; then
+        if ! run_security_validation "$AWS_REGION" "$INSTANCE_TYPE" "$stack_name" "$AWS_PROFILE"; then
+            error "Security validation failed"
+            return 1
+        fi
+    fi
+    
+    # Check for secrets
+    if [ -d "$PROJECT_ROOT/secrets" ]; then
+        log "Validating secrets..."
+        if [ -f "$SCRIPT_DIR/setup-secrets.sh" ]; then
+            "$SCRIPT_DIR/setup-secrets.sh" validate || {
+                warning "Secrets validation failed. Run: ./scripts/setup-secrets.sh setup"
+                return 1
+            }
+        fi
+    else
+        warning "Secrets directory not found. Creating..."
+        if [ -f "$SCRIPT_DIR/setup-secrets.sh" ]; then
+            "$SCRIPT_DIR/setup-secrets.sh" setup || {
+                error "Failed to setup secrets"
+                return 1
+            }
+        fi
+    fi
+    
+    # Validate Docker compose file
+    local compose_file="${COMPOSE_FILE:-docker-compose.gpu-optimized.yml}"
+    if [ -f "$PROJECT_ROOT/$compose_file" ]; then
+        log "Validating Docker Compose configuration..."
+        docker-compose -f "$PROJECT_ROOT/$compose_file" config >/dev/null || {
+            error "Invalid Docker Compose configuration"
+            return 1
+        }
+    fi
+    
+    success "Pre-deployment validation completed"
+    return 0
+}
 
 # =============================================================================
 # ERROR HANDLING AND CLEANUP
@@ -307,6 +393,9 @@ validate_deployment() {
 
 setup_infrastructure() {
     log "Setting up AWS infrastructure..."
+    
+    # Mark that we're starting to create resources
+    RESOURCES_CREATED=true
     
     # Get or create VPC with retry
     if [ -z "${VPC_ID:-}" ]; then

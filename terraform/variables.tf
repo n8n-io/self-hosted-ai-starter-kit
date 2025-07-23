@@ -383,3 +383,64 @@ variable "preserve_on_failure" {
   type        = bool
   default     = false
 }
+
+# Add these security-related variables at the end of the file
+
+# =============================================================================
+# SECURITY CONFIGURATION
+# =============================================================================
+
+variable "enable_secrets_manager" {
+  description = "Enable AWS Secrets Manager for credentials"
+  type        = bool
+  default     = false
+}
+
+variable "postgres_password" {
+  description = "PostgreSQL password (leave null to auto-generate)"
+  type        = string
+  default     = null
+  sensitive   = true
+}
+
+variable "enable_enhanced_monitoring" {
+  description = "Enable enhanced CloudWatch monitoring"
+  type        = bool
+  default     = true
+}
+
+variable "enable_flow_logs" {
+  description = "Enable VPC Flow Logs for network monitoring"
+  type        = bool
+  default     = false
+}
+
+variable "enable_guardduty" {
+  description = "Enable AWS GuardDuty for threat detection"
+  type        = bool
+  default     = false
+}
+
+variable "backup_enabled" {
+  description = "Enable automated backups"
+  type        = bool
+  default     = true
+}
+
+variable "backup_retention_days" {
+  description = "Number of days to retain backups"
+  type        = number
+  default     = 7
+}
+
+variable "enable_encryption_at_rest" {
+  description = "Enable encryption at rest for all data"
+  type        = bool
+  default     = true
+}
+
+variable "ssl_certificate_arn" {
+  description = "ARN of SSL certificate for HTTPS (optional)"
+  type        = string
+  default     = null
+}

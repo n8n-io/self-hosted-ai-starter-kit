@@ -388,10 +388,34 @@ resource "aws_efs_file_system" "main" {
   }
   
   encrypted = true
+  kms_key_id = aws_kms_key.efs[0].arn
+  
+  lifecycle_policy {
+    transition_to_ia = "AFTER_30_DAYS"
+    transition_to_primary_storage_class = "AFTER_1_ACCESS"
+  }
   
   tags = merge(local.common_tags, {
     Name = "${var.stack_name}-efs"
   })
+}
+
+# KMS key for EFS encryption
+resource "aws_kms_key" "efs" {
+  count                   = var.enable_efs ? 1 : 0
+  description             = "KMS key for ${var.stack_name} EFS encryption"
+  deletion_window_in_days = 10
+  enable_key_rotation     = true
+  
+  tags = merge(local.common_tags, {
+    Name = "${var.stack_name}-efs-key"
+  })
+}
+
+resource "aws_kms_alias" "efs" {
+  count         = var.enable_efs ? 1 : 0
+  name          = "alias/${var.stack_name}-efs"
+  target_key_id = aws_kms_key.efs[0].key_id
 }
 
 # EFS mount targets
@@ -586,4 +610,94 @@ resource "aws_cloudwatch_metric_alarm" "instance_status" {
   }
   
   tags = local.common_tags
+}
+
+# =============================================================================
+# SECRETS MANAGER (OPTIONAL)
+# =============================================================================
+
+resource "aws_secretsmanager_secret" "postgres_password" {
+  count                   = var.enable_secrets_manager ? 1 : 0
+  name                    = "${var.stack_name}/postgres_password"
+  description             = "PostgreSQL password for ${var.stack_name}"
+  recovery_window_in_days = 7
+  
+  tags = merge(local.common_tags, {
+    Name = "${var.stack_name}-postgres-password"
+  })
+}
+
+resource "aws_secretsmanager_secret_version" "postgres_password" {
+  count          = var.enable_secrets_manager ? 1 : 0
+  secret_id      = aws_secretsmanager_secret.postgres_password[0].id
+  secret_string  = var.postgres_password != null ? var.postgres_password : random_password.postgres[0].result
+  
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+resource "random_password" "postgres" {
+  count   = var.enable_secrets_manager && var.postgres_password == null ? 1 : 0
+  length  = 32
+  special = true
+}
+
+resource "aws_secretsmanager_secret" "n8n_encryption_key" {
+  count                   = var.enable_secrets_manager ? 1 : 0
+  name                    = "${var.stack_name}/n8n_encryption_key"
+  description             = "n8n encryption key for ${var.stack_name}"
+  recovery_window_in_days = 7
+  
+  tags = merge(local.common_tags, {
+    Name = "${var.stack_name}-n8n-encryption-key"
+  })
+}
+
+resource "aws_secretsmanager_secret_version" "n8n_encryption_key" {
+  count          = var.enable_secrets_manager ? 1 : 0
+  secret_id      = aws_secretsmanager_secret.n8n_encryption_key[0].id
+  secret_string  = random_id.n8n_encryption_key[0].hex
+}
+
+resource "random_id" "n8n_encryption_key" {
+  count       = var.enable_secrets_manager ? 1 : 0
+  byte_length = 32
+}
+
+# Update IAM role policy for Secrets Manager access
+resource "aws_iam_role_policy" "secrets_access" {
+  count = var.enable_secrets_manager ? 1 : 0
+  name  = "${var.stack_name}-secrets-access"
+  role  = aws_iam_role.instance_role.id
+  
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret"
+        ]
+        Resource = [
+          aws_secretsmanager_secret.postgres_password[0].arn,
+          aws_secretsmanager_secret.n8n_encryption_key[0].arn
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "secretsmanager.${var.aws_region}.amazonaws.com"
+          }
+        }
+      }
+    ]
+  })
 }

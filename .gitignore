@@ -38,9 +38,17 @@ aws-config/
 # Temporary and backup files
 *.tmp
 *.backup
+*.backup-*
 *.bak
 *.log
 logs/
+
+# Temporary documentation files
+**/HEURISTIC_REVIEW*.md
+**/COMPREHENSIVE_*.md
+**/AMI_SELECTION_*.md
+**/INTELLIGENT_DEPLOYMENT_*.md
+docs/archive/
 
 # Docker and build artifacts
 .docker/

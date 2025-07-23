@@ -1,0 +1,87 @@
+# Docker Image Version Configuration
+# This file allows you to override the default image versions used in deployments
+# 
+# Format:
+#   service_name:
+#     image: "registry/image:tag"
+#     default: "latest" or specific version
+#     description: "Brief description of the service"
+#
+# To use latest tags, set the image to just the registry/image without tag
+# To pin to specific versions, include the full tag
+
+services:
+  postgres:
+    image: "postgres"
+    default: "latest"
+    fallback: "16.1-alpine3.19"
+    description: "PostgreSQL database server"
+    notes: "Using latest for automatic updates, fallback to stable version if needed"
+
+  n8n:
+    image: "n8nio/n8n"
+    default: "latest"
+    fallback: "1.19.4"
+    description: "n8n workflow automation platform"
+    notes: "Latest version includes newest features and bug fixes"
+
+  qdrant:
+    image: "qdrant/qdrant"
+    default: "latest"
+    fallback: "v1.7.3"
+    description: "Qdrant vector database"
+    notes: "Latest version provides improved performance"
+
+  ollama:
+    image: "ollama/ollama"
+    default: "latest"
+    fallback: "0.1.17"
+    description: "Ollama local LLM inference server"
+    notes: "Latest version includes newest model support"
+
+  cuda:
+    image: "nvidia/cuda"
+    default: "12.4.1-devel-ubuntu22.04"
+    fallback: "12.4.1-devel-ubuntu22.04"
+    description: "NVIDIA CUDA development environment"
+    notes: "Pinned to specific CUDA version for GPU compatibility"
+
+  curl:
+    image: "curlimages/curl"
+    default: "latest"
+    fallback: "8.5.0"
+    description: "Curl utility for health checks"
+    notes: "Latest version is fine for basic curl operations"
+
+  crawl4ai:
+    image: "unclecode/crawl4ai"
+    default: "latest"
+    fallback: "0.7.0-r1"
+    description: "Crawl4AI web scraping with LLM extraction"
+    notes: "Latest version includes newest extraction features"
+
+# Global settings
+settings:
+  use_latest_by_default: true
+  fallback_on_pull_failure: true
+  update_check_interval: "daily"
+  
+# Environment-specific overrides
+environments:
+  production:
+    # In production, you might want to pin specific versions
+    postgres:
+      image: "postgres:16.1-alpine3.19"
+    n8n:
+      image: "n8nio/n8n:1.19.4"
+    
+  development:
+    # In development, use latest for all services
+    use_latest_by_default: true
+    
+  testing:
+    # In testing, use specific known-good versions
+    postgres:
+      image: "postgres:16.1-alpine3.19"
+    ollama:
+      image: "ollama/ollama:0.1.17"

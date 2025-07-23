@@ -13,6 +13,50 @@
 
 set -euo pipefail
 
+# =============================================================================
+# CLEANUP ON FAILURE HANDLER
+# =============================================================================
+
+# Global flag to track if cleanup should run
+CLEANUP_ON_FAILURE="${CLEANUP_ON_FAILURE:-true}"
+RESOURCES_CREATED=false
+STACK_NAME=""
+
+cleanup_on_failure() {
+    local exit_code=$?
+    if [ "$CLEANUP_ON_FAILURE" = "true" ] && [ "$RESOURCES_CREATED" = "true" ] && [ $exit_code -ne 0 ] && [ -n "$STACK_NAME" ]; then
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        error "🚨 Deployment failed! Running automatic cleanup for stack: $STACK_NAME"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        
+        # Get script directory
+        local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        local project_root="$(cd "$script_dir/.." && pwd)"
+        
+        # Use cleanup script if available
+        if [ -f "$project_root/cleanup-stack.sh" ]; then
+            log "Using cleanup script to remove resources..."
+            "$project_root/cleanup-stack.sh" "$STACK_NAME" || true
+        else
+            log "Running manual cleanup..."
+            # Basic manual cleanup
+            aws ec2 describe-instances --filters "Name=tag:Stack,Values=$STACK_NAME" --query 'Reservations[].Instances[].[InstanceId]' --output text | while read -r instance_id; do
+                if [ -n "$instance_id" ] && [ "$instance_id" != "None" ]; then
+                    aws ec2 terminate-instances --instance-ids "$instance_id" --region "${AWS_REGION:-us-east-1}" || true
+                    log "Terminated instance: $instance_id"
+                fi
+            done
+        fi
+        
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        warning "💡 To disable automatic cleanup, set CLEANUP_ON_FAILURE=false"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    fi
+}
+
+# Register cleanup handler
+trap cleanup_on_failure EXIT
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -644,10 +688,18 @@ EOF
         warning "Custom policy may already be attached, continuing..."
     }
     
-    # Create instance profile
-    aws iam create-instance-profile --instance-profile-name "${STACK_NAME}-instance-profile" || true
+    # Create instance profile (ensure name starts with letter for AWS compliance)
+    local profile_name
+    if [[ "${STACK_NAME}" =~ ^[0-9] ]]; then
+        local clean_name=$(echo "${STACK_NAME}" | sed 's/[^a-zA-Z0-9]//g')
+        profile_name="app-${clean_name}-profile"
+    else
+        profile_name="${STACK_NAME}-instance-profile"
+    fi
+    
+    aws iam create-instance-profile --instance-profile-name "$profile_name" || true
     aws iam add-role-to-instance-profile \
-        --instance-profile-name "${STACK_NAME}-instance-profile" \
+        --instance-profile-name "$profile_name" \
         --role-name "${STACK_NAME}-role" || true
     
     # Wait for IAM propagation
@@ -818,7 +870,7 @@ EOF
         --key-name "$KEY_NAME" \
         --security-group-ids "$SG_ID" \
         --user-data "$USER_DATA" \
-        --iam-instance-profile Name="${STACK_NAME}-instance-profile" \
+        --iam-instance-profile Name="$(if [[ "${STACK_NAME}" =~ ^[0-9] ]]; then echo "app-$(echo "${STACK_NAME}" | sed 's/[^a-zA-Z0-9]//g')-profile"; else echo "${STACK_NAME}-instance-profile"; fi)" \
         --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=${STACK_NAME}-gpu-instance},{Key=Project,Value=$PROJECT_NAME},{Key=Type,Value=OnDemand},{Key=CostOptimized,Value=false}]" \
         --region "$AWS_REGION" \
         --query 'Instances[0].InstanceId' \
@@ -1349,8 +1401,17 @@ cleanup_on_error() {
     # Delete IAM resources
     log "Cleaning up IAM resources..."
     ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) || ""
-    aws iam remove-role-from-instance-profile --instance-profile-name "${STACK_NAME}-instance-profile" --role-name "${STACK_NAME}-role" 2>/dev/null || true
-    aws iam delete-instance-profile --instance-profile-name "${STACK_NAME}-instance-profile" 2>/dev/null || true
+    # Clean up instance profile (handle numeric stack names)
+    local profile_name
+    if [[ "${STACK_NAME}" =~ ^[0-9] ]]; then
+        local clean_name=$(echo "${STACK_NAME}" | sed 's/[^a-zA-Z0-9]//g')
+        profile_name="app-${clean_name}-profile"
+    else
+        profile_name="${STACK_NAME}-instance-profile"
+    fi
+    
+    aws iam remove-role-from-instance-profile --instance-profile-name "$profile_name" --role-name "${STACK_NAME}-role" 2>/dev/null || true
+    aws iam delete-instance-profile --instance-profile-name "$profile_name" 2>/dev/null || true
     aws iam detach-role-policy --role-name "${STACK_NAME}-role" --policy-arn "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy" 2>/dev/null || true
     aws iam detach-role-policy --role-name "${STACK_NAME}-role" --policy-arn "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore" 2>/dev/null || true
     if [ ! -z "$ACCOUNT_ID" ]; then
@@ -1392,6 +1453,10 @@ EOF
     check_prerequisites
     
     log "Starting on-demand AWS deployment (no spot instances)..."
+    
+    # Mark that we're starting to create resources
+    RESOURCES_CREATED=true
+    
     create_key_pair
     create_iam_role
     

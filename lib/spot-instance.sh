@@ -200,7 +200,7 @@ launch_spot_instance_with_failover() {
             --max-items 1 \
             --query 'SpotPriceHistory[0].SpotPrice' \
             --output text \
-            --region "$AWS_REGION")
+            --region "$AWS_REGION" | head -1 | tr -d '[:space:]')
             
         if [ "$current_price" != "None" ] && [ -n "$current_price" ]; then
             info "Current spot price in $target_az: \$${current_price}/hour"
@@ -211,6 +211,8 @@ launch_spot_instance_with_failover() {
                     info "Using current market price: \$${bid_price}/hour"
                 fi
             fi
+        else
+            warning "No current spot price available for $target_az"
         fi
     else
         # Get optimal spot configuration
@@ -241,17 +243,26 @@ launch_spot_instance_with_failover() {
     log "  Bid Price: \$${bid_price}/hour"
     log "  Availability Zone: $target_az"
 
-    # Create spot launch specification
-    local launch_spec='{
-        "ImageId": "'$ami_id'",
-        "InstanceType": "'$instance_type'",
-        "KeyName": "'$key_name'",
-        "SecurityGroupIds": ["'$security_group_id'"],
-        "SubnetId": "'$subnet_id'",
-        "UserData": "'$(echo -n "$user_data" | base64 -w 0)'",
-        "IamInstanceProfile": {"Name": "'$iam_instance_profile'"},
-        "Placement": {"AvailabilityZone": "'$target_az'"}
-    }'
+    # Debug logging
+    log "DEBUG: IAM Instance Profile: $iam_instance_profile"
+    
+    # Create spot launch specification file to avoid JSON parsing issues
+    local launch_spec_file="/tmp/launch-spec-${stack_name}.json"
+    cat > "$launch_spec_file" << EOF
+{
+    "ImageId": "$ami_id",
+    "InstanceType": "$instance_type",
+    "KeyName": "$key_name",
+    "SecurityGroupIds": ["$security_group_id"],
+    "SubnetId": "$subnet_id",
+    "UserData": "$(echo -n "$user_data" | base64 -w 0)",
+    "IamInstanceProfile": {"Name": "$iam_instance_profile"},
+    "Placement": {"AvailabilityZone": "$target_az"}
+}
+EOF
+    
+    # Debug: log the launch spec
+    log "DEBUG: Launch spec file: $launch_spec_file"
 
     # Submit spot instance request
     local spot_request_id
@@ -259,11 +270,14 @@ launch_spot_instance_with_failover() {
         --spot-price "$bid_price" \
         --instance-count 1 \
         --type "$SPOT_TYPE" \
-        --launch-specification "$launch_spec" \
+        --launch-specification "file://$launch_spec_file" \
         --query 'SpotInstanceRequests[0].SpotInstanceRequestId' \
         --output text \
         --region "$AWS_REGION")
 
+    # Clean up temporary file
+    rm -f "$launch_spec_file"
+    
     if [ -z "$spot_request_id" ] || [ "$spot_request_id" = "None" ]; then
         error "Failed to create spot instance request"
         return 1
@@ -364,17 +378,25 @@ launch_spot_instance_fallback() {
     local subnet_id="$6"
     local key_name="$7"
     local iam_instance_profile="$8"
-    
+
+    # Parameter validation
+    if [ -z "$stack_name" ] || [ -z "$instance_type" ] || [ -z "$max_price" ] || [ -z "$user_data" ] || [ -z "$security_group_id" ] || [ -z "$key_name" ] || [ -z "$iam_instance_profile" ]; then
+        error "launch_spot_instance_fallback requires stack_name, instance_type, max_price, user_data, security_group_id, key_name, and iam_instance_profile parameters"
+        return 1
+    fi
+
     log "Attempting spot instance fallback strategies..."
 
     # Strategy 1: Try alternative availability zones
-    local azs
-    mapfile -t azs < <(aws ec2 describe-availability-zones \
+    local azs=()
+    while IFS= read -r az; do
+        [ -n "$az" ] && azs+=("$az")
+    done < <(aws ec2 describe-availability-zones \
         --region "$AWS_REGION" \
         --query 'AvailabilityZones[].ZoneName' \
         --output text | tr '\t' '\n')
 
-    for az in "${azs[@]+"${azs[@]}"}"; do
+    for az in "${azs[@]+${azs[@]}}"; do
         log "Trying availability zone: $az"
         
         # Get subnet for this AZ

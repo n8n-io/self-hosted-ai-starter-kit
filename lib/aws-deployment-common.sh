@@ -198,7 +198,15 @@ create_standard_iam_role() {
     fi
 
     local role_name="${stack_name}-role"
-    local profile_name="${stack_name}-instance-profile"
+    # Ensure profile name starts with letter for AWS IAM compliance
+    local profile_name
+    if [[ "${stack_name}" =~ ^[0-9] ]]; then
+        # Use simple prefix for numeric stacks to avoid AWS restrictions
+        local clean_name=$(echo "${stack_name}" | sed 's/[^a-zA-Z0-9]//g')
+        profile_name="app-${clean_name}-profile"
+    else
+        profile_name="${stack_name}-instance-profile"
+    fi
     
     log "Creating/checking IAM role: $role_name"
 
@@ -255,6 +263,25 @@ create_standard_iam_role() {
     # Create instance profile
     if aws iam get-instance-profile --instance-profile-name "$profile_name" &> /dev/null; then
         warning "Instance profile $profile_name already exists."
+        
+        # Check if role is associated with the instance profile
+        local associated_roles
+        associated_roles=$(aws iam get-instance-profile \
+            --instance-profile-name "$profile_name" \
+            --query 'InstanceProfile.Roles[].RoleName' \
+            --output text \
+            --region "$AWS_REGION" 2>/dev/null || echo "")
+        
+        if [[ ! "$associated_roles" =~ "$role_name" ]]; then
+            log "Associating role $role_name with instance profile $profile_name"
+            aws iam add-role-to-instance-profile \
+                --instance-profile-name "$profile_name" \
+                --role-name "$role_name" \
+                --region "$AWS_REGION"
+            success "Role associated with existing instance profile"
+        else
+            success "Role already associated with instance profile"
+        fi
     else
         aws iam create-instance-profile \
             --instance-profile-name "$profile_name" \
@@ -267,6 +294,9 @@ create_standard_iam_role() {
         
         success "Instance profile created: $profile_name"
     fi
+    
+    # Wait a moment for IAM propagation
+    sleep 2
 
     echo "$profile_name"
     return 0
@@ -538,6 +568,23 @@ deploy_application_stack() {
         error "deploy_application_stack requires instance_ip, key_file, and stack_name parameters"
         return 1
     fi
+    
+    # Sanitize inputs to prevent command injection
+    stack_name=$(echo "$stack_name" | sed 's/[^a-zA-Z0-9-]//g')
+    environment=$(echo "$environment" | sed 's/[^a-zA-Z0-9-]//g')
+    compose_file=$(basename "$compose_file" | sed 's/[^a-zA-Z0-9.-]//g')
+    
+    # Validate sanitized inputs
+    if [[ -z "$stack_name" ]] || [[ -z "$environment" ]] || [[ -z "$compose_file" ]]; then
+        error "Invalid input after sanitization"
+        return 1
+    fi
+    
+    # Validate stack name length
+    if [[ ${#stack_name} -gt 32 ]]; then
+        error "Stack name too long: '$stack_name'. Maximum 32 characters."
+        return 1
+    fi
 
     log "Deploying application stack to $instance_ip..."
     
@@ -558,13 +605,22 @@ deploy_application_stack() {
         --exclude='.env*' \
         ./ ubuntu@"$instance_ip":/home/ubuntu/ai-starter-kit/
 
-    # Generate environment configuration
-    info "Generating environment configuration..."
+    # Run deployment fixes first
+    info "Running deployment fixes (disk space, EFS, Parameter Store)..."
     if [ "$follow_logs" = "true" ]; then
         info "Watch the [INSTANCE] logs below for detailed progress..."
         sleep 3  # Give user time to see the message
     fi
     
+    # Copy and run the fix script
+    scp -i "$key_file" -o StrictHostKeyChecking=no \
+        ./scripts/fix-deployment-issues.sh ubuntu@"$instance_ip":/tmp/
+    
+    ssh -i "$key_file" -o StrictHostKeyChecking=no ubuntu@"$instance_ip" \
+        "chmod +x /tmp/fix-deployment-issues.sh && sudo /tmp/fix-deployment-issues.sh '$stack_name' '$AWS_REGION' 2>&1 | tee -a /var/log/deployment.log"
+
+    # Generate environment configuration
+    info "Generating environment configuration..."
     ssh -i "$key_file" -o StrictHostKeyChecking=no ubuntu@"$instance_ip" << EOF
 cd /home/ubuntu/ai-starter-kit
 echo "\$(date): Starting environment configuration..." | tee -a /var/log/deployment.log
@@ -580,30 +636,76 @@ EOF
     info "Starting application stack..."
     ssh -i "$key_file" -o StrictHostKeyChecking=no ubuntu@"$instance_ip" << EOF
 cd /home/ubuntu/ai-starter-kit
-echo "\$(date): Starting application deployment..." | tee -a /var/log/deployment.log
+
+# Ensure deployment log exists and is writable
+sudo touch /var/log/deployment.log 2>/dev/null || touch \$HOME/deployment.log
+DEPLOY_LOG=\$([ -w /var/log/deployment.log ] && echo "/var/log/deployment.log" || echo "\$HOME/deployment.log")
+
+echo "\$(date): Starting application deployment..." | tee -a "\$DEPLOY_LOG"
+
+# Function to wait for apt locks to be released
+wait_for_apt_lock() {
+    local max_wait=300
+    local wait_time=0
+    echo "\$(date): Waiting for apt locks to be released..." | tee -a "\$DEPLOY_LOG"
+    
+    while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || \
+          fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || \
+          fuser /var/lib/dpkg/lock >/dev/null 2>&1 || \
+          pgrep -f "apt-get|dpkg|unattended-upgrade" >/dev/null 2>&1; do
+        if [ \$wait_time -ge \$max_wait ]; then
+            echo "\$(date): Timeout waiting for apt locks, killing blocking processes..." | tee -a "\$DEPLOY_LOG"
+            sudo pkill -9 -f "unattended-upgrade" || true
+            sudo pkill -9 -f "apt-get" || true
+            sleep 5
+            break
+        fi
+        echo "\$(date): APT is locked, waiting 10 seconds..." | tee -a "\$DEPLOY_LOG"
+        sleep 10
+        wait_time=\$((wait_time + 10))
+    done
+    echo "\$(date): APT locks released" | tee -a "\$DEPLOY_LOG"
+}
+
+# Wait for any ongoing apt operations to complete
+wait_for_apt_lock
 
 # Install missing dependencies first
-echo "\$(date): Installing missing dependencies..." | tee -a /var/log/deployment.log
-sudo apt-get update -qq
-sudo apt-get install -y docker-compose yq jq gettext-base 2>&1 | tee -a /var/log/deployment.log
+echo "\$(date): Installing missing dependencies..." | tee -a "\$DEPLOY_LOG"
+sudo apt-get update -qq 2>&1 | tee -a "\$DEPLOY_LOG"
+
+# Install docker-compose and other dependencies
+if ! command -v docker-compose >/dev/null 2>&1; then
+    echo "\$(date): Installing docker-compose..." | tee -a "\$DEPLOY_LOG"
+    sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m)" -o /usr/local/bin/docker-compose
+    sudo chmod +x /usr/local/bin/docker-compose
+fi
+
+sudo apt-get install -y yq jq gettext-base 2>&1 | tee -a "\$DEPLOY_LOG"
+
+# Verify docker-compose installation
+if ! command -v docker-compose >/dev/null 2>&1; then
+    echo "\$(date): ERROR: docker-compose installation failed" | tee -a "\$DEPLOY_LOG"
+    exit 1
+fi
 
 # Pull latest images
-echo "\$(date): Pulling Docker images..." | tee -a /var/log/deployment.log
-docker-compose -f $compose_file pull 2>&1 | tee -a /var/log/deployment.log
+echo "\$(date): Pulling Docker images..." | tee -a "\$DEPLOY_LOG"
+docker-compose -f $compose_file pull 2>&1 | tee -a "\$DEPLOY_LOG"
 
 # Start services
-echo "\$(date): Starting Docker services..." | tee -a /var/log/deployment.log
-docker-compose -f $compose_file up -d 2>&1 | tee -a /var/log/deployment.log
+echo "\$(date): Starting Docker services..." | tee -a "\$DEPLOY_LOG"
+docker-compose -f $compose_file up -d 2>&1 | tee -a "\$DEPLOY_LOG"
 
 # Wait for services to stabilize
-echo "\$(date): Waiting for services to stabilize..." | tee -a /var/log/deployment.log
+echo "\$(date): Waiting for services to stabilize..." | tee -a "\$DEPLOY_LOG"
 sleep 30
 
 # Check service status
-echo "\$(date): Checking service status..." | tee -a /var/log/deployment.log
-docker-compose -f $compose_file ps 2>&1 | tee -a /var/log/deployment.log
+echo "\$(date): Checking service status..." | tee -a "\$DEPLOY_LOG"
+docker-compose -f $compose_file ps 2>&1 | tee -a "\$DEPLOY_LOG"
 
-echo "\$(date): Application deployment completed" | tee -a /var/log/deployment.log
+echo "\$(date): Application deployment completed" | tee -a "\$DEPLOY_LOG"
 EOF
 
     # Stop log streaming
@@ -789,6 +891,129 @@ cleanup_key_pairs() {
 }
 
 # =============================================================================
+# MONITORING FUNCTIONS
+# =============================================================================
+
+setup_cloudwatch_monitoring() {
+    local stack_name="$1"
+    local instance_id="$2"
+    local alb_arn="$3"
+    
+    if [ -z "$stack_name" ] || [ -z "$instance_id" ]; then
+        error "setup_cloudwatch_monitoring requires stack_name and instance_id parameters"
+        return 1
+    fi
+
+    log "Setting up CloudWatch monitoring for instance: $instance_id"
+
+    # Create CloudWatch log group
+    local log_group="${CLOUDWATCH_LOG_GROUP:-/aws/ai-starter-kit}/${ENVIRONMENT:-development}"
+    aws logs create-log-group \
+        --log-group-name "$log_group" \
+        --region "$AWS_REGION" 2>/dev/null || true
+
+    # Set log retention
+    aws logs put-retention-policy \
+        --log-group-name "$log_group" \
+        --retention-in-days "${CLOUDWATCH_LOG_RETENTION:-7}" \
+        --region "$AWS_REGION" 2>/dev/null || true
+
+    # Create custom metrics alarms
+    create_instance_alarms "$stack_name" "$instance_id"
+    
+    if [ -n "$alb_arn" ]; then
+        create_alb_alarms "$stack_name" "$alb_arn"
+    fi
+
+    success "CloudWatch monitoring configured"
+    return 0
+}
+
+create_instance_alarms() {
+    local stack_name="$1"
+    local instance_id="$2"
+    
+    # High CPU alarm
+    aws cloudwatch put-metric-alarm \
+        --alarm-name "${stack_name}-high-cpu" \
+        --alarm-description "High CPU utilization for ${stack_name}" \
+        --metric-name "CPUUtilization" \
+        --namespace "AWS/EC2" \
+        --statistic "Average" \
+        --period 300 \
+        --threshold 80 \
+        --comparison-operator "GreaterThanThreshold" \
+        --evaluation-periods 2 \
+        --dimensions Name=InstanceId,Value="$instance_id" \
+        --region "$AWS_REGION" || true
+
+    # High memory alarm (if CloudWatch agent is installed)
+    aws cloudwatch put-metric-alarm \
+        --alarm-name "${stack_name}-high-memory" \
+        --alarm-description "High memory utilization for ${stack_name}" \
+        --metric-name "MemoryUtilization" \
+        --namespace "CWAgent" \
+        --statistic "Average" \
+        --period 300 \
+        --threshold 90 \
+        --comparison-operator "GreaterThanThreshold" \
+        --evaluation-periods 2 \
+        --dimensions Name=InstanceId,Value="$instance_id" \
+        --region "$AWS_REGION" || true
+
+    # Instance status check alarm
+    aws cloudwatch put-metric-alarm \
+        --alarm-name "${stack_name}-instance-status" \
+        --alarm-description "Instance status check failed for ${stack_name}" \
+        --metric-name "StatusCheckFailed_Instance" \
+        --namespace "AWS/EC2" \
+        --statistic "Maximum" \
+        --period 60 \
+        --threshold 1 \
+        --comparison-operator "GreaterThanOrEqualToThreshold" \
+        --evaluation-periods 1 \
+        --dimensions Name=InstanceId,Value="$instance_id" \
+        --region "$AWS_REGION" || true
+}
+
+create_alb_alarms() {
+    local stack_name="$1"
+    local alb_arn="$2"
+    
+    # Extract ALB name from ARN
+    local alb_name
+    alb_name=$(echo "$alb_arn" | cut -d'/' -f2-3)
+
+    # High response time alarm
+    aws cloudwatch put-metric-alarm \
+        --alarm-name "${stack_name}-alb-high-response-time" \
+        --alarm-description "High response time for ${stack_name} ALB" \
+        --metric-name "TargetResponseTime" \
+        --namespace "AWS/ApplicationELB" \
+        --statistic "Average" \
+        --period 300 \
+        --threshold 5 \
+        --comparison-operator "GreaterThanThreshold" \
+        --evaluation-periods 2 \
+        --dimensions Name=LoadBalancer,Value="$alb_name" \
+        --region "$AWS_REGION" || true
+
+    # High error rate alarm
+    aws cloudwatch put-metric-alarm \
+        --alarm-name "${stack_name}-alb-high-errors" \
+        --alarm-description "High error rate for ${stack_name} ALB" \
+        --metric-name "HTTPCode_Target_5XX_Count" \
+        --namespace "AWS/ApplicationELB" \
+        --statistic "Sum" \
+        --period 300 \
+        --threshold 10 \
+        --comparison-operator "GreaterThanThreshold" \
+        --evaluation-periods 2 \
+        --dimensions Name=LoadBalancer,Value="$alb_name" \
+        --region "$AWS_REGION" || true
+}
+
+# =============================================================================
 # UTILITY FUNCTIONS
 # =============================================================================
 
@@ -801,34 +1026,111 @@ generate_user_data_script() {
 # AI Starter Kit Instance Setup
 set -e
 
+# Function to wait for apt locks to be released
+wait_for_apt_lock() {
+    local max_wait=600
+    local wait_time=0
+    echo "\$(date): Waiting for apt locks to be released..."
+    
+    while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || \
+          fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || \
+          fuser /var/lib/dpkg/lock >/dev/null 2>&1 || \
+          pgrep -f "apt-get|dpkg|unattended-upgrade" >/dev/null 2>&1; do
+        if [ \$wait_time -ge \$max_wait ]; then
+            echo "\$(date): Timeout waiting for apt locks, forcefully killing processes..."
+            pkill -9 -f "unattended-upgrade" || true
+            pkill -9 -f "apt-get" || true
+            sleep 5
+            break
+        fi
+        echo "\$(date): APT is locked by another process, waiting 15 seconds..."
+        sleep 15
+        wait_time=\$((wait_time + 15))
+    done
+    echo "\$(date): APT locks released or timeout reached"
+}
+
+# Wait for cloud-init and unattended-upgrades to complete
+echo "\$(date): Waiting for initial cloud-init processes to complete..."
+cloud-init status --wait || true
+
+# Kill any running unattended-upgrade processes that may be holding locks
+echo "\$(date): Stopping unattended-upgrades to prevent lock conflicts..."
+systemctl stop unattended-upgrades || true
+pkill -f unattended-upgrade || true
+sleep 5
+
+wait_for_apt_lock
+
+# Expand root filesystem if needed
+echo "\$(date): Expanding root filesystem..."
+growpart /dev/\$(lsblk -no PKNAME /dev/\$(lsblk -no KNAME /)) 1 2>/dev/null || true
+resize2fs /dev/\$(lsblk -no KNAME /) 2>/dev/null || true
+
+# Clean up space before starting
+echo "\$(date): Cleaning up disk space..."
+apt-get clean || true
+apt-get autoremove -y || true
+rm -rf /var/lib/apt/lists/* || true
+rm -rf /tmp/* || true
+rm -rf /var/tmp/* || true
+
 # Update system
-apt-get update
-apt-get upgrade -y
+echo "\$(date): Updating system packages..."
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq
+apt-get upgrade -y -qq
 
 # Install Docker
+echo "\$(date): Installing Docker..."
 curl -fsSL https://get.docker.com -o get-docker.sh
 sh get-docker.sh
 usermod -aG docker ubuntu
 
 # Install Docker Compose
+echo "\$(date): Installing Docker Compose..."
 curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m)" -o /usr/local/bin/docker-compose
 chmod +x /usr/local/bin/docker-compose
 
+# Optimize Docker daemon for limited disk space
+echo "\$(date): Optimizing Docker configuration..."
+mkdir -p /etc/docker
+cat > /etc/docker/daemon.json << 'DOCKEREOF'
+{
+    "log-driver": "json-file",
+    "log-opts": {
+        "max-size": "10m",
+        "max-file": "3"
+    },
+    "storage-driver": "overlay2",
+    "storage-opts": [
+        "overlay2.size=25G"
+    ],
+    "max-concurrent-downloads": 2,
+    "max-concurrent-uploads": 2,
+    "live-restore": true
+}
+DOCKEREOF
+
 # Install NVIDIA Container Toolkit (for GPU instances)
 if lspci | grep -i nvidia; then
+    echo "\$(date): Installing NVIDIA Docker support..."
     distribution=\$(. /etc/os-release;echo \$ID\$VERSION_ID)
     curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | apt-key add -
     curl -s -L https://nvidia.github.io/nvidia-docker/\$distribution/nvidia-docker.list | tee /etc/apt/sources.list.d/nvidia-docker.list
-    apt-get update
+    wait_for_apt_lock
+    apt-get update -qq
     apt-get install -y nvidia-container-toolkit
     systemctl restart docker
 fi
 
 # Install CloudWatch agent
-wget https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
+echo "\$(date): Installing CloudWatch agent..."
+wget -q https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
 dpkg -i amazon-cloudwatch-agent.deb
 
 # Create application directory
+echo "\$(date): Setting up application directory..."
 mkdir -p /home/ubuntu/ai-starter-kit
 chown ubuntu:ubuntu /home/ubuntu/ai-starter-kit
 
@@ -836,6 +1138,7 @@ chown ubuntu:ubuntu /home/ubuntu/ai-starter-kit
 $additional_commands
 
 # Signal completion
+echo "\$(date): User data script completed successfully"
 touch /tmp/user-data-complete
 EOF
 }

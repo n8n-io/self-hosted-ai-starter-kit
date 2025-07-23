@@ -13,12 +13,32 @@ help: ## Show this help message
 # SETUP AND DEPENDENCIES
 # =============================================================================
 
-setup: ## Set up development environment
-	@echo "Setting up development environment..."
-	@chmod +x scripts/*.sh
-	@chmod +x tools/*.sh 2>/dev/null || true
-	@if [ ! -f .env ]; then cp .env.example .env 2>/dev/null || echo "# Local environment variables" > .env; fi
-	@echo "✅ Development environment setup complete"
+## Security targets
+.PHONY: setup-secrets security-check security-validate
+
+setup-secrets: ## Setup secrets for secure deployment
+	@echo "$(BLUE)Setting up secrets...$(NC)"
+	@chmod +x scripts/setup-secrets.sh
+	@scripts/setup-secrets.sh setup
+
+security-check: ## Run comprehensive security validation
+	@echo "$(BLUE)Running security validation...$(NC)"
+	@chmod +x scripts/security-validation.sh
+	@scripts/security-validation.sh || (echo "$(RED)Security validation failed$(NC)" && exit 1)
+	@echo "$(GREEN)✓ Security validation passed$(NC)"
+
+security-validate: setup-secrets security-check ## Complete security setup and validation
+	@echo "$(GREEN)✓ Security setup complete$(NC)"
+
+rotate-secrets: ## Rotate all secrets
+	@echo "$(YELLOW)Rotating secrets...$(NC)"
+	@scripts/setup-secrets.sh backup
+	@scripts/setup-secrets.sh regenerate
+	@echo "$(GREEN)✓ Secrets rotated successfully$(NC)"
+
+# Update setup target to include security
+setup: check-deps setup-secrets ## Complete initial setup with security
+	@echo "$(GREEN)✓ Setup complete with security configurations$(NC)"
 
 install-deps: ## Install required dependencies
 	@echo "Installing dependencies..."
@@ -139,6 +159,16 @@ logs: ## View application logs (requires STACK_NAME)
 
 monitor: ## Open monitoring dashboard
 	@./tools/open-monitoring.sh
+
+health-check: ## Basic health check of services (requires STACK_NAME)
+	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
+	@echo "🏥 Checking service health..."
+	@./scripts/validate-deployment.sh $(STACK_NAME) || echo "⚠️  Some services may be unhealthy"
+
+health-check-advanced: ## Comprehensive health diagnostics (requires deployed instance)
+	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
+	@echo "🏥 Running advanced health diagnostics..."
+	@./scripts/health-check-advanced.sh
 
 backup: ## Create backup (requires STACK_NAME)
 	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi

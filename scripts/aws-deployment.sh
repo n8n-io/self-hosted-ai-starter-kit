@@ -18,6 +18,50 @@ if [ -z "${BASH_VERSION:-}" ]; then
     exit 1
 fi
 
+# =============================================================================
+# CLEANUP ON FAILURE HANDLER
+# =============================================================================
+
+# Global flag to track if cleanup should run
+CLEANUP_ON_FAILURE="${CLEANUP_ON_FAILURE:-true}"
+RESOURCES_CREATED=false
+STACK_NAME=""
+
+cleanup_on_failure() {
+    local exit_code=$?
+    if [ "$CLEANUP_ON_FAILURE" = "true" ] && [ "$RESOURCES_CREATED" = "true" ] && [ $exit_code -ne 0 ] && [ -n "$STACK_NAME" ]; then
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        error "🚨 Deployment failed! Running automatic cleanup for stack: $STACK_NAME"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        
+        # Get script directory
+        local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        local project_root="$(cd "$script_dir/.." && pwd)"
+        
+        # Use cleanup script if available
+        if [ -f "$project_root/cleanup-stack.sh" ]; then
+            log "Using cleanup script to remove resources..."
+            "$project_root/cleanup-stack.sh" "$STACK_NAME" || true
+        else
+            log "Running manual cleanup..."
+            # Basic manual cleanup
+            aws ec2 describe-instances --filters "Name=tag:Stack,Values=$STACK_NAME" --query 'Reservations[].Instances[].[InstanceId]' --output text | while read -r instance_id; do
+                if [ -n "$instance_id" ] && [ "$instance_id" != "None" ]; then
+                    aws ec2 terminate-instances --instance-ids "$instance_id" --region "${AWS_REGION:-us-east-1}" || true
+                    log "Terminated instance: $instance_id"
+                fi
+            done
+        fi
+        
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        warning "💡 To disable automatic cleanup, set CLEANUP_ON_FAILURE=false"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    fi
+}
+
+# Register cleanup handler
+trap cleanup_on_failure EXIT
+
 # Note: Converted to work with bash 3.2+ (compatible with macOS default bash)
 
 set -euo pipefail
@@ -47,6 +91,9 @@ KEY_NAME="${KEY_NAME:-ai-starter-kit-key}"
 STACK_NAME="${STACK_NAME:-ai-starter-kit}"
 PROJECT_NAME="${PROJECT_NAME:-ai-starter-kit}"
 ENABLE_CROSS_REGION="${ENABLE_CROSS_REGION:-false}"  # Cross-region analysis
+USE_LATEST_IMAGES="${USE_LATEST_IMAGES:-true}"  # Use latest Docker images by default
+SETUP_ALB="${SETUP_ALB:-false}"  # Setup Application Load Balancer
+SETUP_CLOUDFRONT="${SETUP_CLOUDFRONT:-false}"  # Setup CloudFront distribution
 
 # =============================================================================
 # GPU INSTANCE AND AMI CONFIGURATION MATRIX
@@ -1109,7 +1156,7 @@ launch_spot_instance() {
                 \"SecurityGroupIds\": [\"$SG_ID\"],
                 \"SubnetId\": \"$SUBNET_ID\",
                 \"IamInstanceProfile\": {
-                    \"Name\": \"${STACK_NAME}-instance-profile\"
+                    \"Name\": \"$(if [[ "${STACK_NAME}" =~ ^[0-9] ]]; then echo "app-$(echo "${STACK_NAME}" | sed 's/[^a-zA-Z0-9]//g')-profile"; else echo "${STACK_NAME}-instance-profile"; fi)\"
                 },
                 \"UserData\": \"$(if [[ "$OSTYPE" == "darwin"* ]]; then base64 -i user-data.sh | tr -d '\n'; else base64 -w 0 user-data.sh; fi)\"
             }" \
@@ -1605,10 +1652,18 @@ EOF
         warning "Custom policy may already be attached, continuing..."
     }
     
-    # Create instance profile
-    aws iam create-instance-profile --instance-profile-name "${STACK_NAME}-instance-profile" || true
+    # Create instance profile (ensure name starts with letter for AWS compliance)
+    local profile_name
+    if [[ "${STACK_NAME}" =~ ^[0-9] ]]; then
+        local clean_name=$(echo "${STACK_NAME}" | sed 's/[^a-zA-Z0-9]//g')
+        profile_name="app-${clean_name}-profile"
+    else
+        profile_name="${STACK_NAME}-instance-profile"
+    fi
+    
+    aws iam create-instance-profile --instance-profile-name "$profile_name" || true
     aws iam add-role-to-instance-profile \
-        --instance-profile-name "${STACK_NAME}-instance-profile" \
+        --instance-profile-name "$profile_name" \
         --role-name "${STACK_NAME}-role" || true
     
     # Wait for IAM propagation
@@ -1980,21 +2035,54 @@ if [ ! -d "/home/ubuntu/ai-starter-kit" ]; then
 fi
 cd /home/ubuntu/ai-starter-kit
 
-# Create basic .env file
-cat > .env << 'EOFENV'
+# Update Docker images to latest versions (unless overridden)
+if [ "\${USE_LATEST_IMAGES:-true}" = "true" ]; then
+    echo "Updating Docker images to latest versions..."
+    if [ -f "scripts/simple-update-images.sh" ]; then
+        chmod +x scripts/simple-update-images.sh
+        ./scripts/simple-update-images.sh update
+    else
+        echo "Warning: Image update script not found, using default versions"
+    fi
+fi
+
+# Create comprehensive .env file with all required variables
+cat > .env << EOFENV
+# PostgreSQL Configuration
 POSTGRES_DB=n8n_db
 POSTGRES_USER=n8n_user
-POSTGRES_PASSWORD=n8n_password_$(openssl rand -hex 32)
+POSTGRES_PASSWORD=n8n_password_\$(openssl rand -hex 32)
+
+# n8n Configuration
 N8N_ENCRYPTION_KEY=\$(openssl rand -hex 32)
 N8N_USER_MANAGEMENT_JWT_SECRET=\$(openssl rand -hex 32)
 N8N_HOST=0.0.0.0
 N8N_PORT=5678
+N8N_PROTOCOL=http
+WEBHOOK_URL=http://\$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4):5678
+
+# n8n Security Settings
 N8N_CORS_ENABLE=true
 N8N_CORS_ALLOWED_ORIGINS=https://n8n.geuse.io,https://localhost:5678
 N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true
+
+# AWS Configuration
 EFS_DNS=$EFS_DNS
 INSTANCE_ID=$INSTANCE_ID
 AWS_DEFAULT_REGION=$AWS_REGION
+INSTANCE_TYPE=g4dn.xlarge
+
+# Image version control
+USE_LATEST_IMAGES=$USE_LATEST_IMAGES
+
+# API Keys (empty by default - can be configured via SSM)
+OPENAI_API_KEY=
+ANTHROPIC_API_KEY=
+DEEPSEEK_API_KEY=
+GROQ_API_KEY=
+TOGETHER_API_KEY=
+MISTRAL_API_KEY=
+GEMINI_API_TOKEN=
 EOFENV
 
 # Start GPU-optimized services
@@ -2084,6 +2172,247 @@ validate_deployment() {
 }
 
 # =============================================================================
+# APPLICATION LOAD BALANCER SETUP
+# =============================================================================
+
+setup_alb() {
+    local INSTANCE_ID="$1"
+    local SG_ID="$2"
+    
+    if [ "$SETUP_ALB" != "true" ]; then
+        log "Skipping ALB setup (not requested)"
+        return 0
+    fi
+    
+    log "Setting up Application Load Balancer..."
+    
+    # Get VPC ID from the security group
+    local VPC_ID
+    VPC_ID=$(aws ec2 describe-security-groups \
+        --group-ids "$SG_ID" \
+        --query 'SecurityGroups[0].VpcId' \
+        --output text)
+    
+    if [ -z "$VPC_ID" ] || [ "$VPC_ID" = "None" ]; then
+        error "Could not determine VPC ID from security group $SG_ID"
+        return 1
+    fi
+    
+    # Get at least 2 subnets for ALB (ALB requires multiple AZs)
+    local subnet_ids
+    mapfile -t subnet_ids < <(aws ec2 describe-subnets \
+        --filters "Name=vpc-id,Values=$VPC_ID" "Name=state,Values=available" \
+        --query 'Subnets[?MapPublicIpOnLaunch==`true`].SubnetId' \
+        --output text | tr '\t' '\n' | head -2)
+    
+    if [ ${#subnet_ids[@]} -lt 2 ]; then
+        warn "Need at least 2 public subnets for ALB. Attempting to use default VPC subnets..."
+        
+        # Try to get subnets from default VPC
+        mapfile -t subnet_ids < <(aws ec2 describe-subnets \
+            --filters "Name=vpc-id,Values=$VPC_ID" "Name=state,Values=available" \
+            --query 'Subnets[].SubnetId' \
+            --output text | tr '\t' '\n' | head -2)
+        
+        if [ ${#subnet_ids[@]} -lt 2 ]; then
+            warn "Still don't have enough subnets for ALB. Skipping ALB setup."
+            return 0
+        fi
+    fi
+    
+    # Create ALB
+    local ALB_ARN
+    ALB_ARN=$(aws elbv2 create-load-balancer \
+        --name "${STACK_NAME}-alb" \
+        --subnets "${subnet_ids[@]}" \
+        --security-groups "$SG_ID" \
+        --scheme internet-facing \
+        --type application \
+        --ip-address-type ipv4 \
+        --query 'LoadBalancers[0].LoadBalancerArn' \
+        --output text 2>/dev/null)
+    
+    if [ -z "$ALB_ARN" ] || [ "$ALB_ARN" = "None" ]; then
+        warn "Failed to create Application Load Balancer. Continuing without ALB."
+        return 0
+    fi
+    
+    # Create target groups for main services
+    local services=("n8n:5678" "ollama:11434" "qdrant:6333" "crawl4ai:11235")
+    
+    for service in "${services[@]}"; do
+        local service_name="${service%:*}"
+        local service_port="${service#*:}"
+        
+        log "Creating target group for $service_name..."
+        
+        # Create target group
+        local TG_ARN
+        TG_ARN=$(aws elbv2 create-target-group \
+            --name "${STACK_NAME}-${service_name}-tg" \
+            --protocol HTTP \
+            --port "$service_port" \
+            --vpc-id "$VPC_ID" \
+            --health-check-protocol HTTP \
+            --health-check-path "/" \
+            --health-check-interval-seconds 30 \
+            --health-check-timeout-seconds 5 \
+            --healthy-threshold-count 2 \
+            --unhealthy-threshold-count 3 \
+            --query 'TargetGroups[0].TargetGroupArn' \
+            --output text 2>/dev/null)
+        
+        if [ -n "$TG_ARN" ] && [ "$TG_ARN" != "None" ]; then
+            # Register instance with target group
+            aws elbv2 register-targets \
+                --target-group-arn "$TG_ARN" \
+                --targets Id="$INSTANCE_ID",Port="$service_port" \
+                2>/dev/null
+            
+            # Create listener (different ports for different services)
+            local listener_port
+            case "$service_name" in
+                "n8n") listener_port=80 ;;
+                "ollama") listener_port=8080 ;;
+                "qdrant") listener_port=8081 ;;
+                "crawl4ai") listener_port=8082 ;;
+                *) listener_port=$((8000 + service_port % 1000)) ;;
+            esac
+            
+            aws elbv2 create-listener \
+                --load-balancer-arn "$ALB_ARN" \
+                --protocol HTTP \
+                --port "$listener_port" \
+                --default-actions Type=forward,TargetGroupArn="$TG_ARN" \
+                2>/dev/null > /dev/null
+            
+            success "✓ Created target group and listener for $service_name on port $listener_port"
+        fi
+    done
+    
+    # Get ALB DNS name
+    ALB_DNS_NAME=$(aws elbv2 describe-load-balancers \
+        --load-balancer-arns "$ALB_ARN" \
+        --query 'LoadBalancers[0].DNSName' \
+        --output text)
+    
+    success "Application Load Balancer setup completed!"
+    log "ALB DNS: $ALB_DNS_NAME"
+    log "Service URLs:"
+    log "  • n8n:      http://$ALB_DNS_NAME (port 80)"
+    log "  • Ollama:   http://$ALB_DNS_NAME:8080"
+    log "  • Qdrant:   http://$ALB_DNS_NAME:8081"
+    log "  • Crawl4AI: http://$ALB_DNS_NAME:8082"
+    
+    return 0
+}
+
+# =============================================================================
+# CLOUDFRONT SETUP
+# =============================================================================
+
+setup_cloudfront() {
+    local ALB_DNS_NAME="$1"
+    
+    if [ "$SETUP_CLOUDFRONT" != "true" ]; then
+        log "Skipping CloudFront setup (not requested)"
+        return 0
+    fi
+    
+    if [ -z "$ALB_DNS_NAME" ]; then
+        warn "No ALB DNS name provided. CloudFront requires ALB. Skipping CloudFront setup."
+        return 0
+    fi
+    
+    log "Setting up CloudFront distribution..."
+    
+    # Create CloudFront distribution configuration
+    local distribution_config
+    distribution_config=$(cat << EOF
+{
+    "CallerReference": "${STACK_NAME}-$(date +%s)",
+    "Comment": "AI Starter Kit CDN Distribution for ${STACK_NAME}",
+    "DefaultCacheBehavior": {
+        "TargetOriginId": "${STACK_NAME}-alb-origin",
+        "ViewerProtocolPolicy": "redirect-to-https",
+        "TrustedSigners": {
+            "Enabled": false,
+            "Quantity": 0
+        },
+        "ForwardedValues": {
+            "QueryString": true,
+            "Cookies": {
+                "Forward": "all"
+            },
+            "Headers": {
+                "Quantity": 1,
+                "Items": ["*"]
+            }
+        },
+        "MinTTL": 0,
+        "DefaultTTL": 0,
+        "MaxTTL": 31536000
+    },
+    "Origins": {
+        "Quantity": 1,
+        "Items": [
+            {
+                "Id": "${STACK_NAME}-alb-origin",
+                "DomainName": "$ALB_DNS_NAME",
+                "CustomOriginConfig": {
+                    "HTTPPort": 80,
+                    "HTTPSPort": 443,
+                    "OriginProtocolPolicy": "http-only",
+                    "OriginSslProtocols": {
+                        "Quantity": 1,
+                        "Items": ["TLSv1.2"]
+                    }
+                }
+            }
+        ]
+    },
+    "Enabled": true,
+    "PriceClass": "PriceClass_100"
+}
+EOF
+)
+    
+    # Create the distribution
+    local distribution_result
+    distribution_result=$(aws cloudfront create-distribution \
+        --distribution-config "$distribution_config" \
+        2>/dev/null)
+    
+    if [ $? -eq 0 ] && [ -n "$distribution_result" ]; then
+        local CLOUDFRONT_ID
+        local CLOUDFRONT_DOMAIN
+        
+        CLOUDFRONT_ID=$(echo "$distribution_result" | jq -r '.Distribution.Id' 2>/dev/null || echo "")
+        CLOUDFRONT_DOMAIN=$(echo "$distribution_result" | jq -r '.Distribution.DomainName' 2>/dev/null || echo "")
+        
+        if [ -n "$CLOUDFRONT_ID" ] && [ "$CLOUDFRONT_ID" != "null" ]; then
+            success "CloudFront distribution created!"
+            log "Distribution ID: $CLOUDFRONT_ID"
+            log "Distribution Domain: $CLOUDFRONT_DOMAIN"
+            log "CloudFront URL: https://$CLOUDFRONT_DOMAIN"
+            
+            log "Note: CloudFront distribution is being deployed. It may take 15-20 minutes to become fully available."
+            
+            # Store for later use
+            echo "$CLOUDFRONT_ID" > "/tmp/${STACK_NAME}-cloudfront-id"
+            echo "$CLOUDFRONT_DOMAIN" > "/tmp/${STACK_NAME}-cloudfront-domain"
+        else
+            warn "CloudFront distribution creation returned unexpected results. Continuing without CloudFront."
+        fi
+        
+        return 0
+    else
+        warn "Failed to create CloudFront distribution. This is optional and deployment will continue."
+        return 0
+    fi
+}
+
+# =============================================================================
 # MAIN DEPLOYMENT FLOW
 # =============================================================================
 
@@ -2110,6 +2439,10 @@ EOF
     check_prerequisites
     
     log "Starting AWS infrastructure deployment..."
+    
+    # Mark that we're starting to create resources  
+    RESOURCES_CREATED=true
+    
     create_key_pair
     create_iam_role
     
@@ -2125,17 +2458,24 @@ EOF
 
     # Now create EFS mount target in the AZ where instance was actually launched
     create_efs_mount_target "$SG_ID" "$INSTANCE_AZ"
-
-    TARGET_GROUP_ARN=$(create_target_group "$SG_ID" "$INSTANCE_ID")
-    QDRANT_TG_ARN=$(create_qdrant_target_group "$SG_ID" "$INSTANCE_ID")
-    ALB_DNS=$(create_alb "$SG_ID" "$TARGET_GROUP_ARN" "$QDRANT_TG_ARN")
-    
-    setup_cloudfront "$ALB_DNS"
     
     wait_for_instance_ready "$PUBLIC_IP"
     deploy_application "$PUBLIC_IP" "$EFS_DNS" "$INSTANCE_ID"
     setup_monitoring "$PUBLIC_IP"
     validate_deployment "$PUBLIC_IP"
+    
+    # Setup ALB and CloudFront if requested
+    local ALB_DNS=""
+    if [ "$SETUP_ALB" = "true" ]; then
+        setup_alb "$INSTANCE_ID" "$SG_ID"
+        if [ -n "$ALB_DNS_NAME" ]; then
+            ALB_DNS="$ALB_DNS_NAME"
+        fi
+    fi
+    
+    if [ "$SETUP_CLOUDFRONT" = "true" ]; then
+        setup_cloudfront "$ALB_DNS"
+    fi
     
     display_results "$PUBLIC_IP" "$INSTANCE_ID" "$EFS_DNS" "$INSTANCE_AZ"
     
@@ -2192,6 +2532,10 @@ show_usage() {
     echo "  --cross-region          Enable cross-region analysis for best pricing"
     echo "  --key-name NAME         SSH key name (default: ai-starter-kit-key)"
     echo "  --stack-name NAME       Stack name (default: ai-starter-kit)"
+    echo "  --use-pinned-images     Use specific pinned image versions instead of latest"
+    echo "  --setup-alb             Setup Application Load Balancer (ALB)"
+    echo "  --setup-cloudfront      Setup CloudFront CDN distribution"
+    echo "  --setup-cdn             Setup both ALB and CloudFront (convenience flag)"
     echo "  --help                  Show this help message"
     echo ""
     echo "Examples:"
@@ -2205,8 +2549,14 @@ show_usage() {
     echo ""
     echo "  🌍 Regional deployment:"
     echo "    $0 --region us-west-2                # Deploy in different region"
-    echo "    $0 --region eu-central-1             # Deploy in Europe"
+    echo "    $0 --region eu-central-1             # Deploy in Europe" 
     echo "    $0 --cross-region                    # Find best region automatically"
+    echo ""
+    echo "  🌐 Load balancer and CDN:"
+    echo "    $0 --setup-alb                       # Deploy with Application Load Balancer"
+    echo "    $0 --setup-cloudfront                # Deploy with CloudFront CDN"
+    echo "    $0 --setup-cdn                       # Deploy with both ALB and CloudFront"
+    echo "    $0 --setup-cdn --cross-region        # Full setup with best region"
     echo ""
     echo "Cost Optimization Features:"
     echo "  💡 Automatic spot pricing analysis across all AZs"
@@ -2245,6 +2595,24 @@ while [[ $# -gt 0 ]]; do
         --stack-name)
             STACK_NAME="$2"
             shift 2
+            ;;
+        --use-pinned-images)
+            USE_LATEST_IMAGES=false
+            shift
+            ;;
+        --setup-alb)
+            SETUP_ALB=true
+            shift
+            ;;
+        --setup-cloudfront)
+            SETUP_CLOUDFRONT=true
+            shift
+            ;;
+        --setup-cdn)
+            # Convenience flag to enable both ALB and CloudFront
+            SETUP_ALB=true
+            SETUP_CLOUDFRONT=true
+            shift
             ;;
         --help)
             show_usage

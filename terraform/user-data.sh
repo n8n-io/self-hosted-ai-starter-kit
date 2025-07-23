@@ -6,13 +6,34 @@
 
 set -euo pipefail
 
-# Configuration from Terraform template
+# Configuration from Terraform template with input validation
 STACK_NAME="${stack_name}"
 ENVIRONMENT="${environment}"
 COMPOSE_FILE="${compose_file}"
 ENABLE_NVIDIA="${enable_nvidia}"
 LOG_GROUP="${log_group}"
 AWS_REGION="${aws_region}"
+
+# Input validation to prevent template injection
+validate_input() {
+    local input="$1"
+    local name="$2"
+    local pattern="${3:-^[a-zA-Z0-9-_.]+$}"
+    
+    if [[ ! "$input" =~ $pattern ]]; then
+        echo "Error: Invalid $name: '$input' contains disallowed characters" >&2
+        exit 1
+    fi
+    
+    echo "$input"
+}
+
+# Validate all template inputs
+STACK_NAME=$(validate_input "$STACK_NAME" "stack_name" '^[a-zA-Z0-9-]+$')
+ENVIRONMENT=$(validate_input "$ENVIRONMENT" "environment" '^[a-zA-Z0-9-]+$')
+COMPOSE_FILE=$(validate_input "$COMPOSE_FILE" "compose_file" '^[a-zA-Z0-9.-]+\.yml$')
+LOG_GROUP=$(validate_input "$LOG_GROUP" "log_group" '^[a-zA-Z0-9-/_]+$')
+AWS_REGION=$(validate_input "$AWS_REGION" "aws_region" '^[a-z0-9-]+$')
 
 # Logging function
 log() {

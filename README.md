@@ -68,7 +68,7 @@ make deploy-simple STACK_NAME=my-dev-stack
 | **AI Services** | n8n, Ollama, Qdrant, Crawl4AI pre-configured | [API Reference](docs/reference/api/) |
 | **Monitoring Stack** | Prometheus, Grafana, AlertManager | [Monitoring Guide](docs/operations/monitoring.md) |
 | **Cost Optimization** | Intelligent instance selection and scaling | [Cost Guide](docs/operations/cost-optimization.md) |
-| **Security Hardening** | Encrypted storage, IAM, network security | [Security Model](docs/architecture/security.md) |
+| **Security Hardening** | Input sanitization, encrypted storage, IAM, advanced health checks | [Security Model](docs/architecture/security.md) |
 
 ## 🛠️ Available Commands
 
@@ -78,6 +78,8 @@ make deploy-simple STACK_NAME=my-dev-stack
 | `make deploy STACK_NAME=name` | Deploy with intelligent instance selection |
 | `make deploy-spot STACK_NAME=name` | Deploy cost-optimized spot instances |
 | `make deploy-ondemand STACK_NAME=name` | Deploy reliable on-demand instances |
+| `make health-check STACK_NAME=name` | Run basic health check |
+| `make health-check-advanced STACK_NAME=name` | Run comprehensive health diagnostics |
 | `make test` | Run comprehensive test suite |
 | `make status STACK_NAME=name` | Check deployment status |
 | `make destroy STACK_NAME=name` | Clean up all resources |

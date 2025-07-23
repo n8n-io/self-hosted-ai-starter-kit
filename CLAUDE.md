@@ -20,6 +20,12 @@ This is an AI-powered starter kit for GPU-optimized AWS deployment featuring int
 # Run comprehensive security audit
 ./scripts/security-check.sh
 
+# Setup and validate secrets
+make setup-secrets                    # Setup all required secrets
+make security-check                   # Run security validation
+make security-validate               # Complete security setup and validation
+make rotate-secrets                  # Rotate all secrets
+
 # Validate specific configurations
 source scripts/security-validation.sh
 validate_aws_region us-east-1
@@ -34,6 +40,42 @@ validate_stack_name my-stack
 - Enhanced .gitignore protects sensitive files
 
 ## Development Commands
+
+### Makefile-Driven Development
+The project uses Make for standardized development workflows:
+
+```bash
+# Essential development setup
+make setup                    # Set up development environment
+make dev-setup               # Full setup with dependencies
+make help                    # Show all available commands
+
+# Development workflow
+make validate                # Validate all configurations
+make test                   # Run all tests
+make lint                   # Run linting on all code
+make clean                  # Clean temporary files
+
+# Deployment commands (require STACK_NAME)
+make deploy STACK_NAME=my-stack              # Deploy with validation
+make deploy-spot STACK_NAME=my-stack         # Deploy spot instances
+make deploy-simple STACK_NAME=my-stack       # Deploy development environment
+make status STACK_NAME=my-stack              # Check deployment status
+make destroy STACK_NAME=my-stack             # Destroy infrastructure
+
+# Testing
+make test-unit              # Run unit tests only
+make test-integration       # Run integration tests only
+make test-security          # Run security tests
+
+# Utilities
+make cost-estimate STACK_NAME=my-stack HOURS=24  # Estimate costs
+make docs                   # Generate documentation
+
+# Parameter Store and troubleshooting
+./scripts/setup-parameter-store.sh setup         # Setup Parameter Store
+./scripts/fix-deployment-issues.sh STACK REGION  # Fix deployment issues
+```
 
 ### Local Development
 ```bash
@@ -97,20 +139,78 @@ tail -f /var/log/cost-optimization.log
 
 # Validate deployment with verbose output
 ./scripts/validate-deployment.sh -v -t 300
+
+# Advanced health checks
+make health-check STACK_NAME=my-stack
+make health-check-advanced STACK_NAME=my-stack
 ```
+
+## Architecture Patterns
+
+### Shared Library Architecture
+The project uses a modular architecture with shared libraries in `/lib/`:
+
+- **aws-deployment-common.sh**: Common AWS operations, logging, and error handling
+- **spot-instance.sh**: Spot instance management and pricing optimization
+- Deployment scripts source these libraries for consistent behavior across all deployment types
+
+### Unified Deployment Strategy
+The `aws-deployment-unified.sh` script serves as the main orchestrator supporting multiple deployment types:
+- **Spot**: Cost-optimized with intelligent spot instance selection
+- **On-demand**: Reliable instances with guaranteed availability  
+- **Simple**: Quick development deployments
+
+### Testing-First Development
+Test deployment logic without AWS costs using validation scripts:
+- `./scripts/simple-demo.sh` - Basic intelligent selection demo
+- `./scripts/test-intelligent-selection.sh` - Comprehensive testing with cross-region analysis
+- `./test-alb-cloudfront.sh` - ALB/CloudFront functionality validation
+
+### Terraform Infrastructure as Code
+Alternative to shell scripts for infrastructure management:
+
+```bash
+# Terraform workflow
+make tf-init                         # Initialize Terraform
+make tf-plan STACK_NAME=my-stack     # Show infrastructure plan  
+make tf-apply STACK_NAME=my-stack    # Apply infrastructure
+make tf-destroy STACK_NAME=my-stack  # Destroy infrastructure
+```
+
+The Terraform configuration (`terraform/main.tf`) provides:
+- **Comprehensive Infrastructure**: VPC, security groups, IAM roles, EFS, ALB
+- **Multi-deployment Support**: Spot instances, on-demand instances
+- **Advanced Features**: CloudWatch monitoring, Secrets Manager integration
+- **Security**: Encrypted EBS/EFS, KMS key management, least-privilege IAM
 
 ## Key Components
 
 ### Deployment Scripts
-- `aws-deployment.sh`: Main intelligent deployment with auto-selection and cross-region analysis
+- `aws-deployment-unified.sh`: **Main orchestrator** supporting spot/ondemand/simple deployment types
+- `aws-deployment.sh`: Intelligent deployment with auto-selection and cross-region analysis
 - `aws-deployment-simple.sh`: Simple on-demand deployment
 - `aws-deployment-ondemand.sh`: Full on-demand deployment with guaranteed instances
 - `test-intelligent-selection.sh`: Test deployment logic without creating AWS resources
 
+#### Unified Deployment Usage
+```bash
+# The main deployment script with full flexibility
+./scripts/aws-deployment-unified.sh [OPTIONS] STACK_NAME
+
+# Key options:
+-t, --type TYPE         # spot|ondemand|simple (default: spot)
+-e, --environment ENV   # development|staging|production
+-b, --budget-tier TIER  # low|medium|high
+--validate-only         # Validate without deploying
+--cleanup              # Clean up existing resources
+```
+
 ### Docker Configuration
-- `docker-compose.gpu-optimized.yml`: Production GPU configuration with EFS integration
-- Optimized for g4dn.xlarge instances (4 vCPUs, 16GB RAM, NVIDIA T4 GPU)
-- Includes resource allocation, health checks, and monitoring
+- `docker-compose.gpu-optimized.yml`: Production GPU configuration with advanced optimizations
+- **Resource Management**: Precisely tuned for g4dn.xlarge (85% CPU/memory utilization target)
+- **Security**: Docker secrets integration, encrypted storage, non-root containers
+- **Performance**: Connection pooling, GPU memory optimization, health checks
+- **Monitoring**: GPU monitoring, health checks, comprehensive logging
 
 ### AI Services Integration
 - **n8n**: Visual workflow automation platform with AI agent orchestration
@@ -206,16 +306,60 @@ The project includes sophisticated Cursor IDE rules for AWS development:
 
 ## Troubleshooting
 
+### Critical Deployment Issues
+
+#### Disk Space Exhaustion
+**Symptoms**: "no space left on device" during Docker image pulls
+```bash
+# Quick fix - run the deployment fix script
+scp scripts/fix-deployment-issues.sh ubuntu@YOUR-IP:/tmp/
+ssh -i your-key.pem ubuntu@YOUR-IP "sudo /tmp/fix-deployment-issues.sh STACK-NAME"
+
+# Manual disk cleanup
+ssh -i your-key.pem ubuntu@YOUR-IP
+sudo docker system prune -af --volumes
+sudo apt-get clean && sudo apt-get autoremove -y
+df -h  # Check available space
+```
+
+#### EFS Not Mounting
+**Symptoms**: "EFS_DNS variable is not set" warnings
+```bash
+# Setup EFS and Parameter Store integration
+./scripts/setup-parameter-store.sh setup --region YOUR-REGION
+./scripts/fix-deployment-issues.sh STACK-NAME YOUR-REGION
+
+# Verify EFS mounting
+ssh -i your-key.pem ubuntu@YOUR-IP "df -h | grep efs"
+```
+
+#### Missing Environment Variables
+**Symptoms**: Variables defaulting to blank strings
+```bash
+# Setup Parameter Store first
+./scripts/setup-parameter-store.sh setup
+
+# Add your API keys (example)
+aws ssm put-parameter --name '/aibuildkit/OPENAI_API_KEY' \
+    --value 'your-actual-key' --type SecureString --overwrite
+
+# Validate parameters
+./scripts/setup-parameter-store.sh validate
+```
+
 ### Common Issues
 - **Spot instance not launching**: Check spot price limits and availability
 - **InvalidAMIID.Malformed errors**: Use `--cross-region` for better region selection
 - **GPU not detected**: Verify NVIDIA drivers and Docker GPU runtime
-- **EFS mount failures**: Check security groups and VPC configuration
+- **Services failing to start**: Check disk space and environment variables first
 
 ### Debug Commands
 ```bash
 # Test intelligent selection (no AWS required)
 ./scripts/simple-demo.sh
+
+# Fix deployment issues on running instance  
+./scripts/fix-deployment-issues.sh STACK-NAME REGION
 
 # Check service status
 docker compose -f docker-compose.gpu-optimized.yml ps
@@ -226,8 +370,16 @@ docker compose -f docker-compose.gpu-optimized.yml logs ollama
 # Monitor GPU usage
 nvidia-smi
 
+# Check disk usage
+df -h
+du -sh /var/lib/docker
+
 # Verify AWS resources
 aws ec2 describe-instances --filters "Name=instance-state-name,Values=running"
+
+# Parameter Store management
+./scripts/setup-parameter-store.sh list
+./scripts/setup-parameter-store.sh validate
 ```
 
 ## Important Notes
