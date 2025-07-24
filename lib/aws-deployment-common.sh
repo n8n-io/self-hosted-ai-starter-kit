@@ -157,13 +157,13 @@ create_standard_security_group() {
         log "Creating new security group..."
         sg_id=$(aws ec2 create-security-group \
             --group-name "$sg_name" \
-            --description "Security group for $stack_name AI starter kit" \
+            --description "Security group for $stack_name GeuseMaker" \
             --vpc-id "$vpc_id" \
             --query 'GroupId' \
             --output text \
             --region "$AWS_REGION")
         
-        # Standard ports for AI starter kit
+        # Standard ports for GeuseMaker
         local standard_ports=(22 5678 11434 11235 6333)
         
         # Combine standard and additional ports
@@ -234,7 +234,7 @@ create_standard_iam_role() {
             --assume-role-policy-document "$trust_policy" \
             --region "$AWS_REGION" > /dev/null
 
-        # Standard policies for AI starter kit
+        # Standard policies for GeuseMaker
         local standard_policies=(
             "arn:aws:iam::aws:policy/CloudWatchLogsFullAccess"
             "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
@@ -461,7 +461,7 @@ tag_instance_with_metadata() {
             Key=Stack,Value="$stack_name" \
             Key=DeploymentType,Value="${deployment_type:-unknown}" \
             Key=Environment,Value="${ENVIRONMENT:-development}" \
-            Key=CreatedBy,Value="ai-starter-kit" \
+            Key=CreatedBy,Value="GeuseMaker" \
             Key=CreatedAt,Value="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         --region "$AWS_REGION"
 
@@ -526,8 +526,8 @@ stream_provisioning_logs() {
         fi
         
         # Also stream any existing docker-compose logs
-        if [ -d \"/home/ubuntu/ai-starter-kit\" ]; then
-            cd /home/ubuntu/ai-starter-kit
+        if [ -d \"/home/ubuntu/GeuseMaker\" ]; then
+            cd /home/ubuntu/GeuseMaker
             if command -v docker-compose >/dev/null 2>&1; then
                 docker-compose logs --tail=50 -f 2>/dev/null | while read -r line; do
                     echo \"$log_prefix [COMPOSE] \$line\"
@@ -603,7 +603,7 @@ deploy_application_stack() {
         --exclude='*.pem' \
         --exclude='*.key' \
         --exclude='.env*' \
-        ./ ubuntu@"$instance_ip":/home/ubuntu/ai-starter-kit/
+        ./ ubuntu@"$instance_ip":/home/ubuntu/GeuseMaker/
 
     # Run deployment fixes first
     info "Running deployment fixes (disk space, EFS, Parameter Store)..."
@@ -622,7 +622,7 @@ deploy_application_stack() {
     # Generate environment configuration
     info "Generating environment configuration..."
     ssh -i "$key_file" -o StrictHostKeyChecking=no ubuntu@"$instance_ip" << EOF
-cd /home/ubuntu/ai-starter-kit
+cd /home/ubuntu/GeuseMaker
 echo "\$(date): Starting environment configuration..." | tee -a /var/log/deployment.log
 chmod +x scripts/config-manager.sh
 echo "\$(date): Generating $environment configuration..." | tee -a /var/log/deployment.log
@@ -635,7 +635,7 @@ EOF
     # Deploy application
     info "Starting application stack..."
     ssh -i "$key_file" -o StrictHostKeyChecking=no ubuntu@"$instance_ip" << EOF
-cd /home/ubuntu/ai-starter-kit
+cd /home/ubuntu/GeuseMaker
 
 # Ensure deployment log exists and is writable
 sudo touch /var/log/deployment.log 2>/dev/null || touch \$HOME/deployment.log
@@ -907,7 +907,7 @@ setup_cloudwatch_monitoring() {
     log "Setting up CloudWatch monitoring for instance: $instance_id"
 
     # Create CloudWatch log group
-    local log_group="${CLOUDWATCH_LOG_GROUP:-/aws/ai-starter-kit}/${ENVIRONMENT:-development}"
+    local log_group="${CLOUDWATCH_LOG_GROUP:-/aws/GeuseMaker}/${ENVIRONMENT:-development}"
     aws logs create-log-group \
         --log-group-name "$log_group" \
         --region "$AWS_REGION" 2>/dev/null || true
@@ -1023,7 +1023,7 @@ generate_user_data_script() {
     
     cat << EOF
 #!/bin/bash
-# AI Starter Kit Instance Setup
+# GeuseMaker Instance Setup
 set -e
 
 # Function to wait for apt locks to be released
@@ -1131,8 +1131,8 @@ dpkg -i amazon-cloudwatch-agent.deb
 
 # Create application directory
 echo "\$(date): Setting up application directory..."
-mkdir -p /home/ubuntu/ai-starter-kit
-chown ubuntu:ubuntu /home/ubuntu/ai-starter-kit
+mkdir -p /home/ubuntu/GeuseMaker
+chown ubuntu:ubuntu /home/ubuntu/GeuseMaker
 
 # Additional commands
 $additional_commands

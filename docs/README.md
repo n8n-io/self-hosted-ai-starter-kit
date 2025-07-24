@@ -1,8 +1,8 @@
-# AI Starter Kit Documentation
+# GeuseMaker Documentation
 
 > Complete documentation for enterprise-ready AI infrastructure platform
 
-Welcome to the comprehensive documentation hub for the AI Starter Kit. This documentation is organized by user journey and expertise level to help you find exactly what you need quickly.
+Welcome to the comprehensive documentation hub for GeuseMaker. This documentation is organized by user journey and expertise level to help you find exactly what you need quickly.
 
 ## 🎯 Documentation by User Type
 

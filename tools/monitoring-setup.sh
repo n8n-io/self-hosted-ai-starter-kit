@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================================
 # Monitoring and Observability Setup
-# Sets up comprehensive monitoring for AI Starter Kit
+# Sets up comprehensive monitoring for GeuseMaker
 # =============================================================================
 
 set -euo pipefail
@@ -94,7 +94,7 @@ scrape_configs:
     scrape_interval: 30s
 
   # Custom application metrics
-  - job_name: 'ai-starter-kit'
+  - job_name: 'GeuseMaker'
     static_configs:
       - targets: ['metrics-exporter:8080']
     scrape_interval: 15s
@@ -103,7 +103,7 @@ EOF
     # Create alert rules
     cat > "$PROMETHEUS_DIR/config/alert_rules.yml" << 'EOF'
 groups:
-  - name: ai-starter-kit-alerts
+  - name: GeuseMaker-alerts
     rules:
       # System alerts
       - alert: HighCPUUsage
@@ -220,7 +220,7 @@ allow_sign_up = false
 enabled = false
 
 [dashboards]
-default_home_dashboard_path = /var/lib/grafana/dashboards/ai-starter-kit-overview.json
+default_home_dashboard_path = /var/lib/grafana/dashboards/GeuseMaker-overview.json
 
 [log]
 mode = console
@@ -245,9 +245,9 @@ EOF
 apiVersion: 1
 
 providers:
-  - name: 'ai-starter-kit'
+  - name: 'GeuseMaker'
     orgId: 1
-    folder: 'AI Starter Kit'
+    folder: 'GeuseMaker'
     type: file
     disableDeletion: false
     updateIntervalSeconds: 10
@@ -267,12 +267,12 @@ EOF
 }
 
 create_main_dashboard() {
-    cat > "$GRAFANA_DIR/dashboards/ai-starter-kit-overview.json" << 'EOF'
+    cat > "$GRAFANA_DIR/dashboards/GeuseMaker-overview.json" << 'EOF'
 {
   "dashboard": {
     "id": null,
-    "title": "AI Starter Kit Overview",
-    "tags": ["ai-starter-kit"],
+    "title": "GeuseMaker Overview",
+    "tags": ["GeuseMaker"],
     "timezone": "browser",
     "panels": [
       {
@@ -332,7 +332,7 @@ create_system_dashboard() {
   "dashboard": {
     "id": null,
     "title": "System Metrics",
-    "tags": ["ai-starter-kit", "system"],
+    "tags": ["GeuseMaker", "system"],
     "panels": [
       {
         "id": 1,
@@ -387,7 +387,7 @@ create_gpu_dashboard() {
   "dashboard": {
     "id": null,
     "title": "GPU Metrics",
-    "tags": ["ai-starter-kit", "gpu"],
+    "tags": ["GeuseMaker", "gpu"],
     "panels": [
       {
         "id": 1,
@@ -438,7 +438,7 @@ create_application_dashboard() {
   "dashboard": {
     "id": null,
     "title": "Application Metrics",
-    "tags": ["ai-starter-kit", "applications"],
+    "tags": ["GeuseMaker", "applications"],
     "panels": [
       {
         "id": 1,
@@ -491,7 +491,7 @@ setup_alertmanager() {
     cat > "$ALERTMANAGER_DIR/config/alertmanager.yml" << 'EOF'
 global:
   smtp_smarthost: 'localhost:587'
-  smtp_from: 'alerts@ai-starter-kit.local'
+  smtp_from: 'alerts@GeuseMaker.local'
 
 route:
   group_by: ['alertname']
@@ -505,12 +505,12 @@ receivers:
     slack_configs:
       - api_url: '${SLACK_WEBHOOK_URL}'
         channel: '#alerts'
-        title: 'AI Starter Kit Alert'
+        title: 'GeuseMaker Alert'
         text: 'Alert: {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
     
     email_configs:
       - to: '${ALERT_EMAIL}'
-        subject: 'AI Starter Kit Alert: {{ .GroupLabels.alertname }}'
+        subject: 'GeuseMaker Alert: {{ .GroupLabels.alertname }}'
         body: |
           {{ range .Alerts }}
           Alert: {{ .Annotations.summary }}
@@ -652,7 +652,7 @@ create_monitoring_scripts() {
 #!/bin/bash
 set -e
 
-echo "Starting AI Starter Kit monitoring stack..."
+echo "Starting GeuseMaker monitoring stack..."
 
 # Check if Docker is running
 if ! docker info >/dev/null 2>&1; then
@@ -692,7 +692,7 @@ EOF
 #!/bin/bash
 set -e
 
-echo "Stopping AI Starter Kit monitoring stack..."
+echo "Stopping GeuseMaker monitoring stack..."
 
 docker-compose -f docker-compose.monitoring.yml down
 
@@ -704,7 +704,7 @@ EOF
 #!/bin/bash
 set -e
 
-echo "AI Starter Kit Monitoring Status"
+echo "GeuseMaker Monitoring Status"
 echo "================================"
 
 # Check Docker services
@@ -760,7 +760,7 @@ main() {
             --help|-h)
                 echo "Usage: $0 [--prometheus-only|--grafana-only|--alertmanager-only]"
                 echo ""
-                echo "Sets up monitoring and observability stack for AI Starter Kit"
+                echo "Sets up monitoring and observability stack for GeuseMaker"
                 echo ""
                 echo "Options:"
                 echo "  --prometheus-only    Setup only Prometheus"

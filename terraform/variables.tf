@@ -1,5 +1,5 @@
 # =============================================================================
-# AI Starter Kit Terraform Variables
+# GeuseMaker Terraform Variables
 # Variable definitions for infrastructure deployment
 # =============================================================================
 
@@ -36,7 +36,7 @@ variable "environment" {
 variable "owner" {
   description = "Owner of the resources (for tagging)"
   type        = string
-  default     = "ai-starter-kit"
+  default     = "GeuseMaker"
 }
 
 variable "aws_region" {

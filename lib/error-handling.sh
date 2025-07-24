@@ -30,7 +30,7 @@ readonly ERROR_MODE_INTERACTIVE="interactive" # Prompt user on errors
 
 # Default error handling configuration
 export ERROR_HANDLING_MODE="${ERROR_HANDLING_MODE:-$ERROR_MODE_STRICT}"
-export ERROR_LOG_FILE="${ERROR_LOG_FILE:-/tmp/ai-starter-kit-errors.log}"
+export ERROR_LOG_FILE="${ERROR_LOG_FILE:-/tmp/GeuseMaker-errors.log}"
 export ERROR_NOTIFICATION_ENABLED="${ERROR_NOTIFICATION_ENABLED:-false}"
 export ERROR_CLEANUP_ENABLED="${ERROR_CLEANUP_ENABLED:-true}"
 
@@ -546,7 +546,7 @@ send_error_notification() {
     # In a real system, this could integrate with Slack, email, SNS, etc.
     
     if command -v notify-send &> /dev/null; then
-        notify-send "AI Starter Kit Error" "$error_message"
+        notify-send "GeuseMaker Error" "$error_message"
     fi
     
     # Log notification attempt
@@ -612,7 +612,7 @@ generate_error_report() {
     local report_file="${1:-/tmp/error-report-$(date +%Y%m%d-%H%M%S).txt}"
     
     {
-        echo "=== AI Starter Kit Error Report ==="
+        echo "=== GeuseMaker Error Report ==="
         echo "Generated: $(date)"
         echo "Script: ${BASH_SOURCE[1]:-unknown}"
         echo "PID: $$"

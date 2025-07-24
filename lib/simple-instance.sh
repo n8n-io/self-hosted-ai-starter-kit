@@ -148,7 +148,7 @@ create_simple_user_data() {
     
     cat << EOF
 #!/bin/bash
-# Simple AI Starter Kit Instance Setup
+# Simple GeuseMaker Instance Setup
 set -e
 
 # Update system
@@ -168,8 +168,8 @@ curl -L "https://github.com/docker/compose/releases/latest/download/docker-compo
 chmod +x /usr/local/bin/docker-compose
 
 # Create application directory
-mkdir -p /home/ubuntu/ai-starter-kit
-chown ubuntu:ubuntu /home/ubuntu/ai-starter-kit
+mkdir -p /home/ubuntu/GeuseMaker
+chown ubuntu:ubuntu /home/ubuntu/GeuseMaker
 
 # Install basic monitoring tools
 apt-get install -y htop iotop nethogs

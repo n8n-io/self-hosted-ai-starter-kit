@@ -1,6 +1,6 @@
 # Troubleshooting Guide
 
-This guide helps you diagnose and resolve common issues with the AI Starter Kit deployment and operation.
+This guide helps you diagnose and resolve common issues with the GeuseMaker deployment and operation.
 
 ## 🚨 Emergency Procedures
 
@@ -10,7 +10,7 @@ This guide helps you diagnose and resolve common issues with the AI Starter Kit 
 make status STACK_NAME=your-stack
 
 # Check service health
-ssh -i your-key.pem ubuntu@your-ip 'cd ai-starter-kit && ./health-check.sh'
+ssh -i your-key.pem ubuntu@your-ip 'cd GeuseMaker && ./health-check.sh'
 
 # View recent logs
 make logs STACK_NAME=your-stack
@@ -115,7 +115,7 @@ telnet your-ip 5678
 **Solutions:**
 1. Restart n8n service:
    ```bash
-   ssh -i key.pem ubuntu@ip 'cd ai-starter-kit && docker-compose restart n8n'
+   ssh -i key.pem ubuntu@ip 'cd GeuseMaker && docker-compose restart n8n'
    ```
 2. Check security group allows port 5678
 3. Verify UFW firewall rules:
@@ -176,7 +176,7 @@ ssh -i key.pem ubuntu@ip 'df -h'
 **Solutions:**
 1. Restart Qdrant:
    ```bash
-   ssh -i key.pem ubuntu@ip 'cd ai-starter-kit && docker-compose restart qdrant'
+   ssh -i key.pem ubuntu@ip 'cd GeuseMaker && docker-compose restart qdrant'
    ```
 2. Check storage volume mounting
 3. Verify collection configuration
@@ -244,7 +244,7 @@ No space left on device
 ssh -i key.pem ubuntu@ip 'df -h'
 
 # Find large files
-ssh -i key.pem ubuntu@ip 'du -h /home/ubuntu/ai-starter-kit | sort -rh | head -10'
+ssh -i key.pem ubuntu@ip 'du -h /home/ubuntu/GeuseMaker | sort -rh | head -10'
 
 # Check Docker space usage
 ssh -i key.pem ubuntu@ip 'docker system df'
@@ -331,7 +331,7 @@ ssh -i key.pem ubuntu@ip 'tail -f /var/log/user-data.log'
 #### System Logs
 ```bash
 # CloudWatch logs
-aws logs tail /aws/ai-starter-kit/STACK_NAME --follow
+aws logs tail /aws/GeuseMaker/STACK_NAME --follow
 
 # System logs
 ssh -i key.pem ubuntu@ip 'sudo journalctl -f'
@@ -379,22 +379,22 @@ ssh -i key.pem ubuntu@ip 'docker inspect container_name | grep -A 10 "Resources"
 #### Complete Service Restart
 ```bash
 # Stop all services
-ssh -i key.pem ubuntu@ip 'cd ai-starter-kit && docker-compose down'
+ssh -i key.pem ubuntu@ip 'cd GeuseMaker && docker-compose down'
 
 # Clean up containers and networks
 ssh -i key.pem ubuntu@ip 'docker system prune -f'
 
 # Restart all services
-ssh -i key.pem ubuntu@ip 'cd ai-starter-kit && docker-compose up -d'
+ssh -i key.pem ubuntu@ip 'cd GeuseMaker && docker-compose up -d'
 ```
 
 #### Individual Service Recovery
 ```bash
 # Restart specific service
-ssh -i key.pem ubuntu@ip 'cd ai-starter-kit && docker-compose restart n8n'
+ssh -i key.pem ubuntu@ip 'cd GeuseMaker && docker-compose restart n8n'
 
 # Rebuild service from scratch
-ssh -i key.pem ubuntu@ip 'cd ai-starter-kit && docker-compose up -d --force-recreate n8n'
+ssh -i key.pem ubuntu@ip 'cd GeuseMaker && docker-compose up -d --force-recreate n8n'
 ```
 
 ### Data Recovery
@@ -414,7 +414,7 @@ ssh -i key.pem ubuntu@ip 'docker exec postgres pg_restore -U n8n -d n8n /backup/
 ssh -i key.pem ubuntu@ip 'cp /backup/environment.env config/environment.env'
 
 # Regenerate configuration
-ssh -i key.pem ubuntu@ip 'cd ai-starter-kit && ./scripts/config-manager.sh generate production'
+ssh -i key.pem ubuntu@ip 'cd GeuseMaker && ./scripts/config-manager.sh generate production'
 ```
 
 ### Infrastructure Recovery
@@ -451,7 +451,7 @@ fi
 
 SSH_CMD="ssh -i $KEY_FILE ubuntu@$INSTANCE_IP"
 
-echo "=== AI Starter Kit Diagnostics ==="
+echo "=== GeuseMaker Diagnostics ==="
 echo "Instance: $INSTANCE_IP"
 echo "Time: $(date)"
 echo
@@ -465,7 +465,7 @@ $SSH_CMD 'docker info && docker ps'
 echo
 
 echo "=== Service Health ==="
-$SSH_CMD 'cd ai-starter-kit && ./health-check.sh'
+$SSH_CMD 'cd GeuseMaker && ./health-check.sh'
 echo
 
 echo "=== Recent Errors ==="
@@ -484,17 +484,17 @@ echo "Diagnostics complete."
 # Collect all logs for analysis
 ssh -i key.pem ubuntu@ip << 'EOF'
 cd /tmp
-mkdir ai-starter-kit-logs
-cp /var/log/user-data.log ai-starter-kit-logs/
-journalctl --since "1 hour ago" > ai-starter-kit-logs/system.log
-docker logs n8n > ai-starter-kit-logs/n8n.log 2>&1
-docker logs ollama > ai-starter-kit-logs/ollama.log 2>&1
-docker logs qdrant > ai-starter-kit-logs/qdrant.log 2>&1
-tar czf ai-starter-kit-logs.tar.gz ai-starter-kit-logs/
+mkdir GeuseMaker-logs
+cp /var/log/user-data.log GeuseMaker-logs/
+journalctl --since "1 hour ago" > GeuseMaker-logs/system.log
+docker logs n8n > GeuseMaker-logs/n8n.log 2>&1
+docker logs ollama > GeuseMaker-logs/ollama.log 2>&1
+docker logs qdrant > GeuseMaker-logs/qdrant.log 2>&1
+tar czf GeuseMaker-logs.tar.gz GeuseMaker-logs/
 EOF
 
 # Download logs for analysis
-scp -i key.pem ubuntu@ip:/tmp/ai-starter-kit-logs.tar.gz .
+scp -i key.pem ubuntu@ip:/tmp/GeuseMaker-logs.tar.gz .
 ```
 
 ## 📞 Getting Additional Help

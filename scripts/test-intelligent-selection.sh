@@ -249,7 +249,7 @@ EOF
 show_test_usage() {
     echo "Usage: $0 [OPTIONS]"
     echo ""
-    echo "🧪 AI Starter Kit - Intelligent Selection Test Suite"
+    echo "🧪 GeuseMaker - Intelligent Selection Test Suite"
     echo "=================================================="
     echo ""
     echo "This script tests the enhanced intelligent selection without deploying resources."

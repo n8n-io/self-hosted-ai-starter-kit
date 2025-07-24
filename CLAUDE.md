@@ -143,6 +143,16 @@ tail -f /var/log/cost-optimization.log
 # Advanced health checks
 make health-check STACK_NAME=my-stack
 make health-check-advanced STACK_NAME=my-stack
+
+# Run pytest-based test suites
+make test-unit              # Python unit tests
+make test-integration       # Python integration tests
+make test-security          # Security validation tests
+
+# Docker and configuration testing
+./tests/test-docker-config.sh      # Docker configuration validation
+./tests/test-image-config.sh       # Container image validation
+./tests/test-alb-cloudfront.sh     # ALB/CloudFront functionality
 ```
 
 ## Architecture Patterns
@@ -152,6 +162,8 @@ The project uses a modular architecture with shared libraries in `/lib/`:
 
 - **aws-deployment-common.sh**: Common AWS operations, logging, and error handling
 - **spot-instance.sh**: Spot instance management and pricing optimization
+- **aws-config.sh**: Configuration defaults and environment management
+- **error-handling.sh**: Centralized error handling and cleanup functions
 - Deployment scripts source these libraries for consistent behavior across all deployment types
 
 ### Unified Deployment Strategy
@@ -164,7 +176,10 @@ The `aws-deployment-unified.sh` script serves as the main orchestrator supportin
 Test deployment logic without AWS costs using validation scripts:
 - `./scripts/simple-demo.sh` - Basic intelligent selection demo
 - `./scripts/test-intelligent-selection.sh` - Comprehensive testing with cross-region analysis
-- `./test-alb-cloudfront.sh` - ALB/CloudFront functionality validation
+- `./tests/test-alb-cloudfront.sh` - ALB/CloudFront functionality validation
+- **Python Test Framework**: pytest-based unit and integration tests in `/tests/`
+- **Configuration Testing**: Docker and image validation scripts
+- **Security Testing**: Automated security validation with `/tests/unit/test_security_validation.py`
 
 ### Terraform Infrastructure as Code
 Alternative to shell scripts for infrastructure management:
@@ -287,22 +302,25 @@ The project includes sophisticated Cursor IDE rules for AWS development:
 
 ## Resource Allocation (g4dn.xlarge)
 
-### CPU Allocation (4 vCPUs total)
-- postgres: 1.5 vCPUs (37.5%)
-- n8n: 1.0 vCPUs (25%)
-- ollama: 2.5 vCPUs (62.5%) - Primary compute
-- qdrant: 1.5 vCPUs (37.5%)
-- monitoring: 0.5 vCPUs (12.5%)
+### CPU Allocation (4 vCPUs total, targeting 85% utilization)
+- ollama: 2.0 vCPUs (50%) - Primary compute user
+- postgres: 0.4 vCPUs (10%)
+- n8n: 0.4 vCPUs (10%)
+- qdrant: 0.4 vCPUs (10%)
+- crawl4ai: 0.4 vCPUs (10%)
+- monitoring: 0.3 vCPUs (7.5%)
 
 ### Memory Allocation (16GB total)
-- ollama: 10GB (62.5%) - Primary memory user
-- postgres: 3GB (18.75%)
-- qdrant: 3GB (18.75%)
-- monitoring: 512MB (3.2%)
+- ollama: 6GB (37.5%) - Primary memory user
+- postgres: 2GB (12.5%)
+- qdrant: 2GB (12.5%)
+- n8n: 1.5GB (9.4%)
+- crawl4ai: 1.5GB (9.4%)
+- system reserve: ~2.5GB (15.6%)
 
 ### GPU Memory (T4 16GB)
-- ollama: 14.4GB (90%)
-- system reserve: 1.6GB (10%)
+- ollama: ~13.6GB (85% utilization)
+- system reserve: ~2.4GB (15%)
 
 ## Troubleshooting
 
@@ -382,6 +400,38 @@ aws ec2 describe-instances --filters "Name=instance-state-name,Values=running"
 ./scripts/setup-parameter-store.sh validate
 ```
 
+## Testing Framework
+
+### Python Test Suite
+The project uses pytest for comprehensive testing:
+
+```bash
+# Run specific test categories
+pytest tests/unit/ -v                    # Unit tests
+pytest tests/integration/ -v             # Integration tests
+pytest tests/unit/test_security_validation.py -v  # Security tests
+
+# Test specific deployment workflows
+pytest tests/integration/test_deployment_workflow.py -v
+
+# Generate test coverage reports
+pytest --cov=scripts --cov-report=html tests/
+```
+
+### Shell Script Testing
+Validation scripts for infrastructure and configuration:
+
+```bash
+# Docker configuration validation
+./tests/test-docker-config.sh
+
+# Container image validation  
+./tests/test-image-config.sh
+
+# ALB and CloudFront functionality
+./tests/test-alb-cloudfront.sh
+```
+
 ## Important Notes
 
 - This project requires AWS credentials and appropriate permissions
@@ -389,3 +439,5 @@ aws ec2 describe-instances --filters "Name=instance-state-name,Values=running"
 - The system is optimized for cost efficiency while maintaining performance
 - Always validate configurations before deployment to production
 - Use the test scripts to verify deployment logic without incurring AWS costs
+- **Testing Strategy**: Run `make test` before any deployment to ensure code quality
+- **Security First**: Always run `make security-check` before production deployments

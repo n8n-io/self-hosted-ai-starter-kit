@@ -2,7 +2,7 @@
 
 > Complete API documentation for monitoring, metrics, and health check endpoints
 
-The AI Starter Kit includes comprehensive monitoring capabilities through CloudWatch, custom health checks, and service-specific metrics endpoints. This document covers all monitoring APIs and integration patterns.
+GeuseMaker includes comprehensive monitoring capabilities through CloudWatch, custom health checks, and service-specific metrics endpoints. This document covers all monitoring APIs and integration patterns.
 
 ## 🌟 Monitoring Overview
 
@@ -418,7 +418,7 @@ POST /cloudwatch/metrics
 Content-Type: application/json
 
 {
-  "namespace": "AI-Starter-Kit/Custom",
+  "namespace": "GeuseMaker/Custom",
   "metrics": [
     {
       "metric_name": "WorkflowExecutions",
@@ -551,7 +551,7 @@ class MonitoringClient:
                           dimensions: Optional[Dict[str, str]] = None):
         """Send custom metric to CloudWatch"""
         data = {
-            "namespace": "AI-Starter-Kit/Custom",
+            "namespace": "GeuseMaker/Custom",
             "metrics": [
                 {
                     "metric_name": metric_name,
@@ -982,7 +982,7 @@ class HealthChecker:
         """Send email alert"""
         try:
             msg = MIMEText(f"Severity: {severity}\n\n{message}")
-            msg['Subject'] = f"[AI Starter Kit] {subject}"
+            msg['Subject'] = f"[GeuseMaker] {subject}"
             msg['From'] = self.alert_config['email']['from']
             msg['To'] = self.alert_config['email']['to']
             
@@ -1076,5 +1076,5 @@ while True:
 ---
 
 **Last Updated:** January 2025  
-**Service Compatibility:** All AI Starter Kit deployments  
+**Service Compatibility:** All GeuseMaker deployments  
 **Dependencies:** CloudWatch, Custom health check services

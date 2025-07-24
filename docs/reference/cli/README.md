@@ -1,8 +1,8 @@
 # CLI Reference Overview
 
-> Complete command-line interface reference for the AI Starter Kit
+> Complete command-line interface reference for GeuseMaker
 
-The AI Starter Kit provides comprehensive command-line tools for deployment, management, and operations. This reference covers all available commands, scripts, and automation tools.
+GeuseMaker provides comprehensive command-line tools for deployment, management, and operations. This reference covers all available commands, scripts, and automation tools.
 
 ## 🎯 Quick Reference
 
@@ -341,14 +341,14 @@ DEBUG=true ./scripts/aws-deployment-unified.sh my-stack
 ### Log Locations
 ```bash
 # Application logs
-~/.ai-starter-kit/logs/
+~/.GeuseMaker/logs/
 
 # Deployment logs  
-/tmp/ai-starter-kit-deploy.log
+/tmp/GeuseMaker-deploy.log
 
 # CloudWatch logs
 # Available through AWS Console or CLI
-aws logs describe-log-groups --log-group-name-prefix "/aws/ai-starter-kit"
+aws logs describe-log-groups --log-group-name-prefix "/aws/GeuseMaker"
 ```
 
 ## 📚 Additional Resources
@@ -382,4 +382,4 @@ make deploy --help 2>/dev/null || echo "Use: make deploy STACK_NAME=name"
 
 **CLI Version:** 2.0  
 **Last Updated:** January 2025  
-**Compatibility:** All AI Starter Kit deployments
+**Compatibility:** All GeuseMaker deployments

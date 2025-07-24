@@ -2,7 +2,7 @@
 
 > Complete API documentation for Crawl4AI web crawling and extraction service
 
-Crawl4AI is an intelligent web crawling and content extraction service designed for AI applications. This document covers all available endpoints and integration patterns for the AI Starter Kit deployment.
+Crawl4AI is an intelligent web crawling and content extraction service designed for AI applications. This document covers all available endpoints and integration patterns for the GeuseMaker deployment.
 
 ## 🌟 Service Overview
 
@@ -967,4 +967,4 @@ print("Crawl4AI status:", health_status)
 
 **API Version:** Crawl4AI 0.2.x  
 **Last Updated:** January 2025  
-**Service Compatibility:** All AI Starter Kit deployments
+**Service Compatibility:** All GeuseMaker deployments

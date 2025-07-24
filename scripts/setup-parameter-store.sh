@@ -85,7 +85,7 @@ setup_database_parameters() {
     create_secure_parameter \
         "/aibuildkit/POSTGRES_PASSWORD" \
         "$(generate_secure_password)" \
-        "PostgreSQL database password for AI Starter Kit" \
+        "PostgreSQL database password for GeuseMaker" \
         "$aws_region"
 }
 
@@ -185,7 +185,7 @@ setup_webhook_parameter() {
 list_parameters() {
     local aws_region="$1"
     
-    log "Listing all AI Build Kit parameters..."
+    log "Listing all GeuseMaker parameters..."
     
     aws ssm get-parameters-by-path \
         --path "/aibuildkit" \
@@ -230,7 +230,7 @@ validate_parameters() {
 cleanup_parameters() {
     local aws_region="$1"
     
-    warning "This will delete ALL AI Build Kit parameters!"
+    warning "This will delete ALL GeuseMaker parameters!"
     read -p "Are you sure? Type 'yes' to confirm: " -r
     
     if [[ ! $REPLY == "yes" ]]; then

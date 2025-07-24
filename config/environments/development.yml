@@ -1,11 +1,11 @@
 # Development Environment Configuration
-# AI Starter Kit - Development Settings
+# GeuseMaker - Development Settings
 
 global:
   environment: development
   region: us-east-1
-  stack_name: ai-starter-kit-dev
-  project_name: ai-starter-kit
+  stack_name: GeuseMaker-dev
+  project_name: GeuseMaker
 
 # Infrastructure Configuration
 infrastructure:

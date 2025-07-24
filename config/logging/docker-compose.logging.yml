@@ -1,4 +1,4 @@
-# Centralized Logging Stack for AI Starter Kit
+# Centralized Logging Stack for GeuseMaker
 # Add this as an override to enable centralized logging
 
 version: '3.8'
@@ -21,12 +21,12 @@ services:
       - "9880:9880"    # Health check
     volumes:
       - ./config/logging/fluentd.conf:/fluentd/etc/fluent.conf:ro
-      - /var/log/ai-starter-kit:/var/log/ai-starter-kit
+      - /var/log/GeuseMaker:/var/log/GeuseMaker
       - fluentd_buffer:/var/log/fluentd-buffer
     environment:
       - FLUENTD_CONF=fluent.conf
       - ENVIRONMENT=${ENVIRONMENT:-development}
-      - STACK_NAME=${STACK_NAME:-ai-starter-kit}
+      - STACK_NAME=${STACK_NAME:-GeuseMaker}
       - INSTANCE_ID=${INSTANCE_ID:-local}
       - AWS_REGION=${AWS_REGION:-us-east-1}
       - ELASTICSEARCH_HOST=${ELASTICSEARCH_HOST:-elasticsearch}
@@ -69,7 +69,7 @@ services:
       - discovery.type=single-node
       - xpack.security.enabled=false
       - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
-      - cluster.name=ai-starter-kit-logs
+      - cluster.name=GeuseMaker-logs
       - node.name=log-node-1
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data

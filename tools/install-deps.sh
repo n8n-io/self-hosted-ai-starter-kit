@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================================
 # Dependency Installation Script
-# Installs required tools and dependencies for AI Starter Kit
+# Installs required tools and dependencies for GeuseMaker
 # =============================================================================
 
 set -euo pipefail

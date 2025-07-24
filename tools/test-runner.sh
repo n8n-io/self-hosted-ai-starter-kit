@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================================
 # Comprehensive Test Runner
-# Runs all types of tests for the AI Starter Kit
+# Runs all types of tests for the GeuseMaker
 # =============================================================================
 
 set -euo pipefail
@@ -51,7 +51,7 @@ setup_test_environment() {
     cat > "$RESULTS_FILE" << EOF
 {
     "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-    "project": "ai-starter-kit",
+    "project": "GeuseMaker",
     "environment": "${TEST_ENVIRONMENT:-development}",
     "results": {}
 }
@@ -509,7 +509,7 @@ generate_test_report() {
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI Starter Kit Test Report</title>
+    <title>GeuseMaker Test Report</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; }
         .header { background: #f5f5f5; padding: 20px; border-radius: 5px; }
@@ -525,7 +525,7 @@ generate_test_report() {
 </head>
 <body>
     <div class="header">
-        <h1>AI Starter Kit Test Report</h1>
+        <h1>GeuseMaker Test Report</h1>
         <p>Generated: $(date)</p>
         <p>Environment: ${TEST_ENVIRONMENT:-development}</p>
     </div>
@@ -590,7 +590,7 @@ EOF
 
 show_help() {
     cat << EOF
-Comprehensive Test Runner for AI Starter Kit
+Comprehensive Test Runner for GeuseMaker
 
 Usage: $0 [options] [test-categories...]
 

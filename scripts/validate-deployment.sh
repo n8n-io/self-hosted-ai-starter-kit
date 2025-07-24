@@ -380,7 +380,7 @@ run_functional_tests() {
 # =============================================================================
 
 main() {
-    echo -e "${BLUE}=== AI Starter Kit Deployment Validation ===${NC}"
+    echo -e "${BLUE}=== GeuseMaker Deployment Validation ===${NC}"
     echo "Validating deployment health and functionality..."
     echo
     

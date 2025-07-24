@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================================
-# AI Starter Kit - Simple Intelligent Selection Demo  
+# GeuseMaker - Simple Intelligent Selection Demo  
 # =============================================================================
 # Compatible with older bash versions (works on macOS default bash 3.2)
 # =============================================================================

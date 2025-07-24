@@ -95,7 +95,7 @@ class TestSecurityValidation(unittest.TestCase):
 
     def test_validate_stack_name_valid(self):
         """Test stack name validation with valid names"""
-        valid_names = ['ai-starter-kit', 'mystack123', 'test-stack-1']
+        valid_names = ['GeuseMaker', 'mystack123', 'test-stack-1']
         
         for name in valid_names:
             with self.subTest(name=name):

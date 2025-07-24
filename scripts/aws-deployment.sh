@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================================
-# AI-Powered Starter Kit - AWS Deployment Automation
+# GeuseMaker - AWS Deployment Automation
 # =============================================================================
 # This script automates the complete deployment of the AI starter kit on AWS
 # Features: EFS setup, GPU instances, cost optimization, monitoring
@@ -87,9 +87,9 @@ NC='\033[0m' # No Color
 AWS_REGION="${AWS_REGION:-us-east-1}"
 INSTANCE_TYPE="${INSTANCE_TYPE:-auto}"  # Changed to auto-selection
 MAX_SPOT_PRICE="${MAX_SPOT_PRICE:-2.00}"  # Increased for G5 instances
-KEY_NAME="${KEY_NAME:-ai-starter-kit-key}"
-STACK_NAME="${STACK_NAME:-ai-starter-kit}"
-PROJECT_NAME="${PROJECT_NAME:-ai-starter-kit}"
+KEY_NAME="${KEY_NAME:-GeuseMaker-key}"
+STACK_NAME="${STACK_NAME:-GeuseMaker}"
+PROJECT_NAME="${PROJECT_NAME:-GeuseMaker}"
 ENABLE_CROSS_REGION="${ENABLE_CROSS_REGION:-false}"  # Cross-region analysis
 USE_LATEST_IMAGES="${USE_LATEST_IMAGES:-true}"  # Use latest Docker images by default
 SETUP_ALB="${SETUP_ALB:-false}"  # Setup Application Load Balancer
@@ -802,7 +802,7 @@ set -euo pipefail
 # Log all output for debugging
 exec > >(tee /var/log/user-data.log) 2>&1
 
-echo "=== AI Starter Kit Deep Learning AMI Setup ==="
+echo "=== GeuseMaker Deep Learning AMI Setup ==="
 echo "Timestamp: \$(date)"
 echo "Instance Type: $instance_type"
 echo "CPU Architecture: $cpu_arch"
@@ -1502,7 +1502,7 @@ create_security_group() {
     # Create security group
     SG_ID=$(aws ec2 create-security-group \
         --group-name "${STACK_NAME}-sg" \
-        --description "Security group for AI Starter Kit Intelligent Deployment" \
+        --description "Security group for GeuseMaker Intelligent Deployment" \
         --vpc-id "$VPC_ID" \
         --region "$AWS_REGION" \
         --query 'GroupId' \
@@ -1933,7 +1933,7 @@ setup_cloudfront() {
     # Create CloudFront distribution
     DISTRIBUTION_CONFIG='{
         "CallerReference": "'${STACK_NAME}'-'$(date +%s)'",
-        "Comment": "CloudFront distribution for AI Starter Kit",
+        "Comment": "CloudFront distribution for GeuseMaker",
         "DefaultCacheBehavior": {
             "TargetOriginId": "ALBOrigin",
             "ViewerProtocolPolicy": "redirect-to-https",
@@ -2015,14 +2015,14 @@ deploy_application() {
     local EFS_DNS="$2"
     local INSTANCE_ID="$3"
     
-    log "Deploying AI Starter Kit application..."
+    log "Deploying GeuseMaker application..."
     
     # Create deployment script
     cat > deploy-app.sh << EOF
 #!/bin/bash
 set -euo pipefail
 
-echo "Starting AI Starter Kit deployment..."
+echo "Starting GeuseMaker deployment..."
 
 # Mount EFS
 sudo mkdir -p /mnt/efs
@@ -2030,10 +2030,10 @@ sudo mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,ret
 echo "$EFS_DNS:/ /mnt/efs nfs4 nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,fsc,_netdev 0 0" | sudo tee -a /etc/fstab
 
 # Clone repository if it doesn't exist
-if [ ! -d "/home/ubuntu/ai-starter-kit" ]; then
-    git clone https://github.com/michael-pittman/001-starter-kit.git /home/ubuntu/ai-starter-kit
+if [ ! -d "/home/ubuntu/GeuseMaker" ]; then
+    git clone https://github.com/michael-pittman/001-starter-kit.git /home/ubuntu/GeuseMaker
 fi
-cd /home/ubuntu/ai-starter-kit
+cd /home/ubuntu/GeuseMaker
 
 # Update Docker images to latest versions (unless overridden)
 if [ "\${USE_LATEST_IMAGES:-true}" = "true" ]; then
@@ -2100,7 +2100,7 @@ EOF
     log "Copying application files..."
     rsync -avz --exclude '.git' --exclude 'node_modules' --exclude '*.log' \
         -e "ssh -o StrictHostKeyChecking=no -i ${KEY_NAME}.pem" \
-        ./ "ubuntu@$PUBLIC_IP:/home/ubuntu/ai-starter-kit/"
+        ./ "ubuntu@$PUBLIC_IP:/home/ubuntu/GeuseMaker/"
     
     # Run deployment
     log "Running deployment script..."
@@ -2331,7 +2331,7 @@ setup_cloudfront() {
     distribution_config=$(cat << EOF
 {
     "CallerReference": "${STACK_NAME}-$(date +%s)",
-    "Comment": "AI Starter Kit CDN Distribution for ${STACK_NAME}",
+    "Comment": "GeuseMaker CDN Distribution for ${STACK_NAME}",
     "DefaultCacheBehavior": {
         "TargetOriginId": "${STACK_NAME}-alb-origin",
         "ViewerProtocolPolicy": "redirect-to-https",
@@ -2482,7 +2482,7 @@ EOF
     # Clean up temporary files
     rm -f user-data.sh trust-policy.json custom-policy.json deploy-app.sh
     
-    success "AI Starter Kit deployment completed successfully!"
+    success "GeuseMaker deployment completed successfully!"
 }
 
 # =============================================================================
@@ -2492,7 +2492,7 @@ EOF
 show_usage() {
     echo "Usage: $0 [OPTIONS]"
     echo ""
-    echo "🚀 AI Starter Kit - Intelligent AWS GPU Deployment"
+    echo "🚀 GeuseMaker - Intelligent AWS GPU Deployment"
     echo "================================================="
     echo ""
     echo "This script intelligently deploys GPU-optimized AI infrastructure on AWS"
@@ -2530,8 +2530,8 @@ show_usage() {
     echo "                         (default: auto)"
     echo "  --max-spot-price PRICE  Maximum spot price budget (default: 2.00)"
     echo "  --cross-region          Enable cross-region analysis for best pricing"
-    echo "  --key-name NAME         SSH key name (default: ai-starter-kit-key)"
-    echo "  --stack-name NAME       Stack name (default: ai-starter-kit)"
+    echo "  --key-name NAME         SSH key name (default: GeuseMaker-key)"
+    echo "  --stack-name NAME       Stack name (default: GeuseMaker)"
     echo "  --use-pinned-images     Use specific pinned image versions instead of latest"
     echo "  --setup-alb             Setup Application Load Balancer (ALB)"
     echo "  --setup-cloudfront      Setup CloudFront CDN distribution"

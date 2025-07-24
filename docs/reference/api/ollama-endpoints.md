@@ -2,7 +2,7 @@
 
 > Complete API documentation for Ollama Large Language Model service
 
-Ollama provides a simple REST API for running large language models locally. This document covers all available endpoints and integration patterns for the AI Starter Kit deployment.
+Ollama provides a simple REST API for running large language models locally. This document covers all available endpoints and integration patterns for the GeuseMaker deployment.
 
 ## 🌟 Service Overview
 
@@ -853,4 +853,4 @@ def pull_model(model: str) -> bool:
 
 **API Version:** Ollama 0.1.x  
 **Last Updated:** January 2025  
-**Service Compatibility:** All AI Starter Kit deployments
+**Service Compatibility:** All GeuseMaker deployments

@@ -28,7 +28,7 @@ docker --version             # Should show Docker version
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd ai-starter-kit
+cd GeuseMaker
 
 # Initialize development environment
 make setup
@@ -110,7 +110,7 @@ Your AI infrastructure now includes:
 3. **Import example workflow**: 
    ```bash
    # Copy example workflows to your instance
-   scp -i your-key.pem -r n8n/demo-data/workflows/ ubuntu@YOUR-IP:~/ai-starter-kit/
+   scp -i your-key.pem -r n8n/demo-data/workflows/ ubuntu@YOUR-IP:~/GeuseMaker/
    ```
 4. **Test the workflow**: Run a simple automation
 
@@ -147,7 +147,7 @@ Run the health check to ensure all services are operating correctly:
 make status STACK_NAME=your-stack-name
 
 # SSH into instance and run health check
-ssh -i your-key.pem ubuntu@YOUR-IP 'cd ai-starter-kit && ./health-check.sh'
+ssh -i your-key.pem ubuntu@YOUR-IP 'cd GeuseMaker && ./health-check.sh'
 ```
 
 Expected output:
@@ -164,7 +164,7 @@ Expected output:
 ### Service Not Responding?
 ```bash
 # Restart all services
-ssh -i your-key.pem ubuntu@YOUR-IP 'cd ai-starter-kit && docker-compose restart'
+ssh -i your-key.pem ubuntu@YOUR-IP 'cd GeuseMaker && docker-compose restart'
 ```
 
 ### Need to Change Configuration?
@@ -173,7 +173,7 @@ ssh -i your-key.pem ubuntu@YOUR-IP 'cd ai-starter-kit && docker-compose restart'
 ssh -i your-key.pem ubuntu@YOUR-IP
 
 # Edit configuration
-cd ai-starter-kit
+cd GeuseMaker
 nano config/environment.env
 
 # Restart services to apply changes
@@ -194,7 +194,7 @@ ssh -i your-key.pem ubuntu@YOUR-IP 'docker exec ollama ollama pull codellama'
 make logs STACK_NAME=your-stack-name
 
 # View service logs on instance
-ssh -i your-key.pem ubuntu@YOUR-IP 'cd ai-starter-kit && docker-compose logs -f'
+ssh -i your-key.pem ubuntu@YOUR-IP 'cd GeuseMaker && docker-compose logs -f'
 ```
 
 ### Check Resource Usage
@@ -208,7 +208,7 @@ ssh -i your-key.pem ubuntu@YOUR-IP 'nvidia-smi'
 
 ### CloudWatch Monitoring
 - Open AWS CloudWatch in your browser
-- Navigate to "Log groups" → `/aws/ai-starter-kit/your-stack-name`
+- Navigate to "Log groups" → `/aws/GeuseMaker/your-stack-name`
 - View real-time logs and metrics
 
 ## 💰 Cost Management

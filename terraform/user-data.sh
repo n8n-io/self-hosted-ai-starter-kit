@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# EC2 User Data Script for AI Starter Kit
+# EC2 User Data Script for GeuseMaker
 # This script is executed when the instance first boots
 # =============================================================================
 
@@ -40,7 +40,7 @@ log() {
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a /var/log/user-data.log
 }
 
-log "Starting AI Starter Kit instance initialization..."
+log "Starting GeuseMaker instance initialization..."
 log "Stack: $STACK_NAME, Environment: $ENVIRONMENT"
 
 # =============================================================================
@@ -150,7 +150,7 @@ cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << EOF
         "run_as_user": "cwagent"
     },
     "metrics": {
-        "namespace": "AI-StarterKit/$STACK_NAME",
+        "namespace": "GeuseMaker/$STACK_NAME",
         "metrics_collected": {
             "cpu": {
                 "measurement": [
@@ -236,8 +236,8 @@ log "CloudWatch agent installation completed"
 log "Setting up application directory..."
 
 # Create application directory
-mkdir -p /home/ubuntu/ai-starter-kit
-chown ubuntu:ubuntu /home/ubuntu/ai-starter-kit
+mkdir -p /home/ubuntu/GeuseMaker
+chown ubuntu:ubuntu /home/ubuntu/GeuseMaker
 
 # Create Docker logging configuration
 mkdir -p /etc/docker
@@ -254,9 +254,9 @@ EOF
 systemctl restart docker
 
 # Create environment-specific configuration
-mkdir -p /home/ubuntu/ai-starter-kit/config
-cat > /home/ubuntu/ai-starter-kit/config/environment.env << EOF
-# AI Starter Kit Environment Configuration
+mkdir -p /home/ubuntu/GeuseMaker/config
+cat > /home/ubuntu/GeuseMaker/config/environment.env << EOF
+# GeuseMaker Environment Configuration
 STACK_NAME=$STACK_NAME
 ENVIRONMENT=$ENVIRONMENT
 AWS_REGION=$AWS_REGION
@@ -280,8 +280,8 @@ ENABLE_METRICS=true
 LOG_LEVEL=info
 EOF
 
-chown ubuntu:ubuntu /home/ubuntu/ai-starter-kit/config/environment.env
-chmod 600 /home/ubuntu/ai-starter-kit/config/environment.env
+chown ubuntu:ubuntu /home/ubuntu/GeuseMaker/config/environment.env
+chmod 600 /home/ubuntu/GeuseMaker/config/environment.env
 
 log "Application setup completed"
 
@@ -336,9 +336,9 @@ log "Security hardening completed"
 log "Setting up monitoring and health checks..."
 
 # Create health check script
-cat > /home/ubuntu/ai-starter-kit/health-check.sh << 'EOF'
+cat > /home/ubuntu/GeuseMaker/health-check.sh << 'EOF'
 #!/bin/bash
-# Health check script for AI Starter Kit services
+# Health check script for GeuseMaker services
 
 SERVICES=("n8n:5678" "ollama:11434" "qdrant:6333")
 ALL_HEALTHY=true
@@ -366,13 +366,13 @@ else
 fi
 EOF
 
-chmod +x /home/ubuntu/ai-starter-kit/health-check.sh
-chown ubuntu:ubuntu /home/ubuntu/ai-starter-kit/health-check.sh
+chmod +x /home/ubuntu/GeuseMaker/health-check.sh
+chown ubuntu:ubuntu /home/ubuntu/GeuseMaker/health-check.sh
 
 # Set up health check cron job
-cat > /etc/cron.d/ai-starter-kit-health << EOF
-# Health check for AI Starter Kit services
-*/5 * * * * ubuntu /home/ubuntu/ai-starter-kit/health-check.sh >> /var/log/health-check.log 2>&1
+cat > /etc/cron.d/GeuseMaker-health << EOF
+# Health check for GeuseMaker services
+*/5 * * * * ubuntu /home/ubuntu/GeuseMaker/health-check.sh >> /var/log/health-check.log 2>&1
 EOF
 
 log "Monitoring setup completed"
@@ -382,9 +382,9 @@ log "Monitoring setup completed"
 # =============================================================================
 
 # Create startup script for services
-cat > /home/ubuntu/ai-starter-kit/start-services.sh << 'EOF'
+cat > /home/ubuntu/GeuseMaker/start-services.sh << 'EOF'
 #!/bin/bash
-# Startup script for AI Starter Kit services
+# Startup script for GeuseMaker services
 
 set -e
 
@@ -392,7 +392,7 @@ log() {
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1"
 }
 
-log "Starting AI Starter Kit services..."
+log "Starting GeuseMaker services..."
 
 # Load environment variables
 if [ -f config/environment.env ]; then
@@ -416,19 +416,19 @@ else
     exit 1
 fi
 
-log "AI Starter Kit services startup completed"
+log "GeuseMaker services startup completed"
 EOF
 
-chmod +x /home/ubuntu/ai-starter-kit/start-services.sh
-chown ubuntu:ubuntu /home/ubuntu/ai-starter-kit/start-services.sh
+chmod +x /home/ubuntu/GeuseMaker/start-services.sh
+chown ubuntu:ubuntu /home/ubuntu/GeuseMaker/start-services.sh
 
 # Signal completion
 touch /tmp/user-data-complete
 log "User data script completed successfully!"
 
 # Final status message
-cat > /home/ubuntu/ai-starter-kit/deployment-info.txt << EOF
-AI Starter Kit Deployment Information
+cat > /home/ubuntu/GeuseMaker/deployment-info.txt << EOF
+GeuseMaker Deployment Information
 ====================================
 
 Stack Name: $STACK_NAME
@@ -449,7 +449,7 @@ Services:
 
 Next Steps:
 1. SSH into the instance: ssh -i your-key.pem ubuntu@$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
-2. Navigate to: cd ai-starter-kit
+2. Navigate to: cd GeuseMaker
 3. Deploy application: ./start-services.sh
 4. Check health: ./health-check.sh
 5. Access n8n at the URL above to start building workflows
@@ -467,8 +467,8 @@ Monitoring:
 For troubleshooting, check the logs above or contact support.
 EOF
 
-chown ubuntu:ubuntu /home/ubuntu/ai-starter-kit/deployment-info.txt
+chown ubuntu:ubuntu /home/ubuntu/GeuseMaker/deployment-info.txt
 
-log "Deployment information saved to /home/ubuntu/ai-starter-kit/deployment-info.txt"
+log "Deployment information saved to /home/ubuntu/GeuseMaker/deployment-info.txt"
 
 # End of user data script

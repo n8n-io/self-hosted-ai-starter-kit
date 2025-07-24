@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Advanced Cost Optimization Automation for AI Starter Kit
+Advanced Cost Optimization Automation for GeuseMaker
 Implements intelligent cost reduction strategies for g4dn.xlarge GPU instances
 Features: Spot instance management, auto-scaling, resource optimization, usage analytics
 """
@@ -451,7 +451,7 @@ class CostOptimizationManager:
         """Send cost alert notification"""
         try:
             message = f"""
-Cost Alert: AI Starter Kit
+Cost Alert: GeuseMaker
 
 Daily cost estimate: ${daily_cost:.2f}
 Threshold: ${self.config.cost_alert_threshold:.2f}
@@ -734,7 +734,7 @@ Next Steps:
             
             # Backup critical data to EFS using parameterized commands
             backup_commands = [
-                ["tar", "-czf", f"{backup_dir}/emergency_backup_{timestamp}.tar.gz", "/home/ubuntu/ai-starter-kit/"],
+                ["tar", "-czf", f"{backup_dir}/emergency_backup_{timestamp}.tar.gz", "/home/ubuntu/GeuseMaker/"],
                 ["cp", "/shared/gpu_metrics.json", f"{backup_dir}/gpu_metrics_final_{timestamp}.json"],
                 ["docker", "exec", "postgres-gpu", "pg_dump", "-U", "n8n", "n8n"]
             ]
@@ -796,7 +796,7 @@ def setup_scheduled_scaling():
 def main():
     import argparse
     
-    parser = argparse.ArgumentParser(description='AI Starter Kit Cost Optimization')
+    parser = argparse.ArgumentParser(description='GeuseMaker Cost Optimization')
     parser.add_argument('--action', choices=['optimize', 'report', 'schedule'], 
                        default='optimize', help='Action to perform')
     parser.add_argument('--max-spot-price', type=float, default=0.75,

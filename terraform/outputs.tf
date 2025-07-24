@@ -1,5 +1,5 @@
 # =============================================================================
-# AI Starter Kit Terraform Outputs
+# GeuseMaker Terraform Outputs
 # Output values for deployed infrastructure
 # =============================================================================
 
@@ -188,7 +188,7 @@ output "estimated_hourly_cost" {
 output "cost_allocation_tags" {
   description = "Cost allocation tags applied to resources"
   value = {
-    Project     = "ai-starter-kit"
+    Project     = "GeuseMaker"
     Environment = var.environment
     Stack       = var.stack_name
     Owner       = var.owner

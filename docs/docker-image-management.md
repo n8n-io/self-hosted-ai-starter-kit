@@ -1,6 +1,6 @@
 # Docker Image Version Management
 
-This document explains how to manage Docker image versions in the AI Starter Kit deployment system.
+This document explains how to manage Docker image versions in the GeuseMaker deployment system.
 
 ## Overview
 

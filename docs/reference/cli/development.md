@@ -2,7 +2,7 @@
 
 > Complete reference for development, testing, and debugging CLI tools
 
-This document covers all development-focused commands, testing utilities, and debugging tools for the AI Starter Kit development workflow.
+This document covers all development-focused commands, testing utilities, and debugging tools for the GeuseMaker development workflow.
 
 ## 🎯 Quick Development Commands
 

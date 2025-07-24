@@ -1,6 +1,6 @@
 # ALB and CloudFront Setup Guide
 
-This document explains the new Application Load Balancer (ALB) and CloudFront CDN setup functionality added to the AI Starter Kit deployment system.
+This document explains the new Application Load Balancer (ALB) and CloudFront CDN setup functionality added to the GeuseMaker deployment system.
 
 ## Overview
 
@@ -334,7 +334,7 @@ aws cloudwatch get-metric-statistics \
 - [Application Load Balancer User Guide](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/)
 - [CloudFront Developer Guide](https://docs.aws.amazon.com/cloudfront/)
 
-### AI Starter Kit Resources
+### GeuseMaker Resources
 - Main deployment script: `scripts/aws-deployment.sh`
 - Simple deployment: `scripts/aws-deployment-simple.sh`
 - Test script: `test-alb-cloudfront.sh`

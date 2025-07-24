@@ -258,7 +258,7 @@ validate_docker_security() {
 run_security_validation() {
     local aws_region="${1:-us-east-1}"
     local instance_type="${2:-auto}"
-    local stack_name="${3:-ai-starter-kit}"
+    local stack_name="${3:-GeuseMaker}"
     local profile="${4:-default}"
     
     echo -e "${BLUE}=== Running Security Validation ===${NC}"

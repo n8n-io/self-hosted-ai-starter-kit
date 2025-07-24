@@ -1,11 +1,11 @@
-# AI Starter Kit Makefile
+# GeuseMaker Makefile
 # Build automation and development tools
 
 .PHONY: help setup clean test lint deploy destroy validate docs
 
 # Default target
 help: ## Show this help message
-	@echo "AI Starter Kit - Available Commands:"
+	@echo "GeuseMaker - Available Commands:"
 	@echo ""
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
@@ -220,13 +220,13 @@ update-deps: ## Update dependencies
 # =============================================================================
 
 example-dev: ## Deploy example development environment
-	@$(MAKE) deploy-simple STACK_NAME=ai-dev-$(shell whoami)
+	@$(MAKE) deploy-simple STACK_NAME=GeuseMaker-dev-$(shell whoami)
 
 example-prod: ## Deploy example production environment
-	@$(MAKE) deploy-ondemand STACK_NAME=ai-prod-$(shell date +%Y%m%d)
+	@$(MAKE) deploy-ondemand STACK_NAME=GeuseMaker-prod-$(shell date +%Y%m%d)
 
 quick-start: ## Quick start guide
-	@echo "🚀 AI Starter Kit Quick Start"
+	@echo "🚀 GeuseMaker Quick Start"
 	@echo ""
 	@echo "1. Setup:           make setup"
 	@echo "2. Install deps:    make install-deps"  

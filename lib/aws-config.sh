@@ -56,7 +56,7 @@ set_default_configuration() {
     export CLOUDFRONT_MAX_TTL="${CLOUDFRONT_MAX_TTL:-86400}"
     
     # Monitoring defaults
-    export CLOUDWATCH_LOG_GROUP="${CLOUDWATCH_LOG_GROUP:-/aws/ai-starter-kit}"
+    export CLOUDWATCH_LOG_GROUP="${CLOUDWATCH_LOG_GROUP:-/aws/GeuseMaker}"
     export CLOUDWATCH_LOG_RETENTION="${CLOUDWATCH_LOG_RETENTION:-30}"
     
     # Backup defaults
@@ -416,7 +416,7 @@ export_configuration_to_env_file() {
     log "Exporting configuration to: $env_file"
     
     cat > "$env_file" << EOF
-# AI Starter Kit Deployment Configuration
+# GeuseMaker Deployment Configuration
 # Generated on: $(date)
 # Deployment Type: $deployment_type
 

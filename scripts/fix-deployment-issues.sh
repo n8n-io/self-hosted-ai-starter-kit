@@ -130,11 +130,11 @@ setup_efs_mounting() {
     sudo chmod 755 /mnt/efs
     
     # Update environment file with EFS DNS
-    if [ -f /home/ubuntu/ai-starter-kit/.env ]; then
-        if grep -q "EFS_DNS=" /home/ubuntu/ai-starter-kit/.env; then
-            sed -i "s/EFS_DNS=.*/EFS_DNS=$efs_dns/" /home/ubuntu/ai-starter-kit/.env
+    if [ -f /home/ubuntu/GeuseMaker/.env ]; then
+        if grep -q "EFS_DNS=" /home/ubuntu/GeuseMaker/.env; then
+            sed -i "s/EFS_DNS=.*/EFS_DNS=$efs_dns/" /home/ubuntu/GeuseMaker/.env
         else
-            echo "EFS_DNS=$efs_dns" >> /home/ubuntu/ai-starter-kit/.env
+            echo "EFS_DNS=$efs_dns" >> /home/ubuntu/GeuseMaker/.env
         fi
     fi
     
@@ -228,14 +228,14 @@ setup_parameter_store_integration() {
     log "Setting up Parameter Store integration for stack: $stack_name"
     
     # Create parameter store retrieval script
-    cat > /home/ubuntu/ai-starter-kit/scripts/get-parameters.sh << 'EOF'
+    cat > /home/ubuntu/GeuseMaker/scripts/get-parameters.sh << 'EOF'
 #!/bin/bash
 
 # Parameter Store Integration Script
 set -euo pipefail
 
 AWS_REGION="${AWS_REGION:-us-east-1}"
-STACK_NAME="${STACK_NAME:-ai-starter-kit}"
+STACK_NAME="${STACK_NAME:-GeuseMaker}"
 
 get_parameter() {
     local param_name="$1"
@@ -308,18 +308,18 @@ get_parameter() {
     # EFS Configuration
     echo "EFS_DNS=${EFS_DNS:-}"
     
-} > /home/ubuntu/ai-starter-kit/.env
+} > /home/ubuntu/GeuseMaker/.env
 
-chmod 600 /home/ubuntu/ai-starter-kit/.env
-chown ubuntu:ubuntu /home/ubuntu/ai-starter-kit/.env
+chmod 600 /home/ubuntu/GeuseMaker/.env
+chown ubuntu:ubuntu /home/ubuntu/GeuseMaker/.env
 
 echo "Environment file updated from Parameter Store"
 EOF
     
-    chmod +x /home/ubuntu/ai-starter-kit/scripts/get-parameters.sh
+    chmod +x /home/ubuntu/GeuseMaker/scripts/get-parameters.sh
     
     # Run the parameter retrieval
-    cd /home/ubuntu/ai-starter-kit
+    cd /home/ubuntu/GeuseMaker
     STACK_NAME="$stack_name" AWS_REGION="$aws_region" ./scripts/get-parameters.sh
     
     success "Parameter Store integration completed"
@@ -376,7 +376,7 @@ main() {
     
     if [ -z "$stack_name" ]; then
         echo "Usage: $0 <stack-name> [aws-region]"
-        echo "Example: $0 my-ai-stack us-east-1"
+        echo "Example: $0 my-geuse-stack us-east-1"
         exit 1
     fi
     
@@ -397,8 +397,8 @@ main() {
     
     log "Next steps:"
     log "1. Verify EFS is mounted: df -h | grep efs"
-    log "2. Check environment variables: cat /home/ubuntu/ai-starter-kit/.env"
-    log "3. Restart Docker services: cd /home/ubuntu/ai-starter-kit && docker-compose -f docker-compose.gpu-optimized.yml up -d"
+    log "2. Check environment variables: cat /home/ubuntu/GeuseMaker/.env"
+    log "3. Restart Docker services: cd /home/ubuntu/GeuseMaker && docker-compose -f docker-compose.gpu-optimized.yml up -d"
 }
 
 # Execute main function with all arguments

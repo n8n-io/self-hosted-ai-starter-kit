@@ -2,7 +2,7 @@
 
 > Complete reference for all Makefile automation commands
 
-This document provides comprehensive documentation for all Makefile targets and automation commands available in the AI Starter Kit.
+This document provides comprehensive documentation for all Makefile targets and automation commands available in GeuseMaker.
 
 ## 🎯 Quick Reference
 
@@ -36,7 +36,7 @@ make help
 
 **Output example:**
 ```
-AI Starter Kit - Available Commands:
+GeuseMaker - Available Commands:
 
 backup               Create backup (requires STACK_NAME)
 check-deps          Check if all dependencies are available
@@ -663,11 +663,11 @@ make example-dev
 
 **Implementation:**
 ```bash
-$(MAKE) deploy-simple STACK_NAME=ai-dev-$(shell whoami)
+$(MAKE) deploy-simple STACK_NAME=GeuseMaker-dev-$(shell whoami)
 ```
 
 **Result:**
-- Creates deployment named `ai-dev-username`
+- Creates deployment named `GeuseMaker-dev-username`
 - Uses current username in stack name
 - Deploys simple development configuration
 
@@ -681,11 +681,11 @@ make example-prod
 
 **Implementation:**
 ```bash
-$(MAKE) deploy-ondemand STACK_NAME=ai-prod-$(shell date +%Y%m%d)
+$(MAKE) deploy-ondemand STACK_NAME=GeuseMaker-prod-$(shell date +%Y%m%d)
 ```
 
 **Result:**
-- Creates deployment named `ai-prod-YYYYMMDD`
+- Creates deployment named `GeuseMaker-prod-YYYYMMDD`
 - Uses current date in stack name
 - Deploys production-grade configuration
 
@@ -699,7 +699,7 @@ make quick-start
 
 **Output:**
 ```
-🚀 AI Starter Kit Quick Start
+🚀 GeuseMaker Quick Start
 
 1. Setup:           make setup
 2. Install deps:    make install-deps
@@ -810,9 +810,9 @@ DEBUG=true make deploy STACK_NAME=my-stack
 ## 📋 Best Practices
 
 ### Naming Conventions
-- Use descriptive stack names: `ai-production-2024`, `dev-john-testing`
+- Use descriptive stack names: `GeuseMaker-production-2024`, `dev-john-testing`
 - Include environment: `staging-api-v2`, `prod-web-frontend`
-- Use lowercase and hyphens: `my-ai-stack` not `MyAIStack`
+- Use lowercase and hyphens: `my-GeuseMaker-stack` not `MyGeuseMakerStack`
 
 ### Development Workflow
 1. `make setup` - First time setup

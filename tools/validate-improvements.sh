@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================================
 # Comprehensive Improvements Validation
-# Validates all improvements made to the AI Starter Kit
+# Validates all improvements made to the GeuseMaker
 # =============================================================================
 
 set -euo pipefail
@@ -458,7 +458,7 @@ run_comprehensive_validation() {
     
     echo
     if [ "$total_issues" -eq 0 ]; then
-        success "🎉 All validations passed! AI Starter Kit improvements are complete."
+        success "🎉 All validations passed! GeuseMaker improvements are complete."
         
         info "Summary of completed improvements:"
         info "• ✅ Security vulnerabilities fixed and credentials secured"
@@ -609,7 +609,7 @@ main() {
         esac
     done
     
-    log "Starting AI Starter Kit improvements validation..."
+    log "Starting GeuseMaker improvements validation..."
     log "Validation type: $validation_type"
     
     case "$validation_type" in

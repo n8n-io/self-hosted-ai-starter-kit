@@ -2,7 +2,7 @@
 
 > Everything you need before deploying your AI infrastructure
 
-This guide covers all prerequisites and initial setup required to deploy the AI Starter Kit successfully. Complete these steps before attempting any deployment.
+This guide covers all prerequisites and initial setup required to deploy the GeuseMaker successfully. Complete these steps before attempting any deployment.
 
 ## 📋 Prerequisites Checklist
 
@@ -336,12 +336,12 @@ aws ec2 describe-regions --output table && echo "✅ AWS connectivity working" |
 
 ### **Automated Prerequisites Check**
 
-The AI Starter Kit includes an automated prerequisites checker:
+The GeuseMaker includes an automated prerequisites checker:
 
 ```bash
 # Clone repository first
 git clone <repository-url>
-cd ai-starter-kit
+cd GeuseMaker
 
 # Run automated check
 make check-deps

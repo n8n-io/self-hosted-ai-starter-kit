@@ -2,7 +2,7 @@
 
 > Complete reference for all deployment-related CLI commands and scripts
 
-This document covers all deployment commands, options, and usage patterns for the AI Starter Kit infrastructure deployment.
+This document covers all deployment commands, options, and usage patterns for the GeuseMaker infrastructure deployment.
 
 ## 🚀 Quick Deployment Commands
 
@@ -255,8 +255,8 @@ aws ec2 describe-spot-price-history \
 ```bash
 # Create custom security group
 aws ec2 create-security-group \
-  --group-name ai-starter-kit-custom \
-  --description "Custom AI Starter Kit security group"
+  --group-name GeuseMaker-custom \
+  --description "Custom GeuseMaker security group"
 
 # Add SSH access
 aws ec2 authorize-security-group-ingress \
@@ -286,11 +286,11 @@ aws ec2 authorize-security-group-ingress \
 make status STACK_NAME=my-stack
 
 # Watch deployment logs
-tail -f /tmp/ai-starter-kit-deploy.log
+tail -f /tmp/GeuseMaker-deploy.log
 
 # Check CloudFormation status
 aws cloudformation describe-stacks \
-  --stack-name ai-starter-kit-my-stack
+  --stack-name GeuseMaker-my-stack
 ```
 
 ### Health Checks During Deployment
@@ -451,7 +451,7 @@ aws ec2 authorize-security-group-ingress \
 
 # Use IAM roles
 ./scripts/aws-deployment-unified.sh \
-  --iam-role arn:aws:iam::account:role/AI-Starter-Kit-Role \
+  --iam-role arn:aws:iam::account:role/GeuseMaker-Role \
   iam-stack
 ```
 
@@ -460,7 +460,7 @@ aws ec2 authorize-security-group-ingress \
 # Use AWS IAM roles (recommended)
 aws sts assume-role \
   --role-arn arn:aws:iam::account:role/DeploymentRole \
-  --role-session-name ai-starter-kit-deployment
+  --role-session-name GeuseMaker-deployment
 
 # Rotate SSH keys
 aws ec2 create-key-pair \

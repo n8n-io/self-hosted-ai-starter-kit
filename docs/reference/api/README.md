@@ -1,8 +1,8 @@
 # API Reference Overview
 
-> Complete API documentation for all AI Starter Kit services
+> Complete API documentation for all GeuseMaker services
 
-The AI Starter Kit provides multiple APIs for different AI and automation services. This section provides comprehensive documentation for integrating with all available services.
+The GeuseMaker provides multiple APIs for different AI and automation services. This section provides comprehensive documentation for integrating with all available services.
 
 ## 🌟 Available Services
 
@@ -434,4 +434,4 @@ class CircuitBreaker:
 
 **API Version:** 2.0  
 **Last Updated:** January 2025  
-**Service Compatibility:** All AI Starter Kit deployments
+**Service Compatibility:** All GeuseMaker deployments

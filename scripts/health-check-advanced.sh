@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# Advanced Health Check Script for AI Starter Kit
+# Advanced Health Check Script for GeuseMaker
 # Performs comprehensive application-level health checks
 # =============================================================================
 
@@ -13,7 +13,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Configuration
-LOG_FILE="/var/log/ai-starter-kit-health.log"
+LOG_FILE="/var/log/GeuseMaker-health.log"
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 OVERALL_HEALTH=true
 HEALTH_REPORT=""
@@ -229,7 +229,7 @@ if [ "$OVERALL_HEALTH" = true ]; then
     # Send success metric to CloudWatch (if configured)
     if command -v aws >/dev/null 2>&1; then
         aws cloudwatch put-metric-data \
-            --namespace "AI-StarterKit" \
+            --namespace "GeuseMaker" \
             --metric-name "HealthCheckStatus" \
             --value 1 \
             --dimensions Service=Overall \
@@ -245,7 +245,7 @@ else
     # Send failure metric to CloudWatch (if configured)
     if command -v aws >/dev/null 2>&1; then
         aws cloudwatch put-metric-data \
-            --namespace "AI-StarterKit" \
+            --namespace "GeuseMaker" \
             --metric-name "HealthCheckStatus" \
             --value 0 \
             --dimensions Service=Overall \

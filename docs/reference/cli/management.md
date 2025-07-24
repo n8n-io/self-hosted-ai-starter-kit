@@ -2,7 +2,7 @@
 
 > Complete reference for operations, monitoring, and maintenance CLI commands
 
-This document covers all management and operational commands for maintaining, monitoring, and operating AI Starter Kit deployments.
+This document covers all management and operational commands for maintaining, monitoring, and operating GeuseMaker deployments.
 
 ## 🎯 Quick Management Commands
 
@@ -54,7 +54,7 @@ make status STACK_NAME=my-stack
 
 **Example output:**
 ```
-🚀 AI Starter Kit Status Report
+🚀 GeuseMaker Status Report
 Stack: my-stack
 Region: us-east-1
 
@@ -152,7 +152,7 @@ sudo journalctl -u docker            # Docker service logs
 sudo journalctl -u cloud-init        # Cloud-init logs
 
 # Application-specific logs
-cd ai-starter-kit
+cd GeuseMaker
 docker-compose logs -f               # All service logs
 docker-compose logs -f ollama        # Specific service logs
 ```
@@ -161,14 +161,14 @@ docker-compose logs -f ollama        # Specific service logs
 ```bash
 # List log groups
 aws logs describe-log-groups \
-  --log-group-name-prefix "/aws/ai-starter-kit"
+  --log-group-name-prefix "/aws/GeuseMaker"
 
 # View CloudWatch logs
-aws logs tail "/aws/ai-starter-kit/my-stack" --follow
+aws logs tail "/aws/GeuseMaker/my-stack" --follow
 
 # Query CloudWatch Insights
 aws logs start-query \
-  --log-group-name "/aws/ai-starter-kit/my-stack" \
+  --log-group-name "/aws/GeuseMaker/my-stack" \
   --start-time $(date -d '1 hour ago' +%s) \
   --end-time $(date +%s) \
   --query-string 'fields @timestamp, @message | filter @message like /ERROR/'
@@ -187,7 +187,7 @@ ssh -i my-stack-key.pem ubuntu@INSTANCE_IP
 sudo apt update && sudo apt upgrade -y
 
 # Update Docker images
-cd ai-starter-kit
+cd GeuseMaker
 docker-compose pull
 docker-compose up -d
 ```

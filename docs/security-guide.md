@@ -1,6 +1,6 @@
 # Security Guide
 
-This guide covers security best practices and configurations for the AI Starter Kit deployment.
+This guide covers security best practices and configurations for the GeuseMaker deployment.
 
 ## Table of Contents
 
@@ -14,7 +14,7 @@ This guide covers security best practices and configurations for the AI Starter 
 
 ## Overview
 
-The AI Starter Kit implements multiple layers of security:
+GeuseMaker implements multiple layers of security:
 
 1. **Secrets Management**: Docker secrets and AWS Secrets Manager
 2. **Network Isolation**: VPC, security groups, and private subnets
@@ -153,7 +153,7 @@ The deployment creates minimal IAM roles:
         "secretsmanager:GetSecretValue",
         "kms:Decrypt"
       ],
-      "Resource": ["arn:aws:secretsmanager:*:*:secret:ai-starter-kit/*"]
+      "Resource": ["arn:aws:secretsmanager:*:*:secret:GeuseMaker/*"]
     }
   ]
 }
@@ -185,11 +185,11 @@ All services log to CloudWatch:
 
 ```bash
 # View logs
-aws logs tail /aws/ai-starter-kit/my-stack --follow
+aws logs tail /aws/GeuseMaker/my-stack --follow
 
 # Search logs
 aws logs filter-log-events \
-  --log-group-name /aws/ai-starter-kit/my-stack \
+  --log-group-name /aws/GeuseMaker/my-stack \
   --filter-pattern "ERROR"
 ```
 
@@ -263,7 +263,7 @@ docker-compose up -d
 ```bash
 # Review security groups
 aws ec2 describe-security-groups \
-  --filters "Name=group-name,Values=*ai-starter-kit*"
+  --filters "Name=group-name,Values=*GeuseMaker*"
 
 # Update to restrict access
 terraform apply -var="allowed_cidr_blocks=[\"YOUR_IP/32\"]"

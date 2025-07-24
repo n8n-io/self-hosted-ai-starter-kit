@@ -1,11 +1,11 @@
 # Production Environment Configuration
-# AI Starter Kit - Production Settings
+# GeuseMaker - Production Settings
 
 global:
   environment: production
   region: us-east-1
-  stack_name: ai-starter-kit-prod
-  project_name: ai-starter-kit
+  stack_name: GeuseMaker-prod
+  project_name: GeuseMaker
 
 # Infrastructure Configuration
 infrastructure:

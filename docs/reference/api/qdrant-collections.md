@@ -2,7 +2,7 @@
 
 > Complete API documentation for Qdrant vector database service
 
-Qdrant is a high-performance vector database designed for similarity search and AI applications. This document covers all Qdrant API endpoints and integration patterns available in the AI Starter Kit.
+Qdrant is a high-performance vector database designed for similarity search and AI applications. This document covers all Qdrant API endpoints and integration patterns available in the GeuseMaker.
 
 ## 🌟 Service Overview
 
@@ -1140,4 +1140,4 @@ PUT /collections/{collection_name}/snapshots/upload
 
 **API Version:** Qdrant 1.7.x  
 **Last Updated:** January 2025  
-**Service Compatibility:** All AI Starter Kit deployments
+**Service Compatibility:** All GeuseMaker deployments

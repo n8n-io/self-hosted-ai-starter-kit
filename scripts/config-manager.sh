@@ -437,7 +437,7 @@ show_config() {
 # Display help
 show_help() {
     cat << EOF
-Configuration Manager for AI Starter Kit
+Configuration Manager for GeuseMaker
 
 USAGE:
     $0 <command> <environment>

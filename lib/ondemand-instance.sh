@@ -379,7 +379,7 @@ setup_cloudfront_distribution() {
     # Create distribution configuration
     local distribution_config='{
         "CallerReference": "'${stack_name}'-'$(date +%s)'",
-        "Comment": "CloudFront distribution for '${stack_name}' AI Starter Kit",
+        "Comment": "CloudFront distribution for '${stack_name}' GeuseMaker",
         "DefaultCacheBehavior": {
             "TargetOriginId": "'${stack_name}'-alb-origin",
             "ViewerProtocolPolicy": "redirect-to-https",

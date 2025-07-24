@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================================
-# Security Check Script for AI Starter Kit
+# Security Check Script for GeuseMaker
 # =============================================================================
 # Comprehensive security audit and validation for the AI starter kit
 # Run this before deployment to identify security issues
@@ -280,7 +280,7 @@ audit_dependencies() {
 # =============================================================================
 
 main() {
-    echo -e "${BLUE}=== AI Starter Kit Security Audit ===${NC}"
+    echo -e "${BLUE}=== GeuseMaker Security Audit ===${NC}"
     echo "Starting comprehensive security check..."
     echo
     

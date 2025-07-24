@@ -1,5 +1,5 @@
 # =============================================================================
-# AI Starter Kit Infrastructure as Code
+# GeuseMaker Infrastructure as Code
 # Terraform configuration for AWS deployment
 # =============================================================================
 
@@ -24,7 +24,7 @@ terraform {
   # Backend configuration (uncomment and configure for production)
   # backend "s3" {
   #   bucket         = "your-terraform-state-bucket"
-  #   key            = "ai-starter-kit/terraform.tfstate"
+  #   key            = "GeuseMaker/terraform.tfstate"
   #   region         = "us-east-1"
   #   encrypt        = true
   #   dynamodb_table = "terraform-lock-table"
@@ -40,7 +40,7 @@ provider "aws" {
   
   default_tags {
     tags = {
-      Project     = "ai-starter-kit"
+      Project     = "GeuseMaker"
       Environment = var.environment
       ManagedBy   = "terraform"
       Owner       = var.owner
@@ -121,7 +121,7 @@ data "aws_ami" "nvidia_optimized" {
 locals {
   # Common tags
   common_tags = {
-    Project     = "ai-starter-kit"
+    Project     = "GeuseMaker"
     Environment = var.environment
     Stack       = var.stack_name
     ManagedBy   = "terraform"
@@ -200,7 +200,7 @@ resource "local_file" "private_key" {
 
 resource "aws_security_group" "main" {
   name        = "${var.stack_name}-sg"
-  description = "Security group for ${var.stack_name} AI starter kit"
+  description = "Security group for ${var.stack_name} GeuseMaker"
   vpc_id      = local.vpc_id
   
   # SSH access
@@ -361,7 +361,7 @@ resource "aws_iam_instance_profile" "main" {
 # =============================================================================
 
 resource "aws_cloudwatch_log_group" "main" {
-  name              = "/aws/ai-starter-kit/${var.stack_name}"
+  name              = "/aws/GeuseMaker/${var.stack_name}"
   retention_in_days = var.log_retention_days
   
   tags = merge(local.common_tags, {

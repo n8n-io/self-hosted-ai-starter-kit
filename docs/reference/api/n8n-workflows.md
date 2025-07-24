@@ -2,7 +2,7 @@
 
 > Complete API documentation for n8n workflow automation service
 
-n8n is a powerful workflow automation tool that connects various services and APIs to create complex automation pipelines. This document covers all n8n API endpoints and integration patterns available in the AI Starter Kit.
+n8n is a powerful workflow automation tool that connects various services and APIs to create complex automation pipelines. This document covers all n8n API endpoints and integration patterns available in the GeuseMaker.
 
 ## 🌟 Service Overview
 
@@ -680,4 +680,4 @@ PATCH /api/v1/settings
 
 **API Version:** n8n 1.x  
 **Last Updated:** January 2025  
-**Service Compatibility:** All AI Starter Kit deployments
+**Service Compatibility:** All GeuseMaker deployments

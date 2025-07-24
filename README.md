@@ -1,4 +1,4 @@
-# AI Starter Kit
+# GeuseMaker
 
 > Enterprise-ready AI infrastructure platform with automated deployment, monitoring, and scaling capabilities.
 
@@ -13,7 +13,7 @@ Get your AI infrastructure running in 5 minutes:
 
 ```bash
 # Clone and setup
-git clone <repository-url> && cd ai-starter-kit
+git clone <repository-url> && cd GeuseMaker
 make setup
 
 # Deploy development environment
@@ -32,57 +32,57 @@ make deploy-simple STACK_NAME=my-dev-stack
 ### 🎯 **Getting Started**
 - [**Prerequisites & Setup**](docs/getting-started/prerequisites.md) - Required tools and configuration
 - [**Quick Start Guide**](docs/getting-started/quick-start.md) - 5-minute deployment walkthrough  
-- [**First Deployment**](docs/getting-started/first-deployment.md) - Complete deployment tutorial
+- [**Security Guide**](docs/security-guide.md) - Security implementation and best practices
 
 ### 📖 **User Guides**
-- [**Deployment Guide**](docs/guides/deployment/) - All deployment methods and options
-- [**Configuration Guide**](docs/guides/configuration/) - Service configuration and customization
-- [**Troubleshooting Guide**](docs/guides/troubleshooting/) - Common issues and solutions
+- [**Deployment Guide**](docs/reference/cli/deployment.md) - All deployment methods and options
+- [**Configuration Guide**](docs/reference/configuration/) - Service configuration and customization (directory structure)
+- [**Troubleshooting Guide**](docs/setup/troubleshooting.md) - Common issues and solutions
 
 ### 🔧 **Reference Documentation**
 - [**API Reference**](docs/reference/api/) - Complete API documentation for all services
 - [**CLI Reference**](docs/reference/cli/) - Command-line tools and scripts
-- [**Configuration Reference**](docs/reference/configuration/) - All configuration options
+- [**Configuration Reference**](docs/reference/cli/makefile.md) - Build and configuration commands
 
 ### 🏗️ **Architecture & Design**
-- [**System Architecture**](docs/architecture/overview.md) - Overall system design and components
-- [**Security Model**](docs/architecture/security.md) - Security design and best practices
-- [**Scaling Strategy**](docs/architecture/scaling.md) - Performance and scaling guidance
+- [**ALB CloudFront Setup**](docs/alb-cloudfront-setup.md) - Load balancer and CDN configuration
+- [**Security Guide**](docs/security-guide.md) - Security design and best practices
+- [**Docker Image Management**](docs/docker-image-management.md) - Container management strategies
 
 ### 💡 **Examples & Tutorials**
-- [**Basic Examples**](docs/examples/basic/) - Simple use cases and tutorials
-- [**Advanced Examples**](docs/examples/advanced/) - Complex AI pipelines and integrations
-- [**Integration Patterns**](docs/examples/integrations/) - Third-party service integrations
+- [**Basic Examples**](docs/examples/basic/) - Example directory for simple use cases
+- [**Advanced Examples**](docs/examples/advanced/) - Example directory for complex AI pipelines
+- [**Integration Patterns**](docs/examples/integrations/) - Example directory for third-party integrations
 
 ### ⚙️ **Operations**
-- [**Monitoring & Alerting**](docs/operations/monitoring.md) - System monitoring and observability
-- [**Backup & Recovery**](docs/operations/backup.md) - Data protection and disaster recovery
-- [**Cost Optimization**](docs/operations/cost-optimization.md) - Cost management strategies
+- [**Monitoring**](docs/reference/api/monitoring.md) - System monitoring and observability
+- [**Backup & Recovery**](docs/setup/troubleshooting.md) - Data protection and disaster recovery procedures
 
 ## 🌟 Core Features
 
 | Feature | Description | Documentation |
 |---------|-------------|---------------|
-| **Multi-Deployment** | Spot, On-demand, Simple deployment options | [Deployment Guide](docs/guides/deployment/) |
-| **Infrastructure as Code** | Terraform and shell script automation | [IaC Guide](docs/guides/deployment/terraform.md) |
+| **Multi-Deployment** | Spot, On-demand, Simple deployment options | [Deployment Guide](docs/reference/cli/deployment.md) |
+| **Infrastructure as Code** | Terraform and shell script automation | [Terraform Config](terraform/main.tf) |
 | **AI Services** | n8n, Ollama, Qdrant, Crawl4AI pre-configured | [API Reference](docs/reference/api/) |
-| **Monitoring Stack** | Prometheus, Grafana, AlertManager | [Monitoring Guide](docs/operations/monitoring.md) |
-| **Cost Optimization** | Intelligent instance selection and scaling | [Cost Guide](docs/operations/cost-optimization.md) |
-| **Security Hardening** | Input sanitization, encrypted storage, IAM, advanced health checks | [Security Model](docs/architecture/security.md) |
+| **Monitoring Stack** | Docker logging and health checks | [Monitoring Guide](docs/reference/api/monitoring.md) |
+| **Cost Optimization** | Intelligent instance selection and scaling | [Cost Scripts](scripts/cost-optimization.py) |
+| **Security Hardening** | Input sanitization, encrypted storage, IAM, advanced health checks | [Security Guide](docs/security-guide.md) |
 
 ## 🛠️ Available Commands
 
 | Command | Description |
 |---------|-------------|
-| `make setup` | Initialize development environment |
-| `make deploy STACK_NAME=name` | Deploy with intelligent instance selection |
-| `make deploy-spot STACK_NAME=name` | Deploy cost-optimized spot instances |
-| `make deploy-ondemand STACK_NAME=name` | Deploy reliable on-demand instances |
-| `make health-check STACK_NAME=name` | Run basic health check |
-| `make health-check-advanced STACK_NAME=name` | Run comprehensive health diagnostics |
-| `make test` | Run comprehensive test suite |
-| `make status STACK_NAME=name` | Check deployment status |
-| `make destroy STACK_NAME=name` | Clean up all resources |
+| `make setup` | Complete initial setup with security |
+| `make deploy STACK_NAME=name` | Deploy infrastructure (requires STACK_NAME) |
+| `make deploy-spot STACK_NAME=name` | Deploy with spot instances (requires STACK_NAME) |
+| `make deploy-ondemand STACK_NAME=name` | Deploy with on-demand instances (requires STACK_NAME) |
+| `make deploy-simple STACK_NAME=name` | Deploy simple development instance (requires STACK_NAME) |
+| `make health-check STACK_NAME=name` | Basic health check of services (requires STACK_NAME) |
+| `make health-check-advanced STACK_NAME=name` | Comprehensive health diagnostics (requires deployed instance) |
+| `make test` | Run all tests |
+| `make status STACK_NAME=name` | Check deployment status (requires STACK_NAME) |
+| `make destroy STACK_NAME=name` | Destroy infrastructure (requires STACK_NAME) |
 
 [**→ Complete CLI Reference**](docs/reference/cli/)
 
@@ -121,7 +121,7 @@ Production-ready with high availability:
 - Cost: ~$200-500/month
 - Setup time: 15 minutes
 
-[**→ Detailed Deployment Comparison**](docs/guides/deployment/comparison.md)
+[**→ Complete CLI Reference**](docs/reference/cli/)
 
 ## 🚨 Support & Community
 
@@ -132,7 +132,7 @@ Production-ready with high availability:
 4. **Ask Questions**: Create new issue with details
 
 ### Contributing
-We welcome contributions! See our [**Contributing Guide**](docs/contributing.md) for:
+We welcome contributions! See our documentation for:
 - Code contribution guidelines
 - Documentation improvements
 - Bug reporting procedures
@@ -154,10 +154,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 | Category | Links |
 |----------|--------|
-| **Start Here** | [Quick Start](docs/getting-started/quick-start.md) • [Prerequisites](docs/getting-started/prerequisites.md) • [First Deployment](docs/getting-started/first-deployment.md) |
-| **Deploy** | [Deployment Guide](docs/guides/deployment/) • [Terraform](docs/guides/deployment/terraform.md) • [Configuration](docs/guides/configuration/) |
+| **Start Here** | [Quick Start](docs/getting-started/quick-start.md) • [Prerequisites](docs/getting-started/prerequisites.md) • [Security Guide](docs/security-guide.md) |
+| **Deploy** | [Deployment Guide](docs/reference/cli/deployment.md) • [Terraform](terraform/main.tf) • [CLI Reference](docs/reference/cli/) |
 | **Use** | [API Reference](docs/reference/api/) • [Examples](docs/examples/) • [CLI Tools](docs/reference/cli/) |
-| **Operate** | [Monitoring](docs/operations/monitoring.md) • [Troubleshooting](docs/guides/troubleshooting/) • [Cost Optimization](docs/operations/cost-optimization.md) |
-| **Learn** | [Architecture](docs/architecture/) • [Security](docs/architecture/security.md) • [Scaling](docs/architecture/scaling.md) |
+| **Operate** | [Monitoring](docs/reference/api/monitoring.md) • [Troubleshooting](docs/setup/troubleshooting.md) • [ALB CloudFront](docs/alb-cloudfront-setup.md) |
+| **Learn** | [Docker Management](docs/docker-image-management.md) • [Security Guide](docs/security-guide.md) • [API Reference](docs/reference/api/) |
 
 **[📚 Complete Documentation Index](docs/README.md)**
