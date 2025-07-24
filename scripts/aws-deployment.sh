@@ -36,12 +36,11 @@ cleanup_on_failure() {
         
         # Get script directory
         local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-        local project_root="$(cd "$script_dir/.." && pwd)"
         
         # Use cleanup script if available
-        if [ -f "$project_root/cleanup-stack.sh" ]; then
+        if [ -f "$script_dir/cleanup-stack.sh" ]; then
             log "Using cleanup script to remove resources..."
-            "$project_root/cleanup-stack.sh" "$STACK_NAME" || true
+            "$script_dir/cleanup-stack.sh" "$STACK_NAME" || true
         else
             log "Running manual cleanup..."
             # Basic manual cleanup
@@ -1145,21 +1144,41 @@ launch_spot_instance() {
         
         # Create spot instance request
         log "Creating spot instance request in $AZ with max price \$$MAX_SPOT_PRICE/hour..."
+        # Prepare instance profile name
+        INSTANCE_PROFILE_NAME="$(if [[ "${STACK_NAME}" =~ ^[0-9] ]]; then echo "app-$(echo "${STACK_NAME}" | sed 's/[^a-zA-Z0-9]//g')-profile"; else echo "${STACK_NAME}-instance-profile"; fi)"
+        
+        # Validate security group ID format before using
+        if [[ ! "$SG_ID" =~ ^sg-[0-9a-fA-F]+$ ]]; then
+            warning "Invalid security group ID format: $SG_ID. Skipping $AZ."
+            continue
+        fi
+        
+        # Validate required parameters before spot instance request
+        if [[ -z "$SELECTED_AMI" || -z "$SELECTED_INSTANCE_TYPE" || -z "$KEY_NAME" || -z "$SUBNET_ID" || -z "$INSTANCE_PROFILE_NAME" ]]; then
+            warning "Missing required parameters for spot instance in $AZ. Skipping..."
+            continue
+        fi
+        
+        # Validate user data file exists
+        if [[ ! -f "user-data.sh" ]]; then
+            warning "User data file not found. Skipping $AZ."
+            continue
+        fi
+        
+        # Create spot instance request with individual parameters
+        info "Requesting spot instance in $AZ: $SELECTED_INSTANCE_TYPE at \$$MAX_SPOT_PRICE/hour"
+        
         REQUEST_RESULT=$(aws ec2 request-spot-instances \
             --spot-price "$MAX_SPOT_PRICE" \
             --instance-count 1 \
             --type "one-time" \
-            --launch-specification "{
-                \"ImageId\": \"$SELECTED_AMI\",
-                \"InstanceType\": \"$SELECTED_INSTANCE_TYPE\",
-                \"KeyName\": \"$KEY_NAME\",
-                \"SecurityGroupIds\": [\"$SG_ID\"],
-                \"SubnetId\": \"$SUBNET_ID\",
-                \"IamInstanceProfile\": {
-                    \"Name\": \"$(if [[ "${STACK_NAME}" =~ ^[0-9] ]]; then echo "app-$(echo "${STACK_NAME}" | sed 's/[^a-zA-Z0-9]//g')-profile"; else echo "${STACK_NAME}-instance-profile"; fi)\"
-                },
-                \"UserData\": \"$(if [[ "$OSTYPE" == "darwin"* ]]; then base64 -i user-data.sh | tr -d '\n'; else base64 -w 0 user-data.sh; fi)\"
-            }" \
+            --image-id "$SELECTED_AMI" \
+            --instance-type "$SELECTED_INSTANCE_TYPE" \
+            --key-name "$KEY_NAME" \
+            --security-group-ids "$SG_ID" \
+            --subnet-id "$SUBNET_ID" \
+            --user-data "file://user-data.sh" \
+            --iam-instance-profile Name="$INSTANCE_PROFILE_NAME" \
             --region "$AWS_REGION" 2>&1) || {
             warning "Failed to create spot instance request in $AZ: $REQUEST_RESULT"
             continue
@@ -1168,9 +1187,11 @@ launch_spot_instance() {
         REQUEST_ID=$(echo "$REQUEST_RESULT" | jq -r '.SpotInstanceRequests[0].SpotInstanceRequestId' 2>/dev/null || echo "")
         
         if [[ -z "$REQUEST_ID" || "$REQUEST_ID" == "None" || "$REQUEST_ID" == "null" ]]; then
-            warning "Invalid spot instance request ID in $AZ, trying next AZ..."
+            warning "Failed to extract spot request ID from response in $AZ"
             continue
         fi
+        
+        success "Created spot instance request $REQUEST_ID in $AZ"
         
         info "Spot instance request ID: $REQUEST_ID in $AZ"
         
@@ -1423,6 +1444,15 @@ display_results() {
 cleanup_on_error() {
     error "Deployment failed. Cleaning up resources..."
     
+    # Use comprehensive cleanup script if available
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if [ -f "$script_dir/cleanup-stack.sh" ] && [ -n "${STACK_NAME:-}" ]; then
+        log "Running comprehensive cleanup for stack: $STACK_NAME"
+        "$script_dir/cleanup-stack.sh" "$STACK_NAME" || true
+        return
+    fi
+    
+    # Fallback to manual cleanup if no stack name or cleanup script
     # Terminate instance first
     if [ ! -z "${INSTANCE_ID:-}" ]; then
         log "Terminating instance $INSTANCE_ID..."
@@ -1479,100 +1509,108 @@ create_key_pair() {
 create_security_group() {
     log "Creating security group..."
     
-    # Check if security group exists
-    SG_ID=$(aws ec2 describe-security-groups \
-        --group-names "${STACK_NAME}-sg" \
-        --region "$AWS_REGION" \
-        --query 'SecurityGroups[0].GroupId' \
-        --output text 2>/dev/null || echo "None")
-    
-    if [[ "$SG_ID" != "None" ]]; then
-        warning "Security group already exists: $SG_ID"
-        echo "$SG_ID"
-        return 0
-    fi
-    
-    # Get VPC ID
+    # Get VPC ID first
     VPC_ID=$(aws ec2 describe-vpcs \
         --filters "Name=is-default,Values=true" \
         --region "$AWS_REGION" \
         --query 'Vpcs[0].VpcId' \
         --output text)
     
-    # Create security group
-    SG_ID=$(aws ec2 create-security-group \
-        --group-name "${STACK_NAME}-sg" \
-        --description "Security group for GeuseMaker Intelligent Deployment" \
-        --vpc-id "$VPC_ID" \
+    if [[ -z "$VPC_ID" || "$VPC_ID" == "None" ]]; then
+        log "[ERROR] Failed to retrieve default VPC ID."
+        exit 1
+    fi
+    
+    # Check if security group exists
+    SG_ID=$(aws ec2 describe-security-groups \
+        --group-names "${STACK_NAME}-sg" \
         --region "$AWS_REGION" \
-        --query 'GroupId' \
-        --output text)
+        --query 'SecurityGroups[0].GroupId' \
+        --output text 2>/dev/null | grep -oE 'sg-[0-9a-fA-F]+' | head -n1)
     
-    # Add rules
-    aws ec2 authorize-security-group-ingress \
-        --group-id "$SG_ID" \
-        --protocol tcp \
-        --port 22 \
-        --cidr 0.0.0.0/0 \
-        --region "$AWS_REGION"
+    if [[ -z "$SG_ID" ]]; then
+        # Create security group
+        SG_ID=$(aws ec2 create-security-group \
+            --group-name "${STACK_NAME}-sg" \
+            --description "Security group for GeuseMaker Intelligent Deployment" \
+            --vpc-id "$VPC_ID" \
+            --region "$AWS_REGION" \
+            --query 'GroupId' \
+            --output text)
+        if [[ -z "$SG_ID" ]]; then
+            log "[ERROR] Failed to create security group."
+            exit 1
+        fi
+    fi
     
-    # n8n
-    aws ec2 authorize-security-group-ingress \
-        --group-id "$SG_ID" \
-        --protocol tcp \
-        --port 5678 \
-        --cidr 0.0.0.0/0 \
-        --region "$AWS_REGION"
+    # Validate SG_ID format
+    if [[ ! "$SG_ID" =~ ^sg-[0-9a-fA-F]+$ ]]; then
+        log "[ERROR] Invalid security group ID: $SG_ID"
+        exit 1
+    fi
     
-    # Ollama
-    aws ec2 authorize-security-group-ingress \
-        --group-id "$SG_ID" \
-        --protocol tcp \
-        --port 11434 \
-        --cidr 0.0.0.0/0 \
-        --region "$AWS_REGION"
+    # Add security group rules with duplicate protection
+    add_sg_rule_if_not_exists() {
+        local sg_id="$1"
+        local protocol="$2"
+        local port="$3"
+        local source_type="$4"
+        local source_value="$5"
+        
+        # Check if rule already exists
+        local existing_rule
+        if [[ "$source_type" == "cidr" ]]; then
+            existing_rule=$(aws ec2 describe-security-groups \
+                --group-ids "$sg_id" \
+                --region "$AWS_REGION" \
+                --query "SecurityGroups[0].IpPermissions[?IpProtocol=='$protocol' && FromPort==$port && ToPort==$port && IpRanges[?CidrIp=='$source_value']]" \
+                --output text 2>/dev/null)
+        else
+            existing_rule=$(aws ec2 describe-security-groups \
+                --group-ids "$sg_id" \
+                --region "$AWS_REGION" \
+                --query "SecurityGroups[0].IpPermissions[?IpProtocol=='$protocol' && FromPort==$port && ToPort==$port && UserIdGroupPairs[?GroupId=='$source_value']]" \
+                --output text 2>/dev/null)
+        fi
+        
+        if [[ -z "$existing_rule" ]]; then
+            log "Adding security group rule for port $port ($protocol)"
+            if [[ "$source_type" == "cidr" ]]; then
+                if ! aws ec2 authorize-security-group-ingress \
+                    --group-id "$sg_id" \
+                    --protocol "$protocol" \
+                    --port "$port" \
+                    --cidr "$source_value" \
+                    --region "$AWS_REGION" >/dev/null 2>&1; then
+                    log "[WARNING] Failed to add rule for port $port (may already exist)"
+                fi
+            else
+                if ! aws ec2 authorize-security-group-ingress \
+                    --group-id "$sg_id" \
+                    --protocol "$protocol" \
+                    --port "$port" \
+                    --source-group "$source_value" \
+                    --region "$AWS_REGION" >/dev/null 2>&1; then
+                    log "[WARNING] Failed to add rule for port $port (may already exist)"
+                fi
+            fi
+        else
+            log "Security group rule for port $port already exists, skipping"
+        fi
+    }
     
-    # Crawl4AI
-    aws ec2 authorize-security-group-ingress \
-        --group-id "$SG_ID" \
-        --protocol tcp \
-        --port 11235 \
-        --cidr 0.0.0.0/0 \
-        --region "$AWS_REGION"
-    
-    # Qdrant
-    aws ec2 authorize-security-group-ingress \
-        --group-id "$SG_ID" \
-        --protocol tcp \
-        --port 6333 \
-        --cidr 0.0.0.0/0 \
-        --region "$AWS_REGION"
-    
-    # ALB ports
-    aws ec2 authorize-security-group-ingress \
-        --group-id "$SG_ID" \
-        --protocol tcp \
-        --port 80 \
-        --cidr 0.0.0.0/0 \
-        --region "$AWS_REGION"
-    
-    aws ec2 authorize-security-group-ingress \
-        --group-id "$SG_ID" \
-        --protocol tcp \
-        --port 443 \
-        --cidr 0.0.0.0/0 \
-        --region "$AWS_REGION"
-    
-    # NFS for EFS
-    aws ec2 authorize-security-group-ingress \
-        --group-id "$SG_ID" \
-        --protocol tcp \
-        --port 2049 \
-        --source-group "$SG_ID" \
-        --region "$AWS_REGION"
+    # Add all required rules
+    add_sg_rule_if_not_exists "$SG_ID" "tcp" "22" "cidr" "0.0.0.0/0"      # SSH
+    add_sg_rule_if_not_exists "$SG_ID" "tcp" "5678" "cidr" "0.0.0.0/0"    # n8n
+    add_sg_rule_if_not_exists "$SG_ID" "tcp" "11434" "cidr" "0.0.0.0/0"   # Ollama
+    add_sg_rule_if_not_exists "$SG_ID" "tcp" "11235" "cidr" "0.0.0.0/0"   # Crawl4AI
+    add_sg_rule_if_not_exists "$SG_ID" "tcp" "6333" "cidr" "0.0.0.0/0"    # Qdrant
+    add_sg_rule_if_not_exists "$SG_ID" "tcp" "80" "cidr" "0.0.0.0/0"      # HTTP
+    add_sg_rule_if_not_exists "$SG_ID" "tcp" "443" "cidr" "0.0.0.0/0"     # HTTPS
+    add_sg_rule_if_not_exists "$SG_ID" "tcp" "2049" "group" "$SG_ID"      # NFS for EFS
     
     success "Created security group: $SG_ID"
-    echo "$SG_ID"
+    echo "$SG_ID" | tr -d '\n\r\t '
 }
 
 create_iam_role() {
