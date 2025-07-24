@@ -17,7 +17,7 @@ export AWS_REGION="${AWS_REGION:-us-east-1}"
 
 log() { echo -e "\033[0;34m[$(date +'%Y-%m-%d %H:%M:%S')] $1\033[0m" >&2; }
 error() { echo -e "\033[0;31m[ERROR] $1\033[0m" >&2; }
-success() { echo -e "\033[0;32m[SUCCESS] $1\033[0m" >&2; }
+success() { echo -e "\033[0;32m✅ [SUCCESS] $1\033[0m" >&2; }
 warning() { echo -e "\033[0;33m[WARNING] $1\033[0m" >&2; }
 
 echo "=============================================="

@@ -85,7 +85,7 @@ error() {
 }
 
 success() {
-    echo -e "${GREEN}[SUCCESS] $1${NC}" >&2
+    echo -e "${GREEN}✅ [SUCCESS] $1${NC}" >&2
 }
 
 warning() {

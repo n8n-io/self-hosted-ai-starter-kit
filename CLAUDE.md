@@ -144,9 +144,16 @@ tail -f /var/log/cost-optimization.log
 make health-check STACK_NAME=my-stack
 make health-check-advanced STACK_NAME=my-stack
 
-# Run pytest-based test suites
-make test-unit              # Python unit tests
-make test-integration       # Python integration tests
+# Comprehensive test runner with multiple categories
+./tools/test-runner.sh                    # Run all test categories
+./tools/test-runner.sh unit integration   # Run specific test categories
+./tools/test-runner.sh --report           # Generate HTML test report
+./tools/test-runner.sh --coverage unit    # Run with coverage reports
+
+# Individual test categories via Make
+make test                   # Run all tests via test-runner.sh
+make test-unit              # Python unit tests with pytest
+make test-integration       # Python integration tests with pytest  
 make test-security          # Security validation tests
 
 # Docker and configuration testing
@@ -158,13 +165,28 @@ make test-security          # Security validation tests
 ## Architecture Patterns
 
 ### Shared Library Architecture
-The project uses a modular architecture with shared libraries in `/lib/`:
+The project uses a modular architecture with shared libraries in `/lib/` that provide consistent functionality across all deployment scripts:
 
-- **aws-deployment-common.sh**: Common AWS operations, logging, and error handling
+- **aws-deployment-common.sh**: Core shared functions including:
+  - Colored logging functions (`log`, `error`, `success`, `warning`, `info`)
+  - AWS prerequisite checking (`check_common_prerequisites`)
+  - Common AWS operations and utilities
+  - Progress tracking for deployment steps
 - **spot-instance.sh**: Spot instance management and pricing optimization
-- **aws-config.sh**: Configuration defaults and environment management
+- **aws-config.sh**: Configuration defaults and environment management  
 - **error-handling.sh**: Centralized error handling and cleanup functions
-- Deployment scripts source these libraries for consistent behavior across all deployment types
+- **ondemand-instance.sh**: On-demand instance specific operations
+- **simple-instance.sh**: Simple deployment specific functions
+
+**Usage Pattern:** All deployment scripts source these libraries for consistent behavior:
+```bash
+# Standard sourcing pattern in deployment scripts
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+source "$PROJECT_ROOT/lib/aws-deployment-common.sh"
+source "$PROJECT_ROOT/lib/error-handling.sh"
+```
 
 ### Unified Deployment Strategy
 The `aws-deployment-unified.sh` script serves as the main orchestrator supporting multiple deployment types:
@@ -180,6 +202,16 @@ Test deployment logic without AWS costs using validation scripts:
 - **Python Test Framework**: pytest-based unit and integration tests in `/tests/`
 - **Configuration Testing**: Docker and image validation scripts
 - **Security Testing**: Automated security validation with `/tests/unit/test_security_validation.py`
+
+### Development Workflow
+The recommended development workflow follows this pattern:
+1. **Setup**: `make setup` - Initialize environment with security configurations
+2. **Development**: Edit code and configurations
+3. **Testing**: `make test` - Run comprehensive test suite before deployment
+4. **Validation**: `./scripts/simple-demo.sh` - Test deployment logic without AWS costs
+5. **Deployment**: `make deploy-simple STACK_NAME=test` - Deploy to development environment
+6. **Verification**: `make health-check STACK_NAME=test` - Validate deployment health
+7. **Cleanup**: `make destroy STACK_NAME=test` - Clean up test resources
 
 ### Terraform Infrastructure as Code
 Alternative to shell scripts for infrastructure management:
@@ -402,11 +434,26 @@ aws ec2 describe-instances --filters "Name=instance-state-name,Values=running"
 
 ## Testing Framework
 
-### Python Test Suite
-The project uses pytest for comprehensive testing:
+### Comprehensive Test Framework
+The project uses a sophisticated test runner (`./tools/test-runner.sh`) that supports multiple test categories:
+
+**Test Categories Available:**
+- **unit**: Unit tests for individual functions using pytest
+- **integration**: Integration tests for component interaction
+- **security**: Security vulnerability scans (bandit, safety, trivy)
+- **performance**: Performance benchmarks and analysis
+- **deployment**: Deployment script validation and Terraform checks
+- **smoke**: Basic smoke tests for quick validation
 
 ```bash
-# Run specific test categories
+# Comprehensive test runner commands
+./tools/test-runner.sh                          # Run all test categories
+./tools/test-runner.sh unit security            # Run specific categories
+./tools/test-runner.sh --report                 # Generate HTML report
+./tools/test-runner.sh --coverage unit          # Run with coverage
+./tools/test-runner.sh --environment staging    # Set test environment
+
+# Direct pytest usage (if needed)
 pytest tests/unit/ -v                    # Unit tests
 pytest tests/integration/ -v             # Integration tests
 pytest tests/unit/test_security_validation.py -v  # Security tests
@@ -417,6 +464,12 @@ pytest tests/integration/test_deployment_workflow.py -v
 # Generate test coverage reports
 pytest --cov=scripts --cov-report=html tests/
 ```
+
+**Test Reports Location:** All test reports are generated in `./test-reports/` directory including:
+- `test-summary.html` - Comprehensive HTML report
+- `test-results.json` - Machine-readable results
+- `coverage/` - Code coverage reports
+- Security scan results and performance benchmarks
 
 ### Shell Script Testing
 Validation scripts for infrastructure and configuration:

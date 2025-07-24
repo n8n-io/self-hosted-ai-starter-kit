@@ -16,7 +16,7 @@ NC='\033[0m'
 
 log() { echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}" >&2; }
 error() { echo -e "${RED}[ERROR] $1${NC}" >&2; }
-success() { echo -e "${GREEN}[SUCCESS] $1${NC}" >&2; }
+success() { echo -e "${GREEN}✅ [SUCCESS] $1${NC}" >&2; }
 warning() { echo -e "${YELLOW}[WARNING] $1${NC}" >&2; }
 
 # =============================================================================

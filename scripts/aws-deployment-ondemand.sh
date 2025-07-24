@@ -86,7 +86,7 @@ error() {
 }
 
 success() {
-    echo -e "${GREEN}[SUCCESS] $1${NC}" >&2
+    echo -e "${GREEN}✅ [SUCCESS] $1${NC}" >&2
 }
 
 warning() {
@@ -639,7 +639,7 @@ EOF
     # Create role
     aws iam create-role \
         --role-name "${STACK_NAME}-role" \
-        --assume-role-policy-document file://trust-policy.json || {
+        --assume-role-policy-document file://trust-policy.json > /dev/null || {
         warning "Role ${STACK_NAME}-role may already exist, continuing..."
     }
     
@@ -680,7 +680,7 @@ EOF
 
     aws iam create-policy \
         --policy-name "${STACK_NAME}-custom-policy" \
-        --policy-document file://custom-policy.json || true
+        --policy-document file://custom-policy.json > /dev/null || true
     
     aws iam attach-role-policy \
         --role-name "${STACK_NAME}-role" \
@@ -697,7 +697,7 @@ EOF
         profile_name="${STACK_NAME}-instance-profile"
     fi
     
-    aws iam create-instance-profile --instance-profile-name "$profile_name" || true
+    aws iam create-instance-profile --instance-profile-name "$profile_name" > /dev/null || true
     aws iam add-role-to-instance-profile \
         --instance-profile-name "$profile_name" \
         --role-name "${STACK_NAME}-role" || true
@@ -937,7 +937,7 @@ create_alb() {
         --name "${STACK_NAME}-alb" \
         --type application \
         --scheme internet-facing \
-        --subnets $SUBNET_IDS \
+        --subnets "$SUBNET_IDS" \
         --security-groups "$SG_ID" \
         --region "$AWS_REGION" \
         --query 'LoadBalancers[0].LoadBalancerArn' \

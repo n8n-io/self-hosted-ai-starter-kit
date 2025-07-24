@@ -79,6 +79,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
 PURPLE='\033[0;35m'
+MAGENTA='\033[0;35m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
@@ -155,19 +156,27 @@ log() {
 }
 
 error() {
-    echo -e "${RED}[ERROR] $1${NC}" >&2
+    echo -e "${RED}❌ [ERROR] $1${NC}" >&2
 }
 
 success() {
-    echo -e "${GREEN}[SUCCESS] $1${NC}" >&2
+    echo -e "${GREEN}✅ [SUCCESS] $1${NC}" >&2
 }
 
 warning() {
-    echo -e "${YELLOW}[WARNING] $1${NC}" >&2
+    echo -e "${YELLOW}⚠️  [WARNING] $1${NC}" >&2
 }
 
 info() {
-    echo -e "${CYAN}[INFO] $1${NC}" >&2
+    echo -e "${CYAN}ℹ️  [INFO] $1${NC}" >&2
+}
+
+step() {
+    echo -e "${MAGENTA}🔸 [STEP] $1${NC}" >&2
+}
+
+progress() {
+    echo -e "${BLUE}⏳ [PROGRESS] $1${NC}" >&2
 }
 
 check_prerequisites() {
@@ -358,22 +367,22 @@ get_comprehensive_spot_pricing() {
     local instance_types="$1"
     local region="$2"
     
-    log "Analyzing comprehensive spot pricing across all configurations..."
+    log "Analyzing comprehensive spot pricing across all configurations..." >&2
     
     # Create temporary file for pricing data
     local pricing_file=$(mktemp)
     echo "[]" > "$pricing_file"
     
     for instance_type in $instance_types; do
-        info "Fetching spot prices for $instance_type..."
+        info "Fetching spot prices for $instance_type..." >&2
         
-        # Get recent spot price history with better error handling
+        # Get recent spot price history with simplified, reliable query
         SPOT_DATA=$(aws ec2 describe-spot-price-history \
             --instance-types "$instance_type" \
             --product-descriptions "Linux/UNIX" \
-            --max-items 50 \
+            --max-items 20 \
             --region "$region" \
-            --query 'SpotPrices | sort_by(@, &Timestamp) | reverse(@) | [*] | group_by(@, &AvailabilityZone) | map({instance_type: `'"$instance_type"'`, az: .[0].AvailabilityZone, price: .[0].SpotPrice, timestamp: .[0].Timestamp})' \
+            --query 'SpotPriceHistory[*].{instance_type: InstanceType, az: AvailabilityZone, price: SpotPrice, timestamp: Timestamp}' \
             --output json 2>/dev/null || echo "[]")
         
         if [[ "$SPOT_DATA" != "[]" && -n "$SPOT_DATA" && "$SPOT_DATA" != "null" ]]; then
@@ -382,42 +391,43 @@ get_comprehensive_spot_pricing() {
                 jq -s '.[0] + .[1]' "$pricing_file" <(echo "$SPOT_DATA") > "${pricing_file}.tmp"
                 mv "${pricing_file}.tmp" "$pricing_file"
             else
-                warning "Invalid JSON response for $instance_type pricing data"
+                warning "Invalid JSON response for $instance_type pricing data" >&2
             fi
         else
-            warning "No spot pricing data available for $instance_type in $region"
-            # Add fallback pricing based on typical market rates
-            case "$instance_type" in
-                "g4dn.xlarge")
-                    FALLBACK_PRICE="0.45"
-                    ;;
-                "g4dn.2xlarge")
-                    FALLBACK_PRICE="0.89"
-                    ;;
-                "g5g.xlarge")
-                    FALLBACK_PRICE="0.38"
-                    ;;
-                "g5g.2xlarge")
-                    FALLBACK_PRICE="0.75"
-                    ;;
-                *)
-                    FALLBACK_PRICE="1.00"
-                    ;;
-            esac
-            
-            warning "Using fallback pricing estimate: \$$FALLBACK_PRICE/hour for $instance_type"
-            FALLBACK_DATA=$(jq -n --arg instance_type "$instance_type" --arg price "$FALLBACK_PRICE" --arg az "${region}a" \
-                '[{instance_type: $instance_type, az: $az, price: $price, timestamp: (now | strftime("%Y-%m-%dT%H:%M:%S.000Z"))}]')
-            
-            jq -s '.[0] + .[1]' "$pricing_file" <(echo "$FALLBACK_DATA") > "${pricing_file}.tmp"
-            mv "${pricing_file}.tmp" "$pricing_file"
+            warning "No spot pricing data available for $instance_type in $region" >&2
+            # COMMENTED OUT: Fallback logic that creates unreliable mock data
+            # # Add fallback pricing based on typical market rates
+            # case "$instance_type" in
+            #     "g4dn.xlarge")
+            #         FALLBACK_PRICE="0.45"
+            #         ;;
+            #     "g4dn.2xlarge")
+            #         FALLBACK_PRICE="0.89"
+            #         ;;
+            #     "g5g.xlarge")
+            #         FALLBACK_PRICE="0.38"
+            #         ;;
+            #     "g5g.2xlarge")
+            #         FALLBACK_PRICE="0.75"
+            #         ;;
+            #     *)
+            #         FALLBACK_PRICE="1.00"
+            #         ;;
+            # esac
+            # 
+            # warning "Using fallback pricing estimate: \$$FALLBACK_PRICE/hour for $instance_type"
+            # FALLBACK_DATA=$(jq -n --arg instance_type "$instance_type" --arg price "$FALLBACK_PRICE" --arg az "${region}a" \
+            #     '[{instance_type: $instance_type, az: $az, price: $price, timestamp: (now | strftime("%Y-%m-%dT%H:%M:%S.000Z"))}]')
+            # 
+            # jq -s '.[0] + .[1]' "$pricing_file" <(echo "$FALLBACK_DATA") > "${pricing_file}.tmp"
+            # mv "${pricing_file}.tmp" "$pricing_file"
         fi
     done
     
     # Validate final pricing data
     local final_data=$(cat "$pricing_file")
     if [[ "$final_data" == "[]" || -z "$final_data" ]]; then
-        error "No pricing data could be obtained for any instance type"
+        error "No pricing data could be obtained for any instance type" >&2
         rm -f "$pricing_file"
         return 1
     fi
@@ -527,6 +537,120 @@ analyze_cost_performance_matrix() {
     rm -f "$analysis_file"
 }
 
+# Function to determine dynamic budget based on actual spot pricing
+determine_dynamic_budget() {
+    local enable_cross_region="${1:-false}"
+    local base_budget="${2:-2.00}"
+    
+    info "Determining dynamic budget based on current spot pricing..."
+    
+    # Define regions to check
+    local regions_to_check=("$AWS_REGION")
+    if [[ "$enable_cross_region" == "true" ]]; then
+        regions_to_check=("us-east-1" "us-west-2" "eu-west-1")
+    fi
+    
+    # Collect all available pricing data
+    local all_prices=()
+    local pricing_available=false
+    
+    for region in "${regions_to_check[@]}"; do
+        # Check common GPU instance types
+        local instance_types="g4dn.xlarge g4dn.2xlarge g5g.xlarge g5g.2xlarge"
+        
+        for instance_type in $instance_types; do
+            local price_data=$(aws ec2 describe-spot-price-history \
+                --instance-types "$instance_type" \
+                --product-descriptions "Linux/UNIX" \
+                --max-items 10 \
+                --region "$region" \
+                --query 'SpotPriceHistory[0].SpotPrice' \
+                --output text 2>/dev/null || echo "")
+            
+            if [[ -n "$price_data" && "$price_data" != "None" && "$price_data" != "null" ]]; then
+                all_prices+=($price_data)
+                pricing_available=true
+            fi
+        done
+    done
+    
+    if [[ "$pricing_available" == "true" && ${#all_prices[@]} -gt 0 ]]; then
+        # Calculate dynamic budget: 120% of current median price
+        local sorted_prices=($(printf '%s\n' "${all_prices[@]}" | sort -n))
+        local median_index=$(( ${#sorted_prices[@]} / 2 ))
+        local median_price="${sorted_prices[$median_index]}"
+        local dynamic_budget=$(echo "scale=2; $median_price * 1.2" | bc -l)
+        
+        info "Current pricing analysis:"
+        info "  • Found ${#all_prices[@]} active spot prices"
+        info "  • Median price: \$${median_price}/hour"
+        info "  • Suggested dynamic budget: \$${dynamic_budget}/hour"
+        
+        # Use the higher of base budget or dynamic budget
+        local final_budget=$(echo "if ($dynamic_budget > $base_budget) $dynamic_budget else $base_budget" | bc -l)
+        echo "$final_budget"
+    else
+        warning "No spot pricing data available for budget calculation"
+        return 1
+    fi
+}
+
+# Function to handle missing pricing data with user interaction
+handle_no_pricing_data() {
+    local enable_cross_region="${1:-false}"
+    local base_budget="${2:-2.00}"
+    
+    error "No spot pricing data could be obtained for any instance type"
+    echo ""
+    warning "This could be due to:"
+    warning "  • Temporary AWS API issues"
+    warning "  • Regional availability constraints" 
+    warning "  • Account/permission limitations"
+    echo ""
+    
+    if [[ "${FORCE_YES:-false}" == "true" ]]; then
+        warning "FORCE_YES enabled - proceeding with base budget \$${base_budget}/hour"
+        return 0
+    fi
+    
+    echo -e "${YELLOW}Would you like to proceed anyway? Options:${NC}"
+    echo "  1) Continue with base budget (\$${base_budget}/hour)"
+    echo "  2) Set custom budget limit"
+    echo "  3) Cancel deployment"
+    echo ""
+    
+    while true; do
+        echo -n "Choose option [1-3]: "
+        read choice
+        case $choice in
+            1)
+                info "Proceeding with base budget: \$${base_budget}/hour"
+                return 0
+                ;;
+            2)
+                while true; do
+                    echo -n "Enter custom budget (e.g., 3.50): \$"
+                    read custom_budget
+                    if [[ "$custom_budget" =~ ^[0-9]+\.?[0-9]*$ ]] && (( $(echo "$custom_budget > 0" | bc -l) )); then
+                        MAX_SPOT_PRICE="$custom_budget"
+                        info "Custom budget set to: \$${custom_budget}/hour"
+                        return 0
+                    else
+                        error "Please enter a valid positive number"
+                    fi
+                done
+                ;;
+            3)
+                info "Deployment cancelled by user"
+                exit 0
+                ;;
+            *)
+                error "Please choose 1, 2, or 3"
+                ;;
+        esac
+    done
+}
+
 select_optimal_configuration() {
     local max_budget="$1"
     local enable_cross_region="${2:-false}"
@@ -540,7 +664,7 @@ select_optimal_configuration() {
     if [[ "$enable_cross_region" == "true" ]]; then
         # Add popular regions with good GPU availability
         regions_to_check=("us-east-1" "us-west-2" "eu-west-1" "ap-southeast-1" "us-east-2" "eu-central-1")
-        info "Cross-region analysis enabled - checking regions: ${regions_to_check[*]}"
+        step "Cross-region analysis enabled - checking regions: ${regions_to_check[*]}"
     fi
     
     local all_valid_configs=()
@@ -553,7 +677,7 @@ select_optimal_configuration() {
         log "Analyzing region: $region"
         
         # Step 1: Check availability of all instance types in this region
-        info "Step 1: Checking instance type availability in $region..."
+        progress "Step 1: Checking instance type availability in $region..."
         local available_types=""
         for instance_type in $(get_instance_type_list); do
             if check_instance_type_availability "$instance_type" "$region" >/dev/null 2>&1; then
@@ -569,7 +693,7 @@ select_optimal_configuration() {
         info "Available instance types in $region:$available_types"
         
         # Step 2: Check AMI availability for each configuration in this region
-        info "Step 2: Verifying AMI availability for each configuration in $region..."
+        progress "Step 2: Verifying AMI availability for each configuration in $region..."
         local valid_configs=()
         
         for instance_type in $available_types; do
@@ -772,6 +896,57 @@ select_optimal_configuration() {
                 info "Cheapest option found: \$$cheapest_price/hour in $cheapest_found"
                 info "Suggested budget: \$$(echo "scale=2; $cheapest_price * 1.2" | bc -l)/hour"
             fi
+        fi
+        
+        # Always show comprehensive analysis when cross-region is enabled
+        if [[ "$enable_cross_region" == "true" ]]; then
+            echo ""
+            echo -e "${CYAN}═══════════════════════════════════════════════════════════════════════════════════${NC}"
+            echo -e "${YELLOW}🌍 COMPREHENSIVE CROSS-REGION ANALYSIS${NC}"
+            echo -e "${CYAN}═══════════════════════════════════════════════════════════════════════════════════${NC}"
+            
+            printf "${CYAN}│ %-15s │ %-11s │ %-8s │ %-10s │ %-11s │ %-15s │${NC}\n" \
+                "Region" "Instance" "Price" "Perf" "Arch" "Status"
+            echo -e "${CYAN}├─────────────────┼─────────────┼──────────┼────────────┼─────────────┼─────────────────┤${NC}"
+            
+            for region in "${regions_to_check[@]}"; do
+                # Check if region has data
+                local sample_inst="g4dn.xlarge"
+                local region_pricing=$(get_comprehensive_spot_pricing "$sample_inst" "$region" 2>/dev/null || echo "[]")
+                if [[ "$region_pricing" != "[]" ]]; then
+                    local region_analysis=$(analyze_cost_performance_matrix "$region_pricing" 2>/dev/null || echo "[]")
+                    if [[ "$region_analysis" != "[]" ]]; then
+                        local region_best=$(echo "$region_analysis" | jq -r --arg budget "$max_budget" '
+                            [.[] | select(.avg_spot_price <= ($budget | tonumber))] | 
+                            if length > 0 then 
+                                sort_by(-.price_performance_ratio)[0] | 
+                                "\(.instance_type)|\(.avg_spot_price)|\(.performance_score)|\(.cpu_architecture)"
+                            else 
+                                # Show cheapest even if over budget
+                                sort_by(.avg_spot_price)[0] | 
+                                "\(.instance_type)|\(.avg_spot_price)|\(.performance_score)|\(.cpu_architecture)"
+                            end')
+                        
+                        IFS='|' read -r r_inst r_price r_perf r_arch <<< "$region_best"
+                        local availability="✓ Available"
+                        if (( $(echo "$r_price > $max_budget" | bc -l 2>/dev/null || echo "0") )); then
+                            availability="💰 Over budget"
+                        fi
+                        
+                        printf "${CYAN}│ %-15s │ %-11s │ %-8s │ %-10s │ %-11s │ %-15s │${NC}\n" \
+                            "$region" "$r_inst" "\$${r_price}" "$r_perf" "$r_arch" "$availability"
+                    else
+                        printf "${CYAN}│ %-15s │ %-11s │ %-8s │ %-10s │ %-11s │ %-15s │${NC}\n" \
+                            "$region" "N/A" "N/A" "N/A" "N/A" "❌ No analysis"
+                    fi
+                else
+                    printf "${CYAN}│ %-15s │ %-11s │ %-8s │ %-10s │ %-11s │ %-15s │${NC}\n" \
+                        "$region" "N/A" "N/A" "N/A" "N/A" "❌ No pricing"
+                fi
+            done
+            
+            echo -e "${CYAN}└─────────────────┴─────────────┴──────────┴────────────┴─────────────┴─────────────────┘${NC}"
+            echo ""
         fi
         
         return 1
@@ -1003,24 +1178,52 @@ launch_spot_instance() {
     
     log "🚀 Launching GPU spot instance with intelligent configuration selection..."
     
-    # Step 1: Run intelligent configuration selection
+    # Step 1: Try to determine dynamic budget based on current pricing
+    local final_budget="$MAX_SPOT_PRICE"
+    if [[ "$INSTANCE_TYPE" == "auto" ]]; then
+        info "Attempting to determine dynamic budget from current spot pricing..."
+        
+        if dynamic_budget=$(determine_dynamic_budget "$enable_cross_region" "$MAX_SPOT_PRICE" 2>/dev/null); then
+            final_budget="$dynamic_budget"
+            success "Using dynamic budget: \$${final_budget}/hour (based on current market pricing)"
+        else
+            warning "Could not determine dynamic budget, using base budget: \$${MAX_SPOT_PRICE}/hour"
+        fi
+    fi
+    
+    # Step 2: Run intelligent configuration selection
     if [[ "$INSTANCE_TYPE" == "auto" ]]; then
         log "Auto-selection mode: Finding optimal configuration..."
-        OPTIMAL_CONFIG=$(select_optimal_configuration "$MAX_SPOT_PRICE" "$enable_cross_region")
+        OPTIMAL_CONFIG=$(select_optimal_configuration "$final_budget" "$enable_cross_region")
         
         if [[ $? -ne 0 ]]; then
-            error "Failed to find optimal configuration within budget"
-            return 1
+            # Handle case where no pricing data is available
+            if handle_no_pricing_data "$enable_cross_region" "$final_budget"; then
+                # Retry with potentially updated budget
+                OPTIMAL_CONFIG=$(select_optimal_configuration "$MAX_SPOT_PRICE" "$enable_cross_region")
+                if [[ $? -ne 0 ]]; then
+                    error "Failed to find optimal configuration even after user intervention"
+                    return 1
+                fi
+            else
+                error "Failed to find optimal configuration within budget"
+                return 1
+            fi
         fi
         
-        # Parse optimal configuration - FIXED: Handle new format with region
+        # Parse optimal configuration - Enhanced validation
         if [[ "$OPTIMAL_CONFIG" == *:*:*:*:* ]]; then
             # New format with region
             IFS=':' read -r SELECTED_INSTANCE_TYPE SELECTED_AMI SELECTED_AMI_TYPE SELECTED_PRICE SELECTED_REGION <<< "$OPTIMAL_CONFIG"
+        # COMMENTED OUT: Fallback logic that may mask parsing issues
+        # else
+        #     # Fallback for old format
+        #     IFS=':' read -r SELECTED_INSTANCE_TYPE SELECTED_AMI SELECTED_AMI_TYPE SELECTED_PRICE <<< "$OPTIMAL_CONFIG"
+        #     SELECTED_REGION="$AWS_REGION"
         else
-            # Fallback for old format
-            IFS=':' read -r SELECTED_INSTANCE_TYPE SELECTED_AMI SELECTED_AMI_TYPE SELECTED_PRICE <<< "$OPTIMAL_CONFIG"
-            SELECTED_REGION="$AWS_REGION"
+            error "Invalid OPTIMAL_CONFIG format: '$OPTIMAL_CONFIG'"
+            error "Expected format: instance_type:ami:ami_type:price:region"
+            return 1
         fi
         
         # Debug output to fix the empty variable issue
@@ -1083,21 +1286,23 @@ launch_spot_instance() {
         --product-descriptions "Linux/UNIX" \
         --max-items 50 \
         --region "$AWS_REGION" \
-        --query 'SpotPrices | sort_by(@, &Timestamp) | reverse(@) | [*] | group_by(@, &AvailabilityZone) | map([.[0].AvailabilityZone, .[0].SpotPrice]) | sort_by(@, &[1])' \
+        --query 'SpotPriceHistory[*].[AvailabilityZone,SpotPrice,Timestamp]' \
         --output json 2>/dev/null || echo "[]")
     
     # Step 4: Determine AZ launch order
     local ORDERED_AZS=()
     if [[ "$SPOT_PRICES_JSON" != "[]" && -n "$SPOT_PRICES_JSON" ]]; then
         info "Current spot pricing by AZ:"
-        echo "$SPOT_PRICES_JSON" | jq -r '.[] | "  \(.[0]): $\(.[1])/hour"'
+        # Group by AZ and get lowest price for each AZ
+        local AZ_PRICES=$(echo "$SPOT_PRICES_JSON" | jq -r 'group_by(.[0]) | map({az: .[0][0], price: (map(.[1]) | min)}) | sort_by(.price) | .[] | "  \(.az): $\(.price)/hour"')
+        echo "$AZ_PRICES"
         
         # Create ordered list of AZs by price (lowest first)
-        ORDERED_AZS=($(echo "$SPOT_PRICES_JSON" | jq -r '.[] | .[0]' 2>/dev/null || echo ""))
+        ORDERED_AZS=($(echo "$SPOT_PRICES_JSON" | jq -r 'group_by(.[0]) | map({az: .[0][0], price: (map(.[1]) | min)}) | sort_by(.price) | .[].az' 2>/dev/null || echo ""))
         
         # Filter AZs within budget
         local AFFORDABLE_AZS=()
-        for AZ_PRICE in $(echo "$SPOT_PRICES_JSON" | jq -r '.[] | "\(.[0]):\(.[1])"' 2>/dev/null); do
+        for AZ_PRICE in $(echo "$SPOT_PRICES_JSON" | jq -r 'group_by(.[0]) | map({az: .[0][0], price: (map(.[1]) | min)}) | sort_by(.price) | .[] | "\(.az):\(.price)"' 2>/dev/null); do
             IFS=':' read -r AZ PRICE <<< "$AZ_PRICE"
             if (( $(echo "$PRICE <= $MAX_SPOT_PRICE" | bc -l 2>/dev/null || echo "1") )); then
                 AFFORDABLE_AZS+=("$AZ")
@@ -1110,12 +1315,18 @@ launch_spot_instance() {
             ORDERED_AZS=("${AFFORDABLE_AZS[@]}")
             info "Attempting launch in price-ordered AZs: ${ORDERED_AZS[*]}"
         else
-            warning "No AZs within budget, trying all available AZs"
-            ORDERED_AZS=($(aws ec2 describe-availability-zones --region "$AWS_REGION" --query 'AvailabilityZones[?State==`available`].ZoneName' --output text))
+            error "No AZs within budget for $SELECTED_INSTANCE_TYPE at \$$MAX_SPOT_PRICE"
+            return 1
+            # COMMENTED OUT: Fallback that ignores budget constraints
+            # warning "No AZs within budget, trying all available AZs"
+            # ORDERED_AZS=($(aws ec2 describe-availability-zones --region "$AWS_REGION" --query 'AvailabilityZones[?State==`available`].ZoneName' --output text))
         fi
     else
-        warning "Could not retrieve pricing data, using all available AZs"
-        ORDERED_AZS=($(aws ec2 describe-availability-zones --region "$AWS_REGION" --query 'AvailabilityZones[?State==`available`].ZoneName' --output text))
+        error "Could not retrieve pricing data for $SELECTED_INSTANCE_TYPE"
+        return 1
+        # COMMENTED OUT: Fallback that proceeds without pricing data
+        # warning "Could not retrieve pricing data, using all available AZs"
+        # ORDERED_AZS=($(aws ec2 describe-availability-zones --region "$AWS_REGION" --query 'AvailabilityZones[?State==`available`].ZoneName' --output text))
     fi
     
     # Step 5: Try launching in each AZ in order
@@ -1166,19 +1377,27 @@ launch_spot_instance() {
         fi
         
         # Create spot instance request with individual parameters
-        info "Requesting spot instance in $AZ: $SELECTED_INSTANCE_TYPE at \$$MAX_SPOT_PRICE/hour"
+        step "Requesting spot instance in $AZ: $SELECTED_INSTANCE_TYPE at \$$MAX_SPOT_PRICE/hour"
+        
+        # Create launch specification JSON
+        local launch_spec=$(cat <<EOF
+{
+    "ImageId": "$SELECTED_AMI",
+    "InstanceType": "$SELECTED_INSTANCE_TYPE", 
+    "KeyName": "$KEY_NAME",
+    "SecurityGroupIds": ["$SG_ID"],
+    "SubnetId": "$SUBNET_ID",
+    "UserData": "$(base64 -i user-data.sh | tr -d '\n')",
+    "IamInstanceProfile": {"Name": "$INSTANCE_PROFILE_NAME"}
+}
+EOF
+)
         
         REQUEST_RESULT=$(aws ec2 request-spot-instances \
             --spot-price "$MAX_SPOT_PRICE" \
             --instance-count 1 \
             --type "one-time" \
-            --image-id "$SELECTED_AMI" \
-            --instance-type "$SELECTED_INSTANCE_TYPE" \
-            --key-name "$KEY_NAME" \
-            --security-group-ids "$SG_ID" \
-            --subnet-id "$SUBNET_ID" \
-            --user-data "file://user-data.sh" \
-            --iam-instance-profile Name="$INSTANCE_PROFILE_NAME" \
+            --launch-specification "$launch_spec" \
             --region "$AWS_REGION" 2>&1) || {
             warning "Failed to create spot instance request in $AZ: $REQUEST_RESULT"
             continue
@@ -1641,7 +1860,7 @@ EOF
     # Create role
     aws iam create-role \
         --role-name "${STACK_NAME}-role" \
-        --assume-role-policy-document file://trust-policy.json || {
+        --assume-role-policy-document file://trust-policy.json > /dev/null || {
         warning "Role ${STACK_NAME}-role may already exist, continuing..."
     }
     
@@ -1682,7 +1901,7 @@ EOF
 
     aws iam create-policy \
         --policy-name "${STACK_NAME}-custom-policy" \
-        --policy-document file://custom-policy.json || true
+        --policy-document file://custom-policy.json > /dev/null || true
     
     aws iam attach-role-policy \
         --role-name "${STACK_NAME}-role" \
@@ -1699,7 +1918,7 @@ EOF
         profile_name="${STACK_NAME}-instance-profile"
     fi
     
-    aws iam create-instance-profile --instance-profile-name "$profile_name" || true
+    aws iam create-instance-profile --instance-profile-name "$profile_name" > /dev/null || true
     aws iam add-role-to-instance-profile \
         --instance-profile-name "$profile_name" \
         --role-name "${STACK_NAME}-role" || true
@@ -1926,7 +2145,7 @@ create_alb() {
     
     ALB_ARN=$(aws elbv2 create-load-balancer \
         --name "${STACK_NAME}-alb" \
-        --subnets $SUBNETS \
+        --subnets "$SUBNETS" \
         --security-groups "$SG_ID" \
         --scheme internet-facing \
         --type application \

@@ -133,7 +133,7 @@ SPOT_PRICES=$(aws ec2 describe-spot-price-history \
     --product-descriptions "Linux/UNIX" \
     --max-items 10 \
     --region "$AWS_REGION" \
-    --query 'SpotPrices[0:5].[AvailabilityZone,SpotPrice,Timestamp]' \
+    --query 'SpotPriceHistory[0:5].[AvailabilityZone,SpotPrice,Timestamp]' \
     --output table 2>/dev/null || echo "")
 
 if [[ -n "$SPOT_PRICES" && "$SPOT_PRICES" != *"None"* ]]; then
@@ -146,7 +146,7 @@ if [[ -n "$SPOT_PRICES" && "$SPOT_PRICES" != *"None"* ]]; then
         --product-descriptions "Linux/UNIX" \
         --max-items 20 \
         --region "$AWS_REGION" \
-        --query 'SpotPrices | min_by(@, &SpotPrice).SpotPrice' \
+        --query 'SpotPriceHistory | min_by(@, &SpotPrice).SpotPrice' \
         --output text 2>/dev/null || echo "N/A")
     
     if [[ "$LOWEST_PRICE" != "N/A" ]]; then

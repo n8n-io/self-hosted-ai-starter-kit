@@ -17,12 +17,16 @@ readonly PURPLE='\033[0;35m'
 readonly CYAN='\033[0;36m'
 readonly NC='\033[0m'
 
-# Logging functions
-log() { echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}" >&2; }
-error() { echo -e "${RED}[ERROR] $1${NC}" >&2; }
-success() { echo -e "${GREEN}[SUCCESS] $1${NC}" >&2; }
-warning() { echo -e "${YELLOW}[WARNING] $1${NC}" >&2; }
-info() { echo -e "${CYAN}[INFO] $1${NC}" >&2; }
+# Enhanced logging functions for human-readable output
+log() { echo -e "${BLUE}🕐 [$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}" >&2; }
+error() { echo -e "${RED}❌ [ERROR] $1${NC}" >&2; }
+success() { echo -e "${GREEN}✅ [SUCCESS] $1${NC}" >&2; }
+warning() { echo -e "${YELLOW}⚠️  [WARNING] $1${NC}" >&2; }
+info() { echo -e "${CYAN}ℹ️  [INFO] $1${NC}" >&2; }
+
+# Deployment progress functions for better user experience
+step() { echo -e "${MAGENTA}🔸 [STEP] $1${NC}" >&2; }
+progress() { echo -e "${BLUE}⏳ [PROGRESS] $1${NC}" >&2; }
 
 # =============================================================================
 # SHARED PREREQUISITE CHECKING
@@ -843,7 +847,7 @@ cleanup_instances() {
         --region "$AWS_REGION" 2>/dev/null)
 
     if [ -n "$instance_ids" ] && [ "$instance_ids" != "None" ]; then
-        aws ec2 terminate-instances --instance-ids $instance_ids --region "$AWS_REGION" > /dev/null
+        aws ec2 terminate-instances --instance-ids "$instance_ids" --region "$AWS_REGION" > /dev/null
         success "Terminated instances: $instance_ids"
     else
         info "No instances found for cleanup"
