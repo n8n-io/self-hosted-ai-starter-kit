@@ -437,25 +437,49 @@ get_comprehensive_spot_pricing() {
     local instance_types="$1"
     local region="$2"
     
-    log "Analyzing comprehensive spot pricing across all configurations..." >&2
+    log "Analyzing comprehensive spot pricing with rate limiting..." >&2
     
     # Create temporary file for pricing data
     local pricing_file=$(mktemp)
     echo "[]" > "$pricing_file"
     
-    for instance_type in $instance_types; do
-        info "Fetching spot prices for $instance_type..." >&2
+    # Convert space-separated instance types to array for batching
+    local instance_array=($instance_types)
+    
+    info "Fetching spot prices for ${#instance_array[@]} instance types in $region..." >&2
+    
+    # Single batched API call for all instance types
+    SPOT_DATA=$(aws ec2 describe-spot-price-history \
+        --instance-types "${instance_array[@]}" \
+        --product-descriptions "Linux/UNIX" \
+        --max-items 40 \
+        --region "$region" \
+        --query 'SpotPriceHistory[*].{instance_type: InstanceType, az: AvailabilityZone, price: SpotPrice, timestamp: Timestamp}' \
+        --output json)
+    
+    local api_exit_code=$?
+    
+    # Handle API errors with exponential backoff
+    if [ $api_exit_code -ne 0 ]; then
+        warning "AWS API rate limit or error, retrying with backoff..." >&2
+        sleep 3
         
-        # Get recent spot price history with simplified, reliable query
+        # Retry with reduced items
         SPOT_DATA=$(aws ec2 describe-spot-price-history \
-            --instance-types "$instance_type" \
+            --instance-types "${instance_array[@]}" \
             --product-descriptions "Linux/UNIX" \
             --max-items 20 \
             --region "$region" \
             --query 'SpotPriceHistory[*].{instance_type: InstanceType, az: AvailabilityZone, price: SpotPrice, timestamp: Timestamp}' \
-            --output json 2>/dev/null || echo "[]")
+            --output json 2>/dev/null)
         
-        if [[ "$SPOT_DATA" != "[]" && -n "$SPOT_DATA" && "$SPOT_DATA" != "null" ]]; then
+        if [ $? -ne 0 ]; then
+            warning "Failed to retrieve pricing after retry" >&2
+            SPOT_DATA="[]"
+        fi
+    fi
+    
+    if [[ "$SPOT_DATA" != "[]" && -n "$SPOT_DATA" && "$SPOT_DATA" != "null" ]]; then
             # Validate JSON and merge with existing data
             if echo "$SPOT_DATA" | jq empty 2>/dev/null; then
                 jq -s '.[0] + .[1]' "$pricing_file" <(echo "$SPOT_DATA") > "${pricing_file}.tmp"
@@ -512,7 +536,7 @@ get_comprehensive_spot_pricing_enhanced() {
     local configurations="$1"  # Array of unified configurations
     local max_budget="${2:-999999}"
     
-    log "💰 Analyzing comprehensive spot pricing with budget optimization..."
+    log "💰 Analyzing comprehensive spot pricing with rate limiting..."
     
     # Create temporary file for enhanced pricing data
     local pricing_file=$(mktemp)
@@ -530,20 +554,56 @@ get_comprehensive_spot_pricing_enhanced() {
     # Remove duplicates
     local unique_instance_regions=($(printf '%s\n' "${instance_regions[@]}" | sort -u))
     
+    # Batch API calls to reduce rate limiting - process all instance types in single region call
+    local regions_processed=()
+    local unique_regions=($(printf '%s\n' "${unique_instance_regions[@]}" | cut -d':' -f2 | sort -u))
     local lowest_price="999999"
     
-    for instance_region in "${unique_instance_regions[@]}"; do
-        IFS=':' read -r instance_type region <<< "$instance_region"
-        info "Fetching spot prices for $instance_type in $region..."
+    for region in "${unique_regions[@]}"; do
+        # Get instance types for this region
+        local region_instances=()
+        for instance_region in "${unique_instance_regions[@]}"; do
+            IFS=':' read -r instance_type inst_region <<< "$instance_region"
+            if [[ "$inst_region" == "$region" ]]; then
+                region_instances+=("$instance_type")
+            fi
+        done
         
-        # Get recent spot price history with enhanced query
+        info "Fetching spot prices for ${#region_instances[@]} instance types in $region..."
+        
+        # Single batched API call for all instance types in this region
         SPOT_DATA=$(aws ec2 describe-spot-price-history \
-            --instance-types "$instance_type" \
+            --instance-types "${region_instances[@]}" \
             --product-descriptions "Linux/UNIX" \
-            --max-items 30 \
+            --max-items 50 \
             --region "$region" \
             --query 'SpotPriceHistory[*].{instance_type: InstanceType, az: AvailabilityZone, price: SpotPrice, timestamp: Timestamp, region: "'$region'"}' \
-            --output json 2>/dev/null || echo "[]")
+            --output json)
+        
+        local api_exit_code=$?
+        
+        # Rate limiting: wait 2 seconds between API calls to respect AWS limits
+        sleep 2
+        
+        # Handle API errors with exponential backoff
+        if [ $api_exit_code -ne 0 ]; then
+            warning "AWS API rate limit or error for region $region, retrying with backoff..."
+            sleep 5
+            
+            # Retry with exponential backoff
+            SPOT_DATA=$(aws ec2 describe-spot-price-history \
+                --instance-types "${region_instances[@]}" \
+                --product-descriptions "Linux/UNIX" \
+                --max-items 20 \
+                --region "$region" \
+                --query 'SpotPriceHistory[*].{instance_type: InstanceType, az: AvailabilityZone, price: SpotPrice, timestamp: Timestamp, region: "'$region'"}' \
+                --output json 2>/dev/null)
+            
+            if [ $? -ne 0 ]; then
+                warning "Failed to retrieve pricing for region $region after retry"
+                SPOT_DATA="[]"
+            fi
+        fi
         
         if [[ "$SPOT_DATA" != "[]" && -n "$SPOT_DATA" && "$SPOT_DATA" != "null" ]]; then
             # Validate JSON and merge with existing data

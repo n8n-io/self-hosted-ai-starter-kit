@@ -2,6 +2,32 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Quick Reference
+
+### Essential Commands
+```bash
+# Setup and validate environment
+make setup                          # Complete setup with security
+make test                          # Run all tests before deployment
+make lint                          # Check code quality
+
+# Development workflow  
+make deploy-simple STACK_NAME=test  # Quick dev deployment
+make health-check STACK_NAME=test   # Verify services
+make destroy STACK_NAME=test        # Clean up resources
+
+# Testing without AWS costs
+./scripts/simple-demo.sh            # Test intelligent selection
+./tools/test-runner.sh unit         # Run specific test category
+```
+
+### File Patterns & Architecture
+- **Shared Libraries**: `/lib/*.sh` - Common functions sourced by all scripts
+  - Always source `aws-deployment-common.sh` and `error-handling.sh`
+- **Deployment Scripts**: `/scripts/aws-deployment-*.sh` - Main deployment orchestrators  
+- **Testing**: `/tests/` (Python pytest) + `/tools/test-runner.sh` (comprehensive runner)
+- **Configuration**: `/config/` - Environment-specific settings and versions
+
 ## Project Overview
 
 This is an AI-powered starter kit for GPU-optimized AWS deployment featuring intelligent infrastructure automation, cost optimization, and enterprise-grade AI workflows. The project is designed for deploying production-ready AI workloads on AWS with 70% cost savings through intelligent spot instance management and cross-region analysis.
@@ -40,6 +66,16 @@ validate_stack_name my-stack
 - Enhanced .gitignore protects sensitive files
 
 ## Development Commands
+
+### Critical Development Workflow
+**ALWAYS follow this pattern when making changes:**
+1. `make setup` - Initialize environment (security configurations)
+2. `make test` - **MANDATORY** before any deployment
+3. `make lint` - Validate code quality 
+4. `./scripts/simple-demo.sh` - Test deployment logic without AWS costs
+5. `make deploy-simple STACK_NAME=test` - Deploy to test environment
+6. `make health-check STACK_NAME=test` - Validate deployment
+7. `make destroy STACK_NAME=test` - Clean up test resources
 
 ### Makefile-Driven Development
 The project uses Make for standardized development workflows:
@@ -122,41 +158,35 @@ python3 scripts/cost-optimization.py --action report
 tail -f /var/log/cost-optimization.log
 ```
 
-### Testing and Validation
+### Testing Strategy & Commands
+
+**Test Categories (via ./tools/test-runner.sh):**
+- `unit` - Python unit tests with pytest (tests/unit/)
+- `integration` - Component interaction tests (tests/integration/)  
+- `security` - Vulnerability scans (bandit, safety, trivy)
+- `performance` - Benchmarks and performance analysis
+- `deployment` - Script validation and Terraform checks
+- `smoke` - Quick validation tests for CI/CD
+
 ```bash
-# Test intelligent selection without AWS deployment
-./scripts/simple-demo.sh
-
-# Comprehensive testing with cross-region analysis
-./scripts/test-intelligent-selection.sh --comprehensive
-
-# Test specific scenarios
-./scripts/test-intelligent-selection.sh --cross-region
-./scripts/test-intelligent-selection.sh --budget 1.50
-
-# Validate deployment after launch
-./scripts/validate-deployment.sh
-
-# Validate deployment with verbose output
-./scripts/validate-deployment.sh -v -t 300
-
-# Advanced health checks
-make health-check STACK_NAME=my-stack
-make health-check-advanced STACK_NAME=my-stack
-
-# Comprehensive test runner with multiple categories
-./tools/test-runner.sh                    # Run all test categories
-./tools/test-runner.sh unit integration   # Run specific test categories
+# Primary test commands
+make test                                  # Run all tests (uses test-runner.sh)
+./tools/test-runner.sh unit security      # Run specific categories
 ./tools/test-runner.sh --report           # Generate HTML test report
 ./tools/test-runner.sh --coverage unit    # Run with coverage reports
 
-# Individual test categories via Make
-make test                   # Run all tests via test-runner.sh
-make test-unit              # Python unit tests with pytest
-make test-integration       # Python integration tests with pytest  
-make test-security          # Security validation tests
+# Testing without AWS costs (IMPORTANT)
+./scripts/simple-demo.sh                  # Test intelligent selection logic
+./scripts/test-intelligent-selection.sh --comprehensive  # Cross-region analysis
+./scripts/test-intelligent-selection.sh --budget 1.50    # Budget-constrained testing
 
-# Docker and configuration testing
+# Deployment validation
+./scripts/validate-deployment.sh                         # Basic validation
+./scripts/validate-deployment.sh -v -t 300              # Verbose with timeout
+make health-check STACK_NAME=my-stack                   # Service health checks
+make health-check-advanced STACK_NAME=my-stack          # Comprehensive diagnostics
+
+# Infrastructure testing  
 ./tests/test-docker-config.sh      # Docker configuration validation
 ./tests/test-image-config.sh       # Container image validation
 ./tests/test-alb-cloudfront.sh     # ALB/CloudFront functionality
@@ -164,29 +194,32 @@ make test-security          # Security validation tests
 
 ## Architecture Patterns
 
-### Shared Library Architecture
-The project uses a modular architecture with shared libraries in `/lib/` that provide consistent functionality across all deployment scripts:
+### Code Organization & Patterns
 
-- **aws-deployment-common.sh**: Core shared functions including:
-  - Colored logging functions (`log`, `error`, `success`, `warning`, `info`)
-  - AWS prerequisite checking (`check_common_prerequisites`)
-  - Common AWS operations and utilities
-  - Progress tracking for deployment steps
-- **spot-instance.sh**: Spot instance management and pricing optimization
-- **aws-config.sh**: Configuration defaults and environment management  
-- **error-handling.sh**: Centralized error handling and cleanup functions
-- **ondemand-instance.sh**: On-demand instance specific operations
-- **simple-instance.sh**: Simple deployment specific functions
+**When editing ANY deployment script, you MUST understand this pattern:**
 
-**Usage Pattern:** All deployment scripts source these libraries for consistent behavior:
+#### Shared Library System
+All deployment scripts follow this standardized sourcing pattern:
 ```bash
-# Standard sourcing pattern in deployment scripts
+# ALWAYS start deployment scripts with this pattern
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-source "$PROJECT_ROOT/lib/aws-deployment-common.sh"
-source "$PROJECT_ROOT/lib/error-handling.sh"
+# Required libraries - source these in order
+source "$PROJECT_ROOT/lib/aws-deployment-common.sh"  # Logging, prerequisites
+source "$PROJECT_ROOT/lib/error-handling.sh"        # Error handling, cleanup
 ```
+
+#### Library Functions Reference
+- **aws-deployment-common.sh**: 
+  - Logging: `log()`, `error()`, `success()`, `warning()`, `info()`
+  - Prerequisites: `check_common_prerequisites()`
+  - Progress tracking: `step()`, `progress()`
+- **error-handling.sh**: Centralized error handling and cleanup functions  
+- **spot-instance.sh**: Spot instance management and pricing optimization
+- **aws-config.sh**: Configuration defaults and environment management
+- **ondemand-instance.sh**: On-demand instance specific operations
+- **simple-instance.sh**: Simple deployment specific functions
 
 ### Unified Deployment Strategy
 The `aws-deployment-unified.sh` script serves as the main orchestrator supporting multiple deployment types:
@@ -290,22 +323,26 @@ The deployment system automatically selects optimal configurations based on:
 - Auto-scaling based on GPU utilization
 - Cross-region analysis for optimal pricing
 
-## Cursor Rules Integration
+## Development Guidelines & Rules
 
-The project includes sophisticated Cursor IDE rules for AWS development:
+### Cursor IDE Integration
+The project includes sophisticated development rules:
 
-### AWS Architecture Principles (`.cursor/rules/aws.mdc`)
-- Well-Architected Framework implementation
-- Service selection decision matrices
-- Scale-adaptive recommendations (startup/midsize/enterprise)
-- Infrastructure as Code best practices
+#### AWS Architecture Principles (`.cursor/rules/aws.mdc`)
+- Well-Architected Framework implementation (6 pillars)
+- Service selection decision matrices by scale (startup/midsize/enterprise)
+- Infrastructure as Code patterns for CDK, Terraform, CloudFormation
 - Security-first patterns with cost optimization
+- Multi-environment deployment strategies with proper validation
 
-### n8n MCP Integration (`.cursor/rules/n8n-mcp.mdc`)
-- Workflow validation and testing patterns
-- AI tool integration guidelines
+#### n8n Workflow Development (`.cursor/rules/n8n-mcp.mdc`)
+- **MANDATORY Validation Pattern**: Always validate before building workflows
+  1. `validate_node_minimal()` - Check required fields
+  2. `validate_node_operation()` - Full configuration validation  
+  3. `validate_workflow()` - Complete workflow validation
+- AI tool integration guidelines (ANY node can be an AI tool)
 - Pre and post-deployment validation strategies
-- Incremental update patterns for efficiency
+- Incremental update patterns for efficiency (80-90% token savings with diffs)
 
 ## Environment Configuration
 
@@ -434,63 +471,76 @@ aws ec2 describe-instances --filters "Name=instance-state-name,Values=running"
 
 ## Testing Framework
 
-### Comprehensive Test Framework
-The project uses a sophisticated test runner (`./tools/test-runner.sh`) that supports multiple test categories:
+### Test-First Development Approach
+**CRITICAL: Always run tests before any deployment or changes**
 
-**Test Categories Available:**
-- **unit**: Unit tests for individual functions using pytest
-- **integration**: Integration tests for component interaction
-- **security**: Security vulnerability scans (bandit, safety, trivy)
-- **performance**: Performance benchmarks and analysis
-- **deployment**: Deployment script validation and Terraform checks
-- **smoke**: Basic smoke tests for quick validation
+#### Test Architecture
+The project uses a layered testing strategy:
+1. **Python Tests** (pytest) - `/tests/unit/` and `/tests/integration/`
+2. **Shell Script Tests** - Infrastructure validation scripts in `/tests/`
+3. **Comprehensive Test Runner** - `./tools/test-runner.sh` orchestrates all categories
 
+#### Test Categories & Usage
 ```bash
-# Comprehensive test runner commands
-./tools/test-runner.sh                          # Run all test categories
-./tools/test-runner.sh unit security            # Run specific categories
-./tools/test-runner.sh --report                 # Generate HTML report
-./tools/test-runner.sh --coverage unit          # Run with coverage
-./tools/test-runner.sh --environment staging    # Set test environment
+# Primary workflow - run before ANY deployment
+make test                                    # Run all tests via test-runner.sh
 
-# Direct pytest usage (if needed)
-pytest tests/unit/ -v                    # Unit tests
-pytest tests/integration/ -v             # Integration tests
-pytest tests/unit/test_security_validation.py -v  # Security tests
+# Granular testing by category
+./tools/test-runner.sh unit                  # Python unit tests (pytest)
+./tools/test-runner.sh integration          # Component interaction tests  
+./tools/test-runner.sh security             # Vulnerability scans (bandit, safety, trivy)
+./tools/test-runner.sh performance          # Benchmarks and analysis
+./tools/test-runner.sh deployment           # Script validation and Terraform checks
+./tools/test-runner.sh smoke                # Quick validation for CI/CD
 
-# Test specific deployment workflows
-pytest tests/integration/test_deployment_workflow.py -v
-
-# Generate test coverage reports
-pytest --cov=scripts --cov-report=html tests/
+# Advanced test runner options
+./tools/test-runner.sh unit security --report     # Multiple categories with HTML report
+./tools/test-runner.sh --coverage unit            # Coverage analysis
+./tools/test-runner.sh --environment staging      # Environment-specific testing
 ```
 
-**Test Reports Location:** All test reports are generated in `./test-reports/` directory including:
-- `test-summary.html` - Comprehensive HTML report
-- `test-results.json` - Machine-readable results
-- `coverage/` - Code coverage reports
-- Security scan results and performance benchmarks
+#### Test Reports & Outputs
+- **Location**: `./test-reports/` directory
+- **Key Files**: 
+  - `test-summary.html` - Human-readable comprehensive report
+  - `test-results.json` - Machine-readable results for CI/CD
+  - `coverage/` directory - Code coverage analysis
+- **Security Scans**: Individual JSON/text reports for each tool
 
-### Shell Script Testing
-Validation scripts for infrastructure and configuration:
-
+#### Infrastructure Testing (No AWS Costs)
 ```bash
-# Docker configuration validation
-./tests/test-docker-config.sh
+# IMPORTANT: Test deployment logic without creating AWS resources
+./scripts/simple-demo.sh                    # Basic intelligent selection demo
+./scripts/test-intelligent-selection.sh --comprehensive  # Full testing suite
 
-# Container image validation  
-./tests/test-image-config.sh
-
-# ALB and CloudFront functionality
-./tests/test-alb-cloudfront.sh
+# Configuration validation
+./tests/test-docker-config.sh              # Docker Compose validation
+./tests/test-image-config.sh               # Container image validation  
+./tests/test-alb-cloudfront.sh             # ALB/CloudFront functionality
 ```
 
-## Important Notes
+## Critical Development Guidelines
 
-- This project requires AWS credentials and appropriate permissions
-- GPU instances require adequate AWS quotas in your target region
-- The system is optimized for cost efficiency while maintaining performance
-- Always validate configurations before deployment to production
-- Use the test scripts to verify deployment logic without incurring AWS costs
-- **Testing Strategy**: Run `make test` before any deployment to ensure code quality
-- **Security First**: Always run `make security-check` before production deployments
+### Before Making ANY Changes
+1. **MUST** run `make test` before deployment - this is non-negotiable
+2. **MUST** use `./scripts/simple-demo.sh` to test deployment logic without AWS costs
+3. **MUST** follow the shared library sourcing pattern for any new deployment scripts
+4. **MUST** run `make security-check` before production deployments
+
+### Key Requirements & Constraints  
+- AWS credentials and appropriate permissions required for deployments
+- GPU instances require adequate AWS quotas in target regions
+- Always validate configurations before production deployment
+- **Cost Efficiency Focus**: System optimized for 70% cost savings through intelligent spot management
+- **Test-First**: Never skip testing - use test scripts to verify logic without AWS costs
+
+### File Location Reference for Quick Navigation
+```bash
+# Key files for development
+/lib/                          # Shared functions - ALWAYS source these
+/scripts/aws-deployment-*.sh   # Main deployment orchestrators
+/tools/test-runner.sh          # Comprehensive test orchestration
+/tests/                        # Python pytest + shell validation scripts
+/config/                       # Environment and version configurations
+/.cursor/rules/                # IDE development guidelines
+```
