@@ -649,11 +649,13 @@ display_configuration_analysis() {
     
     # Show budget and recommendation info
     info "💰 Budget limit: \$${max_budget}/hour"
-    if [[ -n "$LOWEST_AVAILABLE_PRICE" && "$LOWEST_AVAILABLE_PRICE" != "999999" ]]; then
-        info "📈 Lowest available price: \$${LOWEST_AVAILABLE_PRICE}/hour"
+    local lowest_price_value="${LOWEST_AVAILABLE_PRICE:-}"
+    if [[ -n "$lowest_price_value" && "$lowest_price_value" != "999999" ]]; then
+        info "📈 Lowest available price: \$${lowest_price_value}/hour"
     fi
-    if [[ -n "$DYNAMIC_BUDGET" ]]; then
-        info "🎯 Recommended budget: \$${DYNAMIC_BUDGET}/hour (lowest + 20% margin)"
+    local dynamic_budget_value="${DYNAMIC_BUDGET:-}"
+    if [[ -n "$dynamic_budget_value" ]]; then
+        info "🎯 Recommended budget: \$${dynamic_budget_value}/hour (lowest + 20% margin)"
     fi
     
     # Export valid configurations for user selection
@@ -1014,8 +1016,9 @@ select_optimal_configuration() {
     
     # Step 3: Use dynamic budget if available (set by pricing function)
     local effective_budget="$max_budget"
-    if [[ -n "$DYNAMIC_BUDGET" && "$DYNAMIC_BUDGET" != "999999" ]]; then
-        effective_budget="$DYNAMIC_BUDGET"
+    local dynamic_budget_value="${DYNAMIC_BUDGET:-}"
+    if [[ -n "$dynamic_budget_value" && "$dynamic_budget_value" != "999999" ]]; then
+        effective_budget="$dynamic_budget_value"
         info "Using dynamic budget: \$$effective_budget/hour (optimized from market data)"
     fi
     
