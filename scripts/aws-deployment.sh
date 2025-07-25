@@ -595,13 +595,16 @@ display_configuration_analysis() {
     
     log "📋 Displaying comprehensive configuration analysis..."
     
-    echo ""
-    echo -e "${CYAN}┌────────────────────────────────────────────────────────────────────────────────────────────────────┐${NC}"
-    echo -e "${CYAN}│                         🚀 INTELLIGENT GPU CONFIGURATION ANALYSIS 🚀                        │${NC}"
-    echo -e "${CYAN}├────────────────────────────────────────────────────────────────────────────────────────────────────┤${NC}"
-    printf "${CYAN}│ %-3s │ %-12s │ %-8s │ %-8s │ %-5s │ %-6s │ %-4s │ %-8s │ %-6s │ %-11s │ %-10s │${NC}\n" \
-        "#" "Instance" "Region" "Price/hr" "Perf" "CPUs" "RAM" "GPU" "Arch" "Availability" "Value"
-    echo -e "${CYAN}├─────├──────────────├──────────├──────────├───────├────────├──────├──────────├────────├─────────────├────────────┤${NC}"
+    # Send display output to stderr so it shows to user but doesn't interfere with data capture
+    {
+        echo ""
+        echo -e "${CYAN}┌────────────────────────────────────────────────────────────────────────────────────────────────────┐${NC}"
+        echo -e "${CYAN}│                         🚀 INTELLIGENT GPU CONFIGURATION ANALYSIS 🚀                        │${NC}"
+        echo -e "${CYAN}├────────────────────────────────────────────────────────────────────────────────────────────────────┤${NC}"
+        printf "${CYAN}│ %-3s │ %-12s │ %-8s │ %-8s │ %-5s │ %-6s │ %-4s │ %-8s │ %-6s │ %-11s │ %-10s │${NC}\n" \
+            "#" "Instance" "Region" "Price/hr" "Perf" "CPUs" "RAM" "GPU" "Arch" "Availability" "Value"
+        echo -e "${CYAN}├─────├──────────────├──────────├──────────├───────├────────├──────├──────────├────────├─────────────├────────────┤${NC}"
+    } >&2
     
     local config_num=1
     local valid_configs=()
@@ -637,29 +640,35 @@ display_configuration_analysis() {
             # Format RAM display
             local ram_display="${ram}GB"
             
+            # Send table row to stderr for user display
             printf "${CYAN}│ %-3s │ %-12s │ %-8s │ %-8s │ %-5s │ %-6s │ %-4s │ %-8s │ %-6s │ %-11s │ %-10s │${NC}\n" \
-                "$config_num" "$instance_type" "$region" "$avg_price" "$perf_score" "$vcpus" "$ram_display" "$gpu_type" "$cpu_arch" "$availability" "$value_ratio"
+                "$config_num" "$instance_type" "$region" "$avg_price" "$perf_score" "$vcpus" "$ram_display" "$gpu_type" "$cpu_arch" "$availability" "$value_ratio" >&2
             
             ((config_num++))
         fi
     done <<< "$configurations"
     
-    echo -e "${CYAN}└─────┴──────────────┴──────────┴──────────┴───────┴────────┴──────┴──────────┴────────┴─────────────┴────────────┘${NC}"
-    echo ""
+    # Send closing table and info to stderr for user display
+    {
+        echo -e "${CYAN}└─────┴──────────────┴──────────┴──────────┴───────┴────────┴──────┴──────────┴────────┴─────────────┴────────────┘${NC}"
+        echo ""
+        
+        # Show budget and recommendation info
+        info "💰 Budget limit: \$${max_budget}/hour"
+        local lowest_price_value="${LOWEST_AVAILABLE_PRICE:-}"
+        if [[ -n "$lowest_price_value" && "$lowest_price_value" != "999999" ]]; then
+            info "📈 Lowest available price: \$${lowest_price_value}/hour"
+        fi
+        local dynamic_budget_value="${DYNAMIC_BUDGET:-}"
+        if [[ -n "$dynamic_budget_value" ]]; then
+            info "🎯 Recommended budget: \$${dynamic_budget_value}/hour (lowest + 20% margin)"
+        fi
+    } >&2
     
-    # Show budget and recommendation info
-    info "💰 Budget limit: \$${max_budget}/hour"
-    local lowest_price_value="${LOWEST_AVAILABLE_PRICE:-}"
-    if [[ -n "$lowest_price_value" && "$lowest_price_value" != "999999" ]]; then
-        info "📈 Lowest available price: \$${lowest_price_value}/hour"
+    # Send only valid configurations data to stdout for capture
+    if [[ ${#valid_configs[@]} -gt 0 ]]; then
+        printf '%s\n' "${valid_configs[@]}"
     fi
-    local dynamic_budget_value="${DYNAMIC_BUDGET:-}"
-    if [[ -n "$dynamic_budget_value" ]]; then
-        info "🎯 Recommended budget: \$${dynamic_budget_value}/hour (lowest + 20% margin)"
-    fi
-    
-    # Export valid configurations for user selection
-    printf '%s\n' "${valid_configs[@]}"
 }
 
 # Interactive user selection of configuration
@@ -701,21 +710,28 @@ prompt_user_selection() {
     fi
     
     # Multiple options available - prompt user
-    info "Available configurations within budget:"
-    echo ""
-    
-    for i in "${!config_array[@]}"; do
-        local config_line="${config_array[$i]}"
-        IFS=':' read -r config_num config_data avg_price value_ratio <<< "$config_line"
-        IFS=':' read -r instance_type ami ami_type region vcpus ram gpus gpu_type cpu_arch storage perf_score <<< "$config_data"
+    # CRITICAL: Force output to stderr so user always sees the selection menu
+    # Root cause: prompt_user_selection output was going to stdout and could be
+    # buffered or hidden, while the table from display_configuration_analysis 
+    # goes to stderr. This ensures consistent display to the user.
+    {
+        echo ""
+        info "Available configurations within budget:"
+        echo ""
         
-        echo -e "  ${GREEN}[$((i+1))]${NC} $instance_type in $region - $avg_price/hour (Value: $value_ratio, Perf: $perf_score)"
-    done
-    
-    echo ""
-    echo -e "  ${GREEN}[a]${NC} Auto-select best value (highest performance/price ratio)"
-    echo -e "  ${GREEN}[q]${NC} Quit deployment"
-    echo ""
+        for i in "${!config_array[@]}"; do
+            local config_line="${config_array[$i]}"
+            IFS=':' read -r config_num config_data avg_price value_ratio <<< "$config_line"
+            IFS=':' read -r instance_type ami ami_type region vcpus ram gpus gpu_type cpu_arch storage perf_score <<< "$config_data"
+            
+            echo -e "  ${GREEN}[$((i+1))]${NC} $instance_type in $region - $avg_price/hour (Value: $value_ratio, Perf: $perf_score)"
+        done
+        
+        echo ""
+        echo -e "  ${GREEN}[a]${NC} Auto-select best value (highest performance/price ratio)"
+        echo -e "  ${GREEN}[q]${NC} Quit deployment"
+        echo ""
+    } >&2
     
     while true; do
         read -p "Select configuration [1-${#config_array[@]}/a/q]: " choice
