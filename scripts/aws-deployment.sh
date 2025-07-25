@@ -2018,9 +2018,10 @@ get_subnet_for_az() {
 create_efs_mount_target() {
     local SG_ID="$1"
     local INSTANCE_AZ="$2"
+    local EFS_ID="$3"
     
     if [[ -z "$EFS_ID" ]]; then
-        error "EFS_ID not set. Cannot create mount target."
+        error "EFS_ID not provided. Cannot create mount target."
         return 1
     fi
     
@@ -2714,7 +2715,9 @@ EOF
     INSTANCE_AZ=$(echo "$INSTANCE_INFO" | cut -d: -f3)
 
     # Now create EFS mount target in the AZ where instance was actually launched
-    create_efs_mount_target "$SG_ID" "$INSTANCE_AZ"
+    # Extract EFS_ID from EFS_DNS (format: fs-xxxxx.efs.region.amazonaws.com)
+    LOCAL_EFS_ID=$(echo "$EFS_DNS" | cut -d. -f1)
+    create_efs_mount_target "$SG_ID" "$INSTANCE_AZ" "$LOCAL_EFS_ID"
     
     wait_for_instance_ready "$PUBLIC_IP"
     deploy_application "$PUBLIC_IP" "$EFS_DNS" "$INSTANCE_ID"
