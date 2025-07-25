@@ -2222,10 +2222,6 @@ EOF
                 export DEPLOYED_INSTANCE_TYPE="$SELECTED_INSTANCE_TYPE"
                 export DEPLOYED_AMI="$SELECTED_AMI"
                 export DEPLOYED_AMI_TYPE="$SELECTED_AMI_TYPE"
-                # Export SELECTED_* variables for backward compatibility
-                export SELECTED_INSTANCE_TYPE="$SELECTED_INSTANCE_TYPE"
-                export SELECTED_AMI="$SELECTED_AMI"
-                export SELECTED_AMI_TYPE="$SELECTED_AMI_TYPE"
                 
                 echo "$INSTANCE_ID:$PUBLIC_IP:$ACTUAL_AZ"
                 return 0
@@ -3075,13 +3071,13 @@ N8N_CORS_ALLOWED_ORIGINS=https://n8n.geuse.io,https://localhost:5678
 N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true
 
 # AWS Configuration
-EFS_DNS="${EFS_DNS:-}"
-INSTANCE_ID="${INSTANCE_ID:-}"
-AWS_DEFAULT_REGION="${AWS_REGION:-us-east-1}"
+EFS_DNS=$EFS_DNS
+INSTANCE_ID=$INSTANCE_ID
+AWS_DEFAULT_REGION=$AWS_REGION
 INSTANCE_TYPE=g4dn.xlarge
 
 # Image version control
-USE_LATEST_IMAGES="${USE_LATEST_IMAGES:-true}"
+USE_LATEST_IMAGES=$USE_LATEST_IMAGES
 
 # API Keys (empty by default - can be configured via SSM)
 OPENAI_API_KEY=
@@ -3440,11 +3436,11 @@ EOF
 main() {
     echo -e "${CYAN}"
     cat << 'EOF'
-    ___    ____   _____ __             __              __ ____ __ 
-   /   |  /  _/  / ___// /_____ ______/ /____  _____  / //_  //_/_
-  / /| |  / /    \__ \/ __/ __ `/ ___/ __/ _ \/ ___/ / //_/ /_/ __/
- / ___ |_/ /    ___/ / /_/ /_/ / /  / /_/  __/ /    / / _  __/ /_  
-/_/  |_/___/   /____/\__/\__,_/_/   \__/\___/_/    /_/ /_/ /\__/  
+     ____                        __  ___      __              ____  ____  ____  ____ 
+    / ___| ___ _   _ ___  ___  /  |/  /___ _/ /_____  _____/ __ \/ __ \/ __ \/ __ \
+   / |  _ / _ \ | | / __|/ _ \/ /|_/ / __ `/ //_/ _ \/ ___/ / / / / / / / / / / / /
+  / /__| |  __/ |_| \__ \  __/ /  / / /_/ / ,< /  __/ /  / /_/ / /_/ / /_/ / /_/ / 
+  \____/_|\___|\__,_|___/\___/_/  /_/\__,_/_/|_|\___/_/   \____/\____/\____/\____/  
                                                                   
 🤖 INTELLIGENT GPU DEPLOYMENT SYSTEM 🚀
 EOF
@@ -3482,7 +3478,7 @@ EOF
     LOCAL_EFS_ID=$(echo "$EFS_DNS" | cut -d. -f1)
     create_efs_mount_target "$SG_ID" "$INSTANCE_AZ" "$LOCAL_EFS_ID"
     
-    wait_for_instance_ready "$INSTANCE_ID" "$DEPLOYED_INSTANCE_TYPE"
+    wait_for_instance_ready "$INSTANCE_ID" "$SELECTED_INSTANCE_TYPE"
     deploy_application "$PUBLIC_IP" "$EFS_DNS" "$INSTANCE_ID"
     setup_monitoring "$PUBLIC_IP"
     validate_deployment "$PUBLIC_IP"
