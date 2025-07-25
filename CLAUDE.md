@@ -2,31 +2,43 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Git Context & Workflow
+
+**Current Branch**: `GeuseMaker` (feature branch)  
+**Main Branch**: `main` (for pull requests)  
+**Modified Files**: `CLAUDE.md`, `scripts/aws-deployment.sh`, `tools/test-runner.sh`
+
+### Branch Workflow
+- Work on feature branch `GeuseMaker`
+- Create PRs against `main` branch
+- Always run tests before committing: `make test`
+
 ## Quick Reference
 
 ### Essential Commands
 ```bash
 # Setup and validate environment
-make setup                          # Complete setup with security
-make test                          # Run all tests before deployment
+make setup                          # Complete setup with security validation
+make test                          # Run all tests before deployment (MANDATORY)
 make lint                          # Check code quality
 
 # Development workflow  
 make deploy-simple STACK_NAME=test  # Quick dev deployment
-make health-check STACK_NAME=test   # Verify services
-make destroy STACK_NAME=test        # Clean up resources
+make health-check STACK_NAME=test   # Verify services health
+make destroy STACK_NAME=test        # Clean up test resources
 
-# Testing without AWS costs
-./scripts/simple-demo.sh            # Test intelligent selection
-./tools/test-runner.sh unit         # Run specific test category
+# Testing without AWS costs (IMPORTANT)
+./scripts/simple-demo.sh            # Test intelligent selection logic
+./tools/test-runner.sh unit         # Run specific test categories
+./tools/test-runner.sh --report     # Generate HTML test reports
 ```
 
-### File Patterns & Architecture
+### Architecture Overview
 - **Shared Libraries**: `/lib/*.sh` - Common functions sourced by all scripts
-  - Always source `aws-deployment-common.sh` and `error-handling.sh`
-- **Deployment Scripts**: `/scripts/aws-deployment-*.sh` - Main deployment orchestrators  
-- **Testing**: `/tests/` (Python pytest) + `/tools/test-runner.sh` (comprehensive runner)
-- **Configuration**: `/config/` - Environment-specific settings and versions
+  - Always source `aws-deployment-common.sh` and `error-handling.sh` in deployment scripts
+- **Deployment Scripts**: `/scripts/aws-deployment-*.sh` - Main orchestrators with unified deployment
+- **Testing Framework**: `/tests/` (pytest) + `/tools/test-runner.sh` (comprehensive orchestration)
+- **Configuration**: `/config/` - Environment settings and version locks
 
 ## Project Overview
 
@@ -69,48 +81,45 @@ validate_stack_name my-stack
 
 ### Critical Development Workflow
 **ALWAYS follow this pattern when making changes:**
-1. `make setup` - Initialize environment (security configurations)
-2. `make test` - **MANDATORY** before any deployment
-3. `make lint` - Validate code quality 
-4. `./scripts/simple-demo.sh` - Test deployment logic without AWS costs
-5. `make deploy-simple STACK_NAME=test` - Deploy to test environment
-6. `make health-check STACK_NAME=test` - Validate deployment
-7. `make destroy STACK_NAME=test` - Clean up test resources
+1. `make setup` - Initialize environment with security configurations
+2. `make test` - **MANDATORY** before any deployment (runs comprehensive test suite)
+3. `./scripts/simple-demo.sh` - Test deployment logic without AWS costs
+4. `make deploy-simple STACK_NAME=test` - Deploy to test environment
+5. `make health-check STACK_NAME=test` - Validate deployment health
+6. `make destroy STACK_NAME=test` - Clean up test resources
 
-### Makefile-Driven Development
-The project uses Make for standardized development workflows:
-
+### Core Make Commands
+**Setup & Validation:**
 ```bash
-# Essential development setup
-make setup                    # Set up development environment
-make dev-setup               # Full setup with dependencies
-make help                    # Show all available commands
-
-# Development workflow
+make setup                    # Complete setup with security validation
+make dev-setup               # Full development environment setup
 make validate                # Validate all configurations
-make test                   # Run all tests
-make lint                   # Run linting on all code
-make clean                  # Clean temporary files
+make help                    # Show all available commands
+```
 
-# Deployment commands (require STACK_NAME)
-make deploy STACK_NAME=my-stack              # Deploy with validation
-make deploy-spot STACK_NAME=my-stack         # Deploy spot instances
-make deploy-simple STACK_NAME=my-stack       # Deploy development environment
-make status STACK_NAME=my-stack              # Check deployment status
-make destroy STACK_NAME=my-stack             # Destroy infrastructure
+**Testing (MANDATORY before deployment):**
+```bash
+make test                    # Run all tests via test-runner.sh
+make test-unit              # Python unit tests only
+make test-integration       # Component interaction tests
+make test-security          # Security vulnerability scans
+```
 
-# Testing
-make test-unit              # Run unit tests only
-make test-integration       # Run integration tests only
-make test-security          # Run security tests
+**Deployment (all require STACK_NAME):**
+```bash
+make deploy STACK_NAME=name              # Deploy with validation
+make deploy-spot STACK_NAME=name         # Deploy cost-optimized spot instances
+make deploy-simple STACK_NAME=name       # Deploy simple dev environment
+make status STACK_NAME=name              # Check deployment status
+make health-check STACK_NAME=name        # Basic health checks
+make destroy STACK_NAME=name             # Destroy infrastructure
+```
 
-# Utilities
-make cost-estimate STACK_NAME=my-stack HOURS=24  # Estimate costs
-make docs                   # Generate documentation
-
-# Parameter Store and troubleshooting
-./scripts/setup-parameter-store.sh setup         # Setup Parameter Store
-./scripts/fix-deployment-issues.sh STACK REGION  # Fix deployment issues
+**Security & Operations:**
+```bash
+make setup-secrets          # Setup all required secrets
+make security-check         # Run comprehensive security validation
+make rotate-secrets         # Rotate all secrets
 ```
 
 ### Local Development
@@ -122,74 +131,58 @@ docker compose --profile cpu up
 docker compose -f docker-compose.gpu-optimized.yml up
 ```
 
-### AWS Deployment Commands
+### Direct AWS Deployment Scripts
+**Unified Deployment (Recommended):**
 ```bash
-# Intelligent deployment with auto-selection
-./scripts/aws-deployment.sh
-
-# Cross-region analysis for optimal pricing
-./scripts/aws-deployment.sh --cross-region
-
-# Budget-constrained deployment
-./scripts/aws-deployment.sh --max-spot-price 1.50
-
-# Simple on-demand deployment
-./scripts/aws-deployment-simple.sh
-
-# Full on-demand deployment
-./scripts/aws-deployment-ondemand.sh
-
-# Test deployment logic without creating resources
-./scripts/test-intelligent-selection.sh --comprehensive
-
-# Check AWS quotas before deployment
-./scripts/check-quotas.sh
-
-# Simple demo of intelligent selection
-./scripts/simple-demo.sh
+./scripts/aws-deployment-unified.sh [OPTIONS] STACK_NAME
+# Options: -t spot|ondemand|simple, -e development|staging|production
 ```
 
-### Cost Management
+**Specialized Scripts:**
 ```bash
-# Generate cost optimization report
-python3 scripts/cost-optimization.py --action report
+./scripts/aws-deployment.sh --cross-region     # Intelligent cross-region analysis
+./scripts/aws-deployment-simple.sh            # Simple on-demand deployment
+./scripts/simple-demo.sh                      # Test logic without AWS costs (IMPORTANT)
+./scripts/check-quotas.sh                     # Verify AWS quotas before deployment
+```
 
-# Monitor optimization in real-time
-tail -f /var/log/cost-optimization.log
+### Cost & Operations
+```bash
+python3 scripts/cost-optimization.py --action report    # Cost optimization report
+./scripts/setup-parameter-store.sh setup               # Setup Parameter Store
+./scripts/fix-deployment-issues.sh STACK REGION        # Fix deployment issues
 ```
 
 ### Testing Strategy & Commands
 
-**Test Categories (via ./tools/test-runner.sh):**
-- `unit` - Python unit tests with pytest (tests/unit/)
-- `integration` - Component interaction tests (tests/integration/)  
+**Test Categories:**
+- `unit` - Python unit tests (pytest)
+- `integration` - Component interaction tests  
 - `security` - Vulnerability scans (bandit, safety, trivy)
 - `performance` - Benchmarks and performance analysis
 - `deployment` - Script validation and Terraform checks
 - `smoke` - Quick validation tests for CI/CD
 
+**Primary Testing Commands:**
 ```bash
-# Primary test commands
-make test                                  # Run all tests (uses test-runner.sh)
-./tools/test-runner.sh unit security      # Run specific categories
+make test                                  # Run all tests (MANDATORY before deployment)
+./tools/test-runner.sh unit security      # Run specific test categories
 ./tools/test-runner.sh --report           # Generate HTML test report
-./tools/test-runner.sh --coverage unit    # Run with coverage reports
+./tools/test-runner.sh --coverage unit    # Run with coverage analysis
+```
 
-# Testing without AWS costs (IMPORTANT)
-./scripts/simple-demo.sh                  # Test intelligent selection logic
-./scripts/test-intelligent-selection.sh --comprehensive  # Cross-region analysis
-./scripts/test-intelligent-selection.sh --budget 1.50    # Budget-constrained testing
+**Testing Without AWS Costs (CRITICAL):**
+```bash
+./scripts/simple-demo.sh                         # Test intelligent selection logic
+./scripts/test-intelligent-selection.sh --comprehensive  # Full testing suite
+./tests/test-docker-config.sh                    # Docker configuration validation
+./tests/test-alb-cloudfront.sh                   # ALB/CloudFront functionality
+```
 
-# Deployment validation
-./scripts/validate-deployment.sh                         # Basic validation
-./scripts/validate-deployment.sh -v -t 300              # Verbose with timeout
-make health-check STACK_NAME=my-stack                   # Service health checks
-make health-check-advanced STACK_NAME=my-stack          # Comprehensive diagnostics
-
-# Infrastructure testing  
-./tests/test-docker-config.sh      # Docker configuration validation
-./tests/test-image-config.sh       # Container image validation
-./tests/test-alb-cloudfront.sh     # ALB/CloudFront functionality
+**Deployment Validation:**
+```bash
+./scripts/validate-deployment.sh -v -t 300       # Verbose validation with timeout
+make health-check STACK_NAME=my-stack            # Basic service health checks
 ```
 
 ## Architecture Patterns
@@ -250,11 +243,19 @@ The recommended development workflow follows this pattern:
 Alternative to shell scripts for infrastructure management:
 
 ```bash
-# Terraform workflow
+# Terraform workflow (all require STACK_NAME)
 make tf-init                         # Initialize Terraform
 make tf-plan STACK_NAME=my-stack     # Show infrastructure plan  
-make tf-apply STACK_NAME=my-stack    # Apply infrastructure
+make tf-apply STACK_NAME=my-stack    # Apply infrastructure changes
 make tf-destroy STACK_NAME=my-stack  # Destroy infrastructure
+```
+
+**Additional Operations Commands:**
+```bash
+make status STACK_NAME=my-stack      # Check deployment status
+make logs STACK_NAME=my-stack        # View application logs
+make monitor                         # Open monitoring dashboard
+make backup STACK_NAME=my-stack      # Create infrastructure backup
 ```
 
 The Terraform configuration (`terraform/main.tf`) provides:
@@ -326,23 +327,29 @@ The deployment system automatically selects optimal configurations based on:
 ## Development Guidelines & Rules
 
 ### Cursor IDE Integration
-The project includes sophisticated development rules:
+The project includes sophisticated development rules in `.cursor/rules/`:
 
 #### AWS Architecture Principles (`.cursor/rules/aws.mdc`)
-- Well-Architected Framework implementation (6 pillars)
-- Service selection decision matrices by scale (startup/midsize/enterprise)
-- Infrastructure as Code patterns for CDK, Terraform, CloudFormation
-- Security-first patterns with cost optimization
-- Multi-environment deployment strategies with proper validation
+- **Well-Architected Framework**: 6 pillars (Operational Excellence, Security, Reliability, Performance, Cost, Sustainability)
+- **Service Selection Logic**: Serverless-first approach, then containers, Kubernetes, VMs
+- **Architecture Patterns by Scale**: 
+  - Startup: Single account, serverless-first, managed services
+  - Mid-size: Multi-account, advanced monitoring, CI/CD
+  - Enterprise: Multi-region, advanced security, governance
+- **Database Selection Matrix**: Aurora, RDS, DynamoDB, Neptune based on use case
+- **Infrastructure as Code**: CDK/Terraform patterns with security-first design
 
 #### n8n Workflow Development (`.cursor/rules/n8n-mcp.mdc`)
-- **MANDATORY Validation Pattern**: Always validate before building workflows
-  1. `validate_node_minimal()` - Check required fields
-  2. `validate_node_operation()` - Full configuration validation  
-  3. `validate_workflow()` - Complete workflow validation
-- AI tool integration guidelines (ANY node can be an AI tool)
-- Pre and post-deployment validation strategies
-- Incremental update patterns for efficiency (80-90% token savings with diffs)
+**CRITICAL: Always follow this validation pattern for n8n workflows:**
+1. **Pre-Validation**: `validate_node_minimal()` → `validate_node_operation()` 
+2. **Build**: Create workflow with validated configurations
+3. **Post-Validation**: `validate_workflow()` → `validate_workflow_connections()`
+4. **Deploy**: Use incremental updates with `n8n_update_partial_workflow()` for 80-90% token savings
+
+**Key Insights**:
+- ANY node can be an AI tool (not just those marked usableAsTool=true)
+- Use diff operations for existing workflow updates
+- Test thoroughly both locally and after deployment
 
 ## Environment Configuration
 
@@ -521,11 +528,19 @@ make test                                    # Run all tests via test-runner.sh
 
 ## Critical Development Guidelines
 
+### AWS API Rate Limiting & Pricing
+**IMPORTANT**: The project implements intelligent pricing with caching to avoid AWS API rate limits:
+- **Cached Pricing**: 1-hour cache for individual instance pricing, 30-minute cache for batch data
+- **Fallback Pricing**: Historical averages prevent API dependency (g4dn.xlarge: $0.21/hr, g5g.xlarge: $0.18/hr)
+- **Rate Limiting**: Maximum 1 API call per region with 2-second delays and exponential backoff
+- **Batch Requests**: Single API call per region for all instance types vs individual calls
+
 ### Before Making ANY Changes
 1. **MUST** run `make test` before deployment - this is non-negotiable
 2. **MUST** use `./scripts/simple-demo.sh` to test deployment logic without AWS costs
 3. **MUST** follow the shared library sourcing pattern for any new deployment scripts
 4. **MUST** run `make security-check` before production deployments
+5. **MUST** respect AWS API rate limits - use cached pricing when possible
 
 ### Key Requirements & Constraints  
 - AWS credentials and appropriate permissions required for deployments
@@ -534,13 +549,29 @@ make test                                    # Run all tests via test-runner.sh
 - **Cost Efficiency Focus**: System optimized for 70% cost savings through intelligent spot management
 - **Test-First**: Never skip testing - use test scripts to verify logic without AWS costs
 
+### Compatibility & Breaking Changes Prevention
+**macOS Bash Compatibility**: The project supports both bash 3.x (macOS default) and bash 4.x+ (Linux):
+- **No Associative Arrays**: Uses function-based lookups instead of `declare -A` arrays
+- **Array Syntax**: Uses `"${array[@]}"` syntax compatible with both versions
+- **Set -u Safety**: All variables are properly initialized to prevent unbound variable errors
+
 ### File Location Reference for Quick Navigation
 ```bash
-# Key files for development
-/lib/                          # Shared functions - ALWAYS source these
-/scripts/aws-deployment-*.sh   # Main deployment orchestrators
-/tools/test-runner.sh          # Comprehensive test orchestration
+# Core directories and files
+/lib/                          # Shared functions (ALWAYS source in deployment scripts)
+  ├── aws-deployment-common.sh # Core logging, prerequisites, progress tracking
+  ├── error-handling.sh        # Centralized error handling and cleanup
+  ├── spot-instance.sh         # Spot instance management and pricing
+  └── aws-config.sh           # Configuration defaults and environment
+
+/scripts/                      # Main deployment orchestrators
+  ├── aws-deployment-unified.sh # Main orchestrator (recommended)
+  ├── aws-deployment.sh        # Intelligent deployment with cross-region analysis
+  ├── aws-deployment-simple.sh # Simple on-demand deployment
+  └── simple-demo.sh           # Test deployment logic without AWS costs
+
+/tools/test-runner.sh          # Comprehensive test orchestration (bash 3.x/4.x compatible)
 /tests/                        # Python pytest + shell validation scripts
-/config/                       # Environment and version configurations
-/.cursor/rules/                # IDE development guidelines
+/config/                       # Environment settings and version locks
+/.cursor/rules/                # AWS and n8n development guidelines
 ```

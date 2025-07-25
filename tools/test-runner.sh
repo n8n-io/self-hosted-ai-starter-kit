@@ -27,15 +27,30 @@ readonly TEST_REPORTS_DIR="$PROJECT_ROOT/test-reports"
 readonly COVERAGE_DIR="$TEST_REPORTS_DIR/coverage"
 readonly RESULTS_FILE="$TEST_REPORTS_DIR/test-results.json"
 
-# Test categories
-declare -A TEST_CATEGORIES=(
-    ["unit"]="Unit tests for individual functions"
-    ["integration"]="Integration tests for component interaction"
-    ["security"]="Security vulnerability scans"
-    ["performance"]="Performance and load tests"
-    ["deployment"]="Deployment validation tests"
-    ["smoke"]="Basic smoke tests for quick validation"
-)
+# Test categories - using arrays that work with bash 3.x and 4.x
+readonly TEST_CATEGORIES_UNIT="Unit tests for individual functions"
+readonly TEST_CATEGORIES_INTEGRATION="Integration tests for component interaction"
+readonly TEST_CATEGORIES_SECURITY="Security vulnerability scans"
+readonly TEST_CATEGORIES_PERFORMANCE="Performance and load tests"
+readonly TEST_CATEGORIES_DEPLOYMENT="Deployment validation tests"
+readonly TEST_CATEGORIES_SMOKE="Basic smoke tests for quick validation"
+
+# Helper function to get test category description
+get_test_category_description() {
+    local category="$1"
+    case "$category" in
+        "unit") echo "$TEST_CATEGORIES_UNIT" ;;
+        "integration") echo "$TEST_CATEGORIES_INTEGRATION" ;;
+        "security") echo "$TEST_CATEGORIES_SECURITY" ;;
+        "performance") echo "$TEST_CATEGORIES_PERFORMANCE" ;;
+        "deployment") echo "$TEST_CATEGORIES_DEPLOYMENT" ;;
+        "smoke") echo "$TEST_CATEGORIES_SMOKE" ;;
+        *) echo "Unknown test category" ;;
+    esac
+}
+
+# Array of available test categories
+readonly AVAILABLE_TEST_CATEGORIES=("unit" "integration" "security" "performance" "deployment" "smoke")
 
 # =============================================================================
 # SETUP AND CLEANUP
@@ -537,8 +552,8 @@ generate_test_report() {
 EOF
     
     # Add test results to HTML
-    for category in "${!TEST_CATEGORIES[@]}"; do
-        local description="${TEST_CATEGORIES[$category]}"
+    for category in "${AVAILABLE_TEST_CATEGORIES[@]}"; do
+        local description=$(get_test_category_description "$category")
         local status="Not Run"
         local css_class="warning"
         
@@ -597,8 +612,8 @@ Usage: $0 [options] [test-categories...]
 Test Categories:
 EOF
     
-    for category in "${!TEST_CATEGORIES[@]}"; do
-        printf "  %-12s %s\n" "$category" "${TEST_CATEGORIES[$category]}"
+    for category in "${AVAILABLE_TEST_CATEGORIES[@]}"; do
+        printf "  %-12s %s\n" "$category" "$(get_test_category_description "$category")"
     done
     
     cat << EOF
@@ -670,7 +685,16 @@ main() {
                 exit 1
                 ;;
             *)
-                if [[ " ${!TEST_CATEGORIES[*]} " =~ " $1 " ]]; then
+                # Check if category is valid
+                local category_valid=false
+                for valid_category in "${AVAILABLE_TEST_CATEGORIES[@]}"; do
+                    if [[ "$1" == "$valid_category" ]]; then
+                        category_valid=true
+                        break
+                    fi
+                done
+                
+                if [[ "$category_valid" == "true" ]]; then
                     test_categories+=("$1")
                 else
                     log_error "Unknown test category: $1"
@@ -683,7 +707,7 @@ main() {
     
     # Use all categories if none specified
     if [ ${#test_categories[@]} -eq 0 ]; then
-        test_categories=("${!TEST_CATEGORIES[@]}")
+        test_categories=("${AVAILABLE_TEST_CATEGORIES[@]}")
     fi
     
     # Setup test environment
