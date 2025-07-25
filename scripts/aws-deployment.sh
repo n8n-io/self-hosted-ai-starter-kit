@@ -1900,110 +1900,38 @@ EOF
 launch_spot_instance() {
     local SG_ID="$1"
     local EFS_DNS="$2"
-    local enable_cross_region="${3:-false}"
+    local ENABLE_CROSS_REGION="$3"
     
-    log "🚀 Launching GPU spot instance with intelligent configuration selection..."
+    # Initialize variables with defaults to prevent unbound variable errors
+    local MAX_SPOT_PRICE="${MAX_SPOT_PRICE:-2.00}"
+    local KEY_NAME="${KEY_NAME:-GeuseMaker-key}"
+    local STACK_NAME="${STACK_NAME:-GeuseMaker}"
+    local PROJECT_NAME="${PROJECT_NAME:-GeuseMaker}"
     
-    # Step 1: Try to determine dynamic budget based on current pricing
-    local final_budget="$MAX_SPOT_PRICE"
-    if [[ "$INSTANCE_TYPE" == "auto" ]]; then
-        info "Attempting to determine dynamic budget from current spot pricing..."
-        
-        if dynamic_budget=$(determine_dynamic_budget "$enable_cross_region" "$MAX_SPOT_PRICE" 2>/dev/null); then
-            final_budget="$dynamic_budget"
-            success "Using dynamic budget: \$${final_budget}/hour (based on current market pricing)"
-        else
-            warning "Could not determine dynamic budget, using base budget: \$${MAX_SPOT_PRICE}/hour"
-        fi
+    # Validate required parameters
+    if [[ -z "$SG_ID" || -z "$EFS_DNS" ]]; then
+        error "Missing required parameters for launch_spot_instance"
+        echo "ERROR:missing_params:none:none"
+        return 1
     fi
     
-    # Step 2: Run intelligent configuration selection
-    if [[ "$INSTANCE_TYPE" == "auto" ]]; then
-        log "Auto-selection mode: Finding optimal configuration..."
-        OPTIMAL_CONFIG=$(select_optimal_configuration "$final_budget" "$enable_cross_region")
-        
-        if [[ $? -ne 0 ]]; then
-            # Handle case where no pricing data is available
-            if handle_no_pricing_data "$enable_cross_region" "$final_budget"; then
-                # Retry with potentially updated budget
-                OPTIMAL_CONFIG=$(select_optimal_configuration "$MAX_SPOT_PRICE" "$enable_cross_region")
-                if [[ $? -ne 0 ]]; then
-                    error "Failed to find optimal configuration even after user intervention"
-                    return 1
-                fi
-            else
-                error "Failed to find optimal configuration within budget"
-                return 1
-            fi
-        fi
-        
-        # Parse optimal configuration - Enhanced validation
-        if [[ "$OPTIMAL_CONFIG" == *:*:*:*:* ]]; then
-            # New format with region
-            IFS=':' read -r SELECTED_INSTANCE_TYPE SELECTED_AMI SELECTED_AMI_TYPE SELECTED_PRICE SELECTED_REGION <<< "$OPTIMAL_CONFIG"
-        # COMMENTED OUT: Fallback logic that may mask parsing issues
-        # else
-        #     # Fallback for old format
-        #     IFS=':' read -r SELECTED_INSTANCE_TYPE SELECTED_AMI SELECTED_AMI_TYPE SELECTED_PRICE <<< "$OPTIMAL_CONFIG"
-        #     SELECTED_REGION="$AWS_REGION"
-        else
-            error "Invalid OPTIMAL_CONFIG format: '$OPTIMAL_CONFIG'"
-            error "Expected format: instance_type:ami:ami_type:price:region"
-            return 1
-        fi
-        
-        # Debug output to fix the empty variable issue
-        info "Parsed configuration:"
-        info "  SELECTED_INSTANCE_TYPE: '$SELECTED_INSTANCE_TYPE'"
-        info "  SELECTED_AMI: '$SELECTED_AMI'"
-        info "  SELECTED_AMI_TYPE: '$SELECTED_AMI_TYPE'"
-        info "  SELECTED_PRICE: '$SELECTED_PRICE'"
-        info "  SELECTED_REGION: '$SELECTED_REGION'"
-        
-    else
-        log "Manual selection mode: Using specified instance type $INSTANCE_TYPE"
-        
-        # Verify manually selected instance type and find best AMI
-        if ! check_instance_type_availability "$INSTANCE_TYPE" "$AWS_REGION" >/dev/null 2>&1; then
-            error "Specified instance type $INSTANCE_TYPE not available in $AWS_REGION"
-            return 1
-        fi
-        
-        # Find best AMI for specified instance type
-        local primary_ami="$(get_gpu_config "${INSTANCE_TYPE}_primary")"
-        local secondary_ami="$(get_gpu_config "${INSTANCE_TYPE}_secondary")"
-        
-        if verify_ami_availability "$primary_ami" "$AWS_REGION" >/dev/null 2>&1; then
-            SELECTED_AMI="$primary_ami"
-            SELECTED_AMI_TYPE="primary"
-        elif verify_ami_availability "$secondary_ami" "$AWS_REGION" >/dev/null 2>&1; then
-            SELECTED_AMI="$secondary_ami"
-            SELECTED_AMI_TYPE="secondary"
-        else
-            error "No valid AMIs available for $INSTANCE_TYPE"
-            return 1
-        fi
-        
-        SELECTED_INSTANCE_TYPE="$INSTANCE_TYPE"
-        SELECTED_PRICE="$MAX_SPOT_PRICE"
-        SELECTED_REGION="$AWS_REGION"
-    fi
-    
-    # Validate that we have all required values
+    # Validate that we have the required selection variables
     if [[ -z "$SELECTED_INSTANCE_TYPE" || -z "$SELECTED_AMI" || -z "$SELECTED_AMI_TYPE" ]]; then
-        error "Configuration selection failed - missing required values:"
-        error "  Instance Type: '$SELECTED_INSTANCE_TYPE'"
-        error "  AMI: '$SELECTED_AMI'"
-        error "  AMI Type: '$SELECTED_AMI_TYPE'"
+        error "Instance selection not completed. SELECTED_INSTANCE_TYPE, SELECTED_AMI, or SELECTED_AMI_TYPE is empty"
+        echo "ERROR:no_selection:none:none"
         return 1
     fi
     
     success "Selected configuration: $SELECTED_INSTANCE_TYPE with AMI $SELECTED_AMI ($SELECTED_AMI_TYPE)"
     info "Budget: \$$SELECTED_PRICE/hour"
-    info "Region: $SELECTED_REGION"
+    info "Region: $AWS_REGION"
     
     # Step 2: Create optimized user data
-    create_optimized_user_data "$SELECTED_INSTANCE_TYPE" "$SELECTED_AMI_TYPE"
+    if ! create_optimized_user_data "$SELECTED_INSTANCE_TYPE" "$SELECTED_AMI_TYPE"; then
+        error "Failed to create optimized user data"
+        echo "ERROR:user_data_failed:none:none"
+        return 1
+    fi
     
     # Step 3: Get pricing data for selected instance type for AZ optimization
     log "Analyzing spot pricing by availability zone for $SELECTED_INSTANCE_TYPE..."
@@ -2021,7 +1949,7 @@ launch_spot_instance() {
         info "Current spot pricing by AZ:"
         # Group by AZ and get lowest price for each AZ
         local AZ_PRICES=$(echo "$SPOT_PRICES_JSON" | jq -r 'group_by(.[0]) | map({az: .[0][0], price: (map(.[1]) | min)}) | sort_by(.price) | .[] | "  \(.az): $\(.price)/hour"')
-        echo "$AZ_PRICES"
+        echo "$AZ_PRICES" >&2
         
         # Create ordered list of AZs by price (lowest first)
         ORDERED_AZS=($(echo "$SPOT_PRICES_JSON" | jq -r 'group_by(.[0]) | map({az: .[0][0], price: (map(.[1]) | min)}) | sort_by(.price) | .[].az' 2>/dev/null || echo ""))
@@ -2042,17 +1970,15 @@ launch_spot_instance() {
             info "Attempting launch in price-ordered AZs: ${ORDERED_AZS[*]}"
         else
             error "No AZs within budget for $SELECTED_INSTANCE_TYPE at \$$MAX_SPOT_PRICE"
+            rm -f user-data.sh
+            echo "ERROR:budget_exceeded:none:none"
             return 1
-            # COMMENTED OUT: Fallback that ignores budget constraints
-            # warning "No AZs within budget, trying all available AZs"
-            # ORDERED_AZS=($(aws ec2 describe-availability-zones --region "$AWS_REGION" --query 'AvailabilityZones[?State==`available`].ZoneName' --output text))
         fi
     else
         error "Could not retrieve pricing data for $SELECTED_INSTANCE_TYPE"
+        rm -f user-data.sh
+        echo "ERROR:pricing_failed:none:none"
         return 1
-        # COMMENTED OUT: Fallback that proceeds without pricing data
-        # warning "Could not retrieve pricing data, using all available AZs"
-        # ORDERED_AZS=($(aws ec2 describe-availability-zones --region "$AWS_REGION" --query 'AvailabilityZones[?State==`available`].ZoneName' --output text))
     fi
     
     # Step 5: Try launching in each AZ in order
@@ -2189,6 +2115,12 @@ EOF
                 PUBLIC_IP=$(echo "$INSTANCE_INFO" | jq -r '.PublicIp')
                 ACTUAL_AZ=$(echo "$INSTANCE_INFO" | jq -r '.AZ')
                 
+                # Validate we got the required information
+                if [[ -z "$PUBLIC_IP" || "$PUBLIC_IP" == "null" || -z "$ACTUAL_AZ" || "$ACTUAL_AZ" == "null" ]]; then
+                    warning "Failed to get complete instance information in $AZ"
+                    continue
+                fi
+                
                 # Tag instance with configuration details
                 aws ec2 create-tags \
                     --resources "$INSTANCE_ID" \
@@ -2252,6 +2184,7 @@ EOF
     
     # Clean up
     rm -f user-data.sh
+    echo "ERROR:all_azs_failed:none:none"
     return 1
 }
 
@@ -2265,10 +2198,10 @@ display_results() {
     local EFS_DNS="$3"
     local INSTANCE_AZ="$4"
     
-    # Get deployed configuration info
-    local DEPLOYED_TYPE="${DEPLOYED_INSTANCE_TYPE:-$INSTANCE_TYPE}"
-    local DEPLOYED_AMI_ID="${DEPLOYED_AMI:-unknown}"
-    local DEPLOYED_AMI_TYPE="${DEPLOYED_AMI_TYPE:-unknown}"
+    # Get deployed configuration info with safe fallbacks
+    local DEPLOYED_TYPE="${DEPLOYED_INSTANCE_TYPE:-${SELECTED_INSTANCE_TYPE:-$INSTANCE_TYPE}}"
+    local DEPLOYED_AMI_ID="${DEPLOYED_AMI:-${SELECTED_AMI:-unknown}}"
+    local DEPLOYED_AMI_TYPE="${DEPLOYED_AMI_TYPE:-${SELECTED_AMI_TYPE:-unknown}}"
     
     # Get instance specs
     local SPECS="$(get_instance_specs "$DEPLOYED_TYPE")"
@@ -3438,7 +3371,7 @@ main() {
     cat << 'EOF'
      ____                        __  ___      __              ____  ____  ____  ____ 
     / ___| ___ _   _ ___  ___  /  |/  /___ _/ /_____  _____/ __ \/ __ \/ __ \/ __ \
-   / |  _ / _ \ | | / __|/ _ \/ /|_/ / __ `/ //_/ _ \/ ___/ / / / / / / / / / / / /
+   / |  _ / _ \ | | / __|/ _ \/ /|_/ / __ `/ //_/ _ \/ ___/ / / / / / / / / / / / / /
   / /__| |  __/ |_| \__ \  __/ /  / / /_/ / ,< /  __/ /  / /_/ / /_/ / /_/ / /_/ / 
   \____/_|\___|\__,_|___/\___/_/  /_/\__,_/_/|_|\___/_/   \____/\____/\____/\____/  
                                                                   
@@ -3451,6 +3384,11 @@ EOF
     
     # Set error trap
     trap cleanup_on_error ERR
+    
+    # Initialize deployment variables with safe defaults to prevent unbound variable errors
+    export DEPLOYED_INSTANCE_TYPE="${DEPLOYED_INSTANCE_TYPE:-}"
+    export DEPLOYED_AMI="${DEPLOYED_AMI:-}"
+    export DEPLOYED_AMI_TYPE="${DEPLOYED_AMI_TYPE:-}"
     
     # Run deployment steps
     check_prerequisites
@@ -3466,12 +3404,133 @@ EOF
     SG_ID=$(create_security_group)
     EFS_DNS=$(create_efs "$SG_ID")
     
+    # Step 1: Run intelligent configuration selection if needed
+    if [[ "$INSTANCE_TYPE" == "auto" ]]; then
+        log "Auto-selection mode: Finding optimal configuration..."
+        
+        # Try to determine dynamic budget based on current pricing
+        local final_budget="$MAX_SPOT_PRICE"
+        info "Attempting to determine dynamic budget from current spot pricing..."
+        
+        if dynamic_budget=$(determine_dynamic_budget "$ENABLE_CROSS_REGION" "$MAX_SPOT_PRICE" 2>/dev/null); then
+            final_budget="$dynamic_budget"
+            success "Using dynamic budget: \$${final_budget}/hour (based on current market pricing)"
+        else
+            warning "Could not determine dynamic budget, using base budget: \$${MAX_SPOT_PRICE}/hour"
+        fi
+        
+        OPTIMAL_CONFIG=$(select_optimal_configuration "$final_budget" "$ENABLE_CROSS_REGION")
+        
+        if [[ $? -ne 0 ]]; then
+            # Handle case where no pricing data is available
+            if handle_no_pricing_data "$ENABLE_CROSS_REGION" "$final_budget"; then
+                # Retry with potentially updated budget
+                OPTIMAL_CONFIG=$(select_optimal_configuration "$MAX_SPOT_PRICE" "$ENABLE_CROSS_REGION")
+                if [[ $? -ne 0 ]]; then
+                    error "Failed to find optimal configuration even after user intervention"
+                    exit 1
+                fi
+            else
+                error "Failed to find optimal configuration within budget"
+                exit 1
+            fi
+        fi
+        
+        # Parse optimal configuration - Enhanced validation
+        if [[ "$OPTIMAL_CONFIG" == *:*:*:*:* ]]; then
+            # New format with region
+            IFS=':' read -r SELECTED_INSTANCE_TYPE SELECTED_AMI SELECTED_AMI_TYPE SELECTED_PRICE SELECTED_REGION <<< "$OPTIMAL_CONFIG"
+        else
+            error "Invalid OPTIMAL_CONFIG format: '$OPTIMAL_CONFIG'"
+            error "Expected format: instance_type:ami:ami_type:price:region"
+            exit 1
+        fi
+        
+        # Debug output to fix the empty variable issue
+        info "Parsed configuration:"
+        info "  SELECTED_INSTANCE_TYPE: '$SELECTED_INSTANCE_TYPE'"
+        info "  SELECTED_AMI: '$SELECTED_AMI'"
+        info "  SELECTED_AMI_TYPE: '$SELECTED_AMI_TYPE'"
+        info "  SELECTED_PRICE: '$SELECTED_PRICE'"
+        info "  SELECTED_REGION: '$SELECTED_REGION'"
+        
+        # Export the selected configuration
+        export SELECTED_INSTANCE_TYPE
+        export SELECTED_AMI
+        export SELECTED_AMI_TYPE
+        export SELECTED_PRICE
+        export SELECTED_REGION
+        
+    else
+        log "Manual selection mode: Using specified instance type $INSTANCE_TYPE"
+        
+        # Verify manually selected instance type and find best AMI
+        if ! check_instance_type_availability "$INSTANCE_TYPE" "$AWS_REGION" >/dev/null 2>&1; then
+            error "Specified instance type $INSTANCE_TYPE not available in $AWS_REGION"
+            exit 1
+        fi
+        
+        # Find best AMI for specified instance type
+        local primary_ami="$(get_gpu_config "${INSTANCE_TYPE}_primary")"
+        local secondary_ami="$(get_gpu_config "${INSTANCE_TYPE}_secondary")"
+        
+        if verify_ami_availability "$primary_ami" "$AWS_REGION" >/dev/null 2>&1; then
+            SELECTED_AMI="$primary_ami"
+            SELECTED_AMI_TYPE="primary"
+        elif verify_ami_availability "$secondary_ami" "$AWS_REGION" >/dev/null 2>&1; then
+            SELECTED_AMI="$secondary_ami"
+            SELECTED_AMI_TYPE="secondary"
+        else
+            error "No valid AMIs available for $INSTANCE_TYPE"
+            exit 1
+        fi
+        
+        SELECTED_INSTANCE_TYPE="$INSTANCE_TYPE"
+        SELECTED_PRICE="$MAX_SPOT_PRICE"
+        SELECTED_REGION="$AWS_REGION"
+        
+        # Export the selected configuration
+        export SELECTED_INSTANCE_TYPE
+        export SELECTED_AMI
+        export SELECTED_AMI_TYPE
+        export SELECTED_PRICE
+        export SELECTED_REGION
+    fi
+    
+    # Validate that we have all required values
+    if [[ -z "$SELECTED_INSTANCE_TYPE" || -z "$SELECTED_AMI" || -z "$SELECTED_AMI_TYPE" ]]; then
+        error "Configuration selection failed - missing required values:"
+        error "  Instance Type: '$SELECTED_INSTANCE_TYPE'"
+        error "  AMI: '$SELECTED_AMI'"
+        error "  AMI Type: '$SELECTED_AMI_TYPE'"
+        exit 1
+    fi
+    
     # Launch single spot instance directly (no ASG to avoid multiple instances)
     log "Launching single spot instance with multi-AZ fallback..."
     INSTANCE_INFO=$(launch_spot_instance "$SG_ID" "$EFS_DNS" "$ENABLE_CROSS_REGION")
+    
+    # Validate launch_spot_instance success and extract info
+    if [[ -z "$INSTANCE_INFO" || "$INSTANCE_INFO" == *"ERROR"* ]]; then
+        error "Failed to launch spot instance"
+        error "Error details: $INSTANCE_INFO"
+        exit 1
+    fi
+    
     INSTANCE_ID=$(echo "$INSTANCE_INFO" | cut -d: -f1)
     PUBLIC_IP=$(echo "$INSTANCE_INFO" | cut -d: -f2)
     INSTANCE_AZ=$(echo "$INSTANCE_INFO" | cut -d: -f3)
+    
+    # Validate extracted information
+    if [[ -z "$INSTANCE_ID" || -z "$PUBLIC_IP" || -z "$INSTANCE_AZ" ]]; then
+        error "Invalid instance information returned: '$INSTANCE_INFO'"
+        exit 1
+    fi
+    
+    # Set deployment variables based on selected configuration
+    export DEPLOYED_INSTANCE_TYPE="$SELECTED_INSTANCE_TYPE"
+    export DEPLOYED_AMI="$SELECTED_AMI"
+    export DEPLOYED_AMI_TYPE="$SELECTED_AMI_TYPE"
 
     # Now create EFS mount target in the AZ where instance was actually launched
     # Extract EFS_ID from EFS_DNS (format: fs-xxxxx.efs.region.amazonaws.com)

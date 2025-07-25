@@ -6,12 +6,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Current Branch**: `GeuseMaker` (feature branch)  
 **Main Branch**: `main` (for pull requests)  
-**Modified Files**: `CLAUDE.md`, `scripts/aws-deployment.sh`, `tools/test-runner.sh`
+**Recent Changes**: Enhanced AWS deployment scripts, test runner improvements, specialized agent integration
 
 ### Branch Workflow
 - Work on feature branch `GeuseMaker`
 - Create PRs against `main` branch
 - Always run tests before committing: `make test`
+
+### Claude Code Agent Integration
+The project includes specialized Claude Code agents in `.claude/agents/` for automated assistance:
+- **bash-script-validator**: Validates shell scripts for cross-platform compatibility (macOS bash 3.x + Linux 4.x+)
+- **test-runner-specialist**: Orchestrates comprehensive testing workflows before deployments
+- **aws-deployment-debugger**: Debugs deployment failures, spot instance issues, and infrastructure problems
+- **security-validator**: Performs security validation and compliance checking before production
+- **aws-cost-optimizer**: Analyzes and optimizes AWS costs during infrastructure deployment
 
 ## Quick Reference
 
@@ -541,6 +549,14 @@ make test                                    # Run all tests via test-runner.sh
 3. **MUST** follow the shared library sourcing pattern for any new deployment scripts
 4. **MUST** run `make security-check` before production deployments
 5. **MUST** respect AWS API rate limits - use cached pricing when possible
+
+### Specialized Agent Usage Patterns
+**When to Use Each Agent Proactively:**
+- **bash-script-validator**: ANY shell script modifications (use before testing deployment scripts)
+- **test-runner-specialist**: Before any deployment or code changes (validates comprehensive test suite)
+- **aws-deployment-debugger**: When encountering AWS deployment failures, spot instance capacity issues
+- **security-validator**: Before production deployment, after security configuration changes
+- **aws-cost-optimizer**: When deploying infrastructure requiring cost efficiency analysis
 
 ### Key Requirements & Constraints  
 - AWS credentials and appropriate permissions required for deployments
