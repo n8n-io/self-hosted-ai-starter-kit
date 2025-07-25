@@ -415,47 +415,140 @@ create_efs_mount_target_for_az() {
 # SHARED INSTANCE MANAGEMENT
 # =============================================================================
 
+refresh_instance_public_ip() {
+    local instance_id="$1"
+    
+    if [ -z "$instance_id" ]; then
+        error "refresh_instance_public_ip requires instance_id parameter"
+        return 1
+    fi
+    
+    local public_ip
+    public_ip=$(aws ec2 describe-instances \
+        --instance-ids "$instance_id" \
+        --query 'Reservations[0].Instances[0].PublicIpAddress' \
+        --output text \
+        --region "$AWS_REGION" 2>/dev/null)
+    
+    if [ "$public_ip" = "None" ] || [ -z "$public_ip" ] || [ "$public_ip" = "null" ]; then
+        return 1
+    fi
+    
+    echo "$public_ip"
+    return 0
+}
+
 wait_for_ssh_ready() {
     local instance_ip="$1"
     local key_file="$2"
-    local max_attempts="${3:-60}"  # Increased from 30 to 60 attempts
-    local sleep_interval="${4:-15}"  # Increased from 10 to 15 seconds
+    local max_attempts="${3:-60}"  # Default for non-GPU instances
+    local sleep_interval="${4:-30}"  # 30 seconds for better reliability
+    local instance_type="${5:-}"  # Instance type for GPU detection
+    local instance_id="${6:-}"  # Instance ID for IP refresh
     
     if [ -z "$instance_ip" ] || [ -z "$key_file" ]; then
         error "wait_for_ssh_ready requires instance_ip and key_file parameters"
         return 1
     fi
 
-    log "Waiting for SSH to be ready on $instance_ip..."
-    log "This may take up to $((max_attempts * sleep_interval / 60)) minutes for GPU instances with comprehensive setup"
+    # Detect GPU instances and extend timeout
+    local is_gpu_instance=false
+    if [[ "$instance_type" =~ ^(g[0-9]|p[0-9]|inf[0-9]) ]]; then
+        is_gpu_instance=true
+        # GPU instances need more time for driver installation and user data
+        if [ "$max_attempts" -eq 60 ]; then  # Only override if using default
+            max_attempts=90  # 45 minutes (90 * 30s)
+        fi
+        log "GPU instance detected ($instance_type) - extending SSH timeout to $((max_attempts * sleep_interval / 60)) minutes"
+        warning "GPU instances take 20-30+ minutes to boot due to NVIDIA driver installation and comprehensive setup"
+        info "You can monitor progress in the AWS EC2 Console under 'Instance Settings > Get System Log'"
+    fi
+
+    # Ensure we have the latest public IP before starting
+    local current_ip="$instance_ip"
+    if [ -n "$instance_id" ]; then
+        local refreshed_ip
+        refreshed_ip=$(refresh_instance_public_ip "$instance_id")
+        if [ $? -eq 0 ] && [ "$refreshed_ip" != "$current_ip" ]; then
+            warning "Public IP changed from $current_ip to $refreshed_ip - using latest IP"
+            current_ip="$refreshed_ip"
+        fi
+    fi
+    
+    log "Waiting for SSH to be ready on $current_ip..."
+    info "Using public IP: $current_ip (retrieved from AWS API)"
+    log "Maximum wait time: $((max_attempts * sleep_interval / 60)) minutes ($max_attempts attempts, ${sleep_interval}s intervals)"
     
     local attempt=1
+    local progress_interval=10  # Show progress every 10 attempts (5 minutes)
+    local last_troubleshoot_attempt=0
+    local last_ip_refresh=0
+    
     while [ $attempt -le $max_attempts ]; do
+        # Refresh IP every 20 attempts (10 minutes) if instance_id is provided
+        if [ -n "$instance_id" ] && [ $((attempt - last_ip_refresh)) -ge 20 ]; then
+            local refreshed_ip
+            refreshed_ip=$(refresh_instance_public_ip "$instance_id")
+            if [ $? -eq 0 ] && [ "$refreshed_ip" != "$current_ip" ]; then
+                warning "Public IP changed from $current_ip to $refreshed_ip during SSH wait - switching to new IP"
+                current_ip="$refreshed_ip"
+            fi
+            last_ip_refresh=$attempt
+        fi
+        
         # First check if SSH port is open
-        if nc -z -w5 "$instance_ip" 22 2>/dev/null; then
+        if nc -z -w5 "$current_ip" 22 2>/dev/null; then
             # Then try SSH connection
-            if ssh -i "$key_file" -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=yes ubuntu@"$instance_ip" "echo 'SSH is ready'" &> /dev/null; then
-                success "SSH is ready on $instance_ip"
+            if ssh -i "$key_file" -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=yes ubuntu@"$current_ip" "echo 'SSH is ready'" &> /dev/null; then
+                success "SSH is ready on $current_ip (attempt $attempt/$max_attempts)"
                 return 0
             fi
         fi
         
-        # Show progress every 10 attempts
-        if [ $((attempt % 10)) -eq 0 ]; then
-            info "SSH attempt $attempt/$max_attempts failed. Waiting ${sleep_interval}s... (${((attempt * 100 / max_attempts))}% complete)"
+        # Show progress every 10 attempts (5 minutes with 30s intervals)
+        if [ $((attempt % progress_interval)) -eq 0 ]; then
+            local elapsed_minutes=$((attempt * sleep_interval / 60))
+            local total_minutes=$((max_attempts * sleep_interval / 60))
+            local percent_complete=$((attempt * 100 / max_attempts))
+            info "SSH attempt $attempt/$max_attempts failed. Elapsed: ${elapsed_minutes}/${total_minutes} minutes (${percent_complete}% complete)"
+            info "Current target IP: $current_ip"
+            
+            # Show troubleshooting notes after 30 minutes for any instance type
+            if [ $elapsed_minutes -ge 30 ] && [ $((attempt - last_troubleshoot_attempt)) -ge 20 ]; then
+                last_troubleshoot_attempt=$attempt
+                warning "SSH wait has exceeded 30 minutes. Troubleshooting suggestions:"
+                warning "1. Check AWS EC2 Console: Instance Settings > Get System Log for boot progress"
+                warning "2. Check AWS EC2 Console: Monitoring tab for CPU/Network activity"
+                warning "3. Verify current public IP in AWS Console matches: $current_ip"
+                if [ "$is_gpu_instance" = true ]; then
+                    warning "4. GPU instances: User data installs NVIDIA drivers and Docker GPU support (can take 20-30+ minutes)"
+                    warning "5. GPU instances: Check CloudWatch logs in /aws/GeuseMaker/development for detailed progress"
+                else
+                    warning "4. Check CloudWatch logs for user data script progress"
+                fi
+                warning "6. Verify Security Group allows SSH (port 22) from your IP"
+                warning "7. Instance will continue waiting until ${total_minutes} minute timeout"
+            fi
         else
-            info "SSH attempt $attempt/$max_attempts failed. Waiting ${sleep_interval}s..."
+            info "SSH attempt $attempt/$max_attempts failed on $current_ip. Waiting ${sleep_interval}s..."
         fi
         
         sleep $sleep_interval
         ((attempt++))
     done
 
-    error "SSH failed to become ready after $max_attempts attempts (${((max_attempts * sleep_interval / 60))} minutes)"
-    error "This may indicate:"
-    error "1. User data script is still running (check CloudWatch logs)"
-    error "2. Security group doesn't allow SSH access"
-    error "3. Instance is having boot issues"
+    error "SSH failed to become ready after $max_attempts attempts ($((max_attempts * sleep_interval / 60)) minutes)"
+    error "Final target IP was: $current_ip"
+    error "Instance may still be booting or have configuration issues. Check:"
+    error "1. AWS EC2 Console > Instance Settings > Get System Log"
+    error "2. AWS EC2 Console > Monitoring tab for activity"
+    error "3. Verify public IP in AWS Console matches script target: $current_ip"
+    if [ "$is_gpu_instance" = true ]; then
+        error "4. CloudWatch logs: /aws/GeuseMaker/development"
+        error "5. GPU driver installation can take 20-30+ minutes"
+    fi
+    error "6. Security group SSH access (port 22)"
+    warning "Instance is NOT being terminated - you can continue troubleshooting in AWS Console"
     return 1
 }
 

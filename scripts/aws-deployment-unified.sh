@@ -553,8 +553,8 @@ deploy_instance() {
 deploy_application() {
     log "Deploying application..."
     
-    # Wait for SSH to be ready
-    if ! wait_for_ssh_ready "$INSTANCE_IP" "$KEY_FILE"; then
+    # Wait for SSH to be ready (with GPU-aware timeout)
+    if ! wait_for_ssh_ready "$INSTANCE_IP" "$KEY_FILE" "" "" "$INSTANCE_TYPE"; then
         error "SSH connectivity failed"
         return 1
     fi

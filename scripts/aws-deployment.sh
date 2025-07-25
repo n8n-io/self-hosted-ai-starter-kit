@@ -305,6 +305,76 @@ get_instance_type_list() {
     echo "g4dn.xlarge g4dn.2xlarge g5g.xlarge g5g.2xlarge"
 }
 
+# Unified configuration matrix that combines static configuration with dynamic checks
+get_unified_configurations() {
+    local region="$1"
+    local enable_cross_region="${2:-false}"
+    
+    log "🔍 Building unified configuration matrix..."
+    
+    # Define regions to check
+    local regions_to_check=("$region")
+    if [[ "$enable_cross_region" == "true" ]]; then
+        regions_to_check=("us-east-1" "us-west-2" "eu-west-1" "ap-southeast-1" "us-east-2" "eu-central-1")
+    fi
+    
+    local unified_configs=()
+    
+    for check_region in "${regions_to_check[@]}"; do
+        info "Checking configurations in region $check_region..."
+        
+        for instance_type in $(get_instance_type_list); do
+            # Get static configuration data
+            local specs="$(get_instance_specs "$instance_type")"
+            local perf_score="$(get_performance_score "$instance_type")"
+            local primary_ami="$(get_gpu_config "${instance_type}_primary")"
+            local secondary_ami="$(get_gpu_config "${instance_type}_secondary")"
+            
+            if [[ -z "$specs" || -z "$perf_score" || -z "$primary_ami" ]]; then
+                warning "Incomplete configuration data for $instance_type, skipping"
+                continue
+            fi
+            
+            # Check instance type availability
+            if ! check_instance_type_availability "$instance_type" "$check_region" >/dev/null 2>&1; then
+                info "$instance_type not available in $check_region"
+                continue
+            fi
+            
+            # Check AMI availability and select best one
+            local selected_ami=""
+            local ami_type=""
+            
+            if verify_ami_availability "$primary_ami" "$check_region" >/dev/null 2>&1; then
+                selected_ami="$primary_ami"
+                ami_type="primary"
+            elif verify_ami_availability "$secondary_ami" "$check_region" >/dev/null 2>&1; then
+                selected_ami="$secondary_ami"
+                ami_type="secondary"
+            else
+                info "No valid AMIs for $instance_type in $check_region"
+                continue
+            fi
+            
+            # Parse specs
+            IFS=':' read -r vcpus ram gpus gpu_type cpu_arch storage <<< "$specs"
+            
+            # Create unified configuration entry
+            local config_entry="$instance_type:$selected_ami:$ami_type:$check_region:$vcpus:$ram:$gpus:$gpu_type:$cpu_arch:$storage:$perf_score"
+            unified_configs+=("$config_entry")
+            
+            success "✓ $instance_type available in $check_region with $ami_type AMI"
+        done
+    done
+    
+    if [[ ${#unified_configs[@]} -eq 0 ]]; then
+        error "No valid configurations found across all checked regions"
+        return 1
+    fi
+    
+    printf '%s\n' "${unified_configs[@]}"
+}
+
 verify_ami_availability() {
     local ami_id="$1"
     local region="$2"
@@ -435,6 +505,270 @@ get_comprehensive_spot_pricing() {
     # Output comprehensive pricing data
     cat "$pricing_file"
     rm -f "$pricing_file"
+}
+
+# Enhanced comprehensive spot pricing with configuration integration
+get_comprehensive_spot_pricing_enhanced() {
+    local configurations="$1"  # Array of unified configurations
+    local max_budget="${2:-999999}"
+    
+    log "💰 Analyzing comprehensive spot pricing with budget optimization..."
+    
+    # Create temporary file for enhanced pricing data
+    local pricing_file=$(mktemp)
+    echo "[]" > "$pricing_file"
+    
+    # Extract unique instance types and regions from configurations
+    local instance_regions=()
+    while IFS= read -r config; do
+        if [[ -n "$config" ]]; then
+            IFS=':' read -r instance_type ami ami_type region vcpus ram gpus gpu_type cpu_arch storage perf_score <<< "$config"
+            instance_regions+=("$instance_type:$region")
+        fi
+    done <<< "$configurations"
+    
+    # Remove duplicates
+    local unique_instance_regions=($(printf '%s\n' "${instance_regions[@]}" | sort -u))
+    
+    local lowest_price="999999"
+    
+    for instance_region in "${unique_instance_regions[@]}"; do
+        IFS=':' read -r instance_type region <<< "$instance_region"
+        info "Fetching spot prices for $instance_type in $region..."
+        
+        # Get recent spot price history with enhanced query
+        SPOT_DATA=$(aws ec2 describe-spot-price-history \
+            --instance-types "$instance_type" \
+            --product-descriptions "Linux/UNIX" \
+            --max-items 30 \
+            --region "$region" \
+            --query 'SpotPriceHistory[*].{instance_type: InstanceType, az: AvailabilityZone, price: SpotPrice, timestamp: Timestamp, region: "'$region'"}' \
+            --output json 2>/dev/null || echo "[]")
+        
+        if [[ "$SPOT_DATA" != "[]" && -n "$SPOT_DATA" && "$SPOT_DATA" != "null" ]]; then
+            # Validate JSON and merge with existing data
+            if echo "$SPOT_DATA" | jq empty 2>/dev/null; then
+                # Track lowest price for budget optimization
+                local current_min=$(echo "$SPOT_DATA" | jq -r 'min_by(.price | tonumber) | .price' 2>/dev/null || echo "999999")
+                if (( $(echo "$current_min < $lowest_price" | bc -l 2>/dev/null || echo "0") )); then
+                    lowest_price="$current_min"
+                fi
+                
+                jq -s '.[0] + .[1]' "$pricing_file" <(echo "$SPOT_DATA") > "${pricing_file}.tmp"
+                mv "${pricing_file}.tmp" "$pricing_file"
+            else
+                warning "Invalid JSON response for $instance_type pricing data"
+            fi
+        else
+            warning "No spot pricing data available for $instance_type in $region"
+        fi
+    done
+    
+    # Validate we have pricing data
+    local data_count=$(jq 'length' "$pricing_file" 2>/dev/null || echo "0")
+    if [[ "$data_count" == "0" ]]; then
+        warning "No pricing data collected across all instances"
+        echo "[]"
+        rm -f "$pricing_file"
+        return 1
+    fi
+    
+    # Set dynamic budget to lowest price + 20% margin if not specified
+    if [[ "$max_budget" == "999999" && "$lowest_price" != "999999" ]]; then
+        local suggested_budget=$(echo "scale=3; $lowest_price * 1.2" | bc -l 2>/dev/null || echo "$lowest_price")
+        success "🎯 Dynamic budget optimization: Suggested budget \$${suggested_budget}/hour (lowest: \$${lowest_price})"
+        # Export for use by calling functions
+        export DYNAMIC_BUDGET="$suggested_budget"
+        export LOWEST_AVAILABLE_PRICE="$lowest_price"
+    fi
+    
+    # Output the pricing data
+    cat "$pricing_file"
+    rm -f "$pricing_file"
+}
+
+# Display comprehensive configuration analysis with pricing
+display_configuration_analysis() {
+    local configurations="$1"
+    local pricing_data="$2"
+    local max_budget="$3"
+    
+    log "📋 Displaying comprehensive configuration analysis..."
+    
+    echo ""
+    echo -e "${CYAN}┌────────────────────────────────────────────────────────────────────────────────────────────────────┐${NC}"
+    echo -e "${CYAN}│                         🚀 INTELLIGENT GPU CONFIGURATION ANALYSIS 🚀                        │${NC}"
+    echo -e "${CYAN}├────────────────────────────────────────────────────────────────────────────────────────────────────┤${NC}"
+    printf "${CYAN}│ %-3s │ %-12s │ %-8s │ %-8s │ %-5s │ %-6s │ %-4s │ %-8s │ %-6s │ %-11s │ %-10s │${NC}\n" \
+        "#" "Instance" "Region" "Price/hr" "Perf" "CPUs" "RAM" "GPU" "Arch" "Availability" "Value"
+    echo -e "${CYAN}├─────├──────────────├──────────├──────────├───────├────────├──────├──────────├────────├─────────────├────────────┤${NC}"
+    
+    local config_num=1
+    local valid_configs=()
+    
+    while IFS= read -r config; do
+        if [[ -n "$config" ]]; then
+            IFS=':' read -r instance_type ami ami_type region vcpus ram gpus gpu_type cpu_arch storage perf_score <<< "$config"
+            
+            # Get average spot price for this instance type in this region
+            local avg_price=$(echo "$pricing_data" | jq -r \
+                --arg type "$instance_type" --arg reg "$region" '
+                [.[] | select(.instance_type == $type and .region == $reg) | .price | tonumber] | 
+                if length > 0 then (add / length) else null end' 2>/dev/null || echo "null")
+            
+            if [[ "$avg_price" == "null" || -z "$avg_price" || "$avg_price" == "0" ]]; then
+                avg_price="N/A"
+                availability="❌ No pricing"
+                value_ratio="N/A"
+            else
+                # Check if within budget
+                if (( $(echo "$avg_price <= $max_budget" | bc -l 2>/dev/null || echo "0") )); then
+                    availability="✓ Available"
+                    # Calculate value ratio (performance per dollar)
+                    value_ratio=$(echo "scale=2; $perf_score / $avg_price" | bc -l 2>/dev/null || echo "0")
+                    valid_configs+=("$config_num:$config:$avg_price:$value_ratio")
+                else
+                    availability="💰 Over budget"
+                    value_ratio=$(echo "scale=2; $perf_score / $avg_price" | bc -l 2>/dev/null || echo "0")
+                fi
+                avg_price="\$${avg_price}"
+            fi
+            
+            # Format RAM display
+            local ram_display="${ram}GB"
+            
+            printf "${CYAN}│ %-3s │ %-12s │ %-8s │ %-8s │ %-5s │ %-6s │ %-4s │ %-8s │ %-6s │ %-11s │ %-10s │${NC}\n" \
+                "$config_num" "$instance_type" "$region" "$avg_price" "$perf_score" "$vcpus" "$ram_display" "$gpu_type" "$cpu_arch" "$availability" "$value_ratio"
+            
+            ((config_num++))
+        fi
+    done <<< "$configurations"
+    
+    echo -e "${CYAN}└─────┴──────────────┴──────────┴──────────┴───────┴────────┴──────┴──────────┴────────┴─────────────┴────────────┘${NC}"
+    echo ""
+    
+    # Show budget and recommendation info
+    info "💰 Budget limit: \$${max_budget}/hour"
+    if [[ -n "$LOWEST_AVAILABLE_PRICE" && "$LOWEST_AVAILABLE_PRICE" != "999999" ]]; then
+        info "📈 Lowest available price: \$${LOWEST_AVAILABLE_PRICE}/hour"
+    fi
+    if [[ -n "$DYNAMIC_BUDGET" ]]; then
+        info "🎯 Recommended budget: \$${DYNAMIC_BUDGET}/hour (lowest + 20% margin)"
+    fi
+    
+    # Export valid configurations for user selection
+    printf '%s\n' "${valid_configs[@]}"
+}
+
+# Interactive user selection of configuration
+prompt_user_selection() {
+    local valid_configs="$1"
+    local all_configurations="$2"
+    
+    echo ""
+    echo -e "${YELLOW}✨ CONFIGURATION SELECTION ✨${NC}"
+    echo -e "${CYAN}─────────────────────────────────────${NC}"
+    
+    if [[ -z "$valid_configs" ]]; then
+        error "No configurations available within your budget."
+        warning "Consider:"
+        warning "  1. Increasing your --max-spot-price budget"
+        warning "  2. Using --cross-region to find better pricing"
+        warning "  3. Trying again during off-peak hours"
+        return 1
+    fi
+    
+    local config_array=()
+    while IFS= read -r line; do
+        if [[ -n "$line" ]]; then
+            config_array+=("$line")
+        fi
+    done <<< "$valid_configs"
+    
+    if [[ ${#config_array[@]} -eq 1 ]]; then
+        # Only one valid option, auto-select it
+        local selected_line="${config_array[0]}"
+        IFS=':' read -r config_num config_data avg_price value_ratio <<< "$selected_line"
+        
+        success "🎯 Only one configuration within budget - auto-selecting:"
+        IFS=':' read -r instance_type ami ami_type region vcpus ram gpus gpu_type cpu_arch storage perf_score <<< "$config_data"
+        info "  Selected: $instance_type in $region at $avg_price/hour (Value: $value_ratio)"
+        
+        echo "$config_data:$avg_price"
+        return 0
+    fi
+    
+    # Multiple options available - prompt user
+    info "Available configurations within budget:"
+    echo ""
+    
+    for i in "${!config_array[@]}"; do
+        local config_line="${config_array[$i]}"
+        IFS=':' read -r config_num config_data avg_price value_ratio <<< "$config_line"
+        IFS=':' read -r instance_type ami ami_type region vcpus ram gpus gpu_type cpu_arch storage perf_score <<< "$config_data"
+        
+        echo -e "  ${GREEN}[$((i+1))]${NC} $instance_type in $region - $avg_price/hour (Value: $value_ratio, Perf: $perf_score)"
+    done
+    
+    echo ""
+    echo -e "  ${GREEN}[a]${NC} Auto-select best value (highest performance/price ratio)"
+    echo -e "  ${GREEN}[q]${NC} Quit deployment"
+    echo ""
+    
+    while true; do
+        read -p "Select configuration [1-${#config_array[@]}/a/q]: " choice
+        
+        case "$choice" in
+            [1-9]|[1-9][0-9])
+                local choice_idx=$((choice - 1))
+                if [[ $choice_idx -ge 0 && $choice_idx -lt ${#config_array[@]} ]]; then
+                    local selected_line="${config_array[$choice_idx]}"
+                    IFS=':' read -r config_num config_data avg_price value_ratio <<< "$selected_line"
+                    
+                    success "🎯 User selected configuration $choice:"
+                    IFS=':' read -r instance_type ami ami_type region vcpus ram gpus gpu_type cpu_arch storage perf_score <<< "$config_data"
+                    info "  Selected: $instance_type in $region at $avg_price/hour (Value: $value_ratio)"
+                    
+                    echo "$config_data:$avg_price"
+                    return 0
+                else
+                    warning "Invalid selection. Please choose 1-${#config_array[@]}, 'a', or 'q'."
+                fi
+                ;;
+            [aA])
+                # Auto-select best value
+                local best_config=""
+                local best_value=0
+                
+                for config_line in "${config_array[@]}"; do
+                    IFS=':' read -r config_num config_data avg_price value_ratio <<< "$config_line"
+                    if (( $(echo "$value_ratio > $best_value" | bc -l 2>/dev/null || echo "0") )); then
+                        best_value="$value_ratio"
+                        best_config="$config_data:$avg_price"
+                    fi
+                done
+                
+                if [[ -n "$best_config" ]]; then
+                    success "🎯 Auto-selected best value configuration:"
+                    IFS=':' read -r instance_type ami ami_type region vcpus ram gpus gpu_type cpu_arch storage perf_score avg_price <<< "$best_config"
+                    info "  Selected: $instance_type in $region at \$$avg_price/hour (Value: $best_value)"
+                    
+                    echo "$best_config"
+                    return 0
+                else
+                    error "Could not determine best configuration"
+                    return 1
+                fi
+                ;;
+            [qQ])
+                info "Deployment cancelled by user."
+                return 1
+                ;;
+            *)
+                warning "Invalid selection. Please choose 1-${#config_array[@]}, 'a', or 'q'."
+                ;;
+        esac
+    done
 }
 
 analyze_cost_performance_matrix() {
@@ -651,306 +985,88 @@ handle_no_pricing_data() {
     done
 }
 
+# Refactored intelligent configuration selection with user interaction
 select_optimal_configuration() {
     local max_budget="$1"
     local enable_cross_region="${2:-false}"
     
-    log "🤖 Intelligent Configuration Selection Process Starting..."
+    log "🤖 NEW Intelligent Configuration Selection Process Starting..."
     log "Budget limit: \$$max_budget/hour"
     log "Cross-region analysis: $enable_cross_region"
     
-    # Define regions to analyze
-    local regions_to_check=("$AWS_REGION")
-    if [[ "$enable_cross_region" == "true" ]]; then
-        # Add popular regions with good GPU availability
-        regions_to_check=("us-east-1" "us-west-2" "eu-west-1" "ap-southeast-1" "us-east-2" "eu-central-1")
-        step "Cross-region analysis enabled - checking regions: ${regions_to_check[*]}"
-    fi
+    # Step 1: Get unified configurations with integrated matrix data and availability
+    step "Step 1: Building unified configuration matrix..."
+    local configurations=$(get_unified_configurations "$AWS_REGION" "$enable_cross_region")
     
-    local all_valid_configs=()
-    local best_region=""
-    local best_config=""
-    local best_price="999999"
-    
-    # Analyze each region
-    for region in "${regions_to_check[@]}"; do
-        log "Analyzing region: $region"
-        
-        # Step 1: Check availability of all instance types in this region
-        progress "Step 1: Checking instance type availability in $region..."
-        local available_types=""
-        for instance_type in $(get_instance_type_list); do
-            if check_instance_type_availability "$instance_type" "$region" >/dev/null 2>&1; then
-                available_types="$available_types $instance_type"
-            fi
-        done
-        
-        if [[ -z "$available_types" ]]; then
-            warning "No GPU instance types available in region $region, skipping"
-            continue
-        fi
-        
-        info "Available instance types in $region:$available_types"
-        
-        # Step 2: Check AMI availability for each configuration in this region
-        progress "Step 2: Verifying AMI availability for each configuration in $region..."
-        local valid_configs=()
-        
-        for instance_type in $available_types; do
-            local primary_ami="$(get_gpu_config "${instance_type}_primary")"
-            local secondary_ami="$(get_gpu_config "${instance_type}_secondary")"
-            
-            if verify_ami_availability "$primary_ami" "$region" >/dev/null 2>&1; then
-                valid_configs+=("${instance_type}:${primary_ami}:primary:${region}")
-                info "✓ $instance_type with primary AMI $primary_ami in $region"
-            elif verify_ami_availability "$secondary_ami" "$region" >/dev/null 2>&1; then
-                valid_configs+=("${instance_type}:${secondary_ami}:secondary:${region}")
-                info "✓ $instance_type with secondary AMI $secondary_ami in $region"
-            else
-                warning "✗ $instance_type: No valid AMIs available in $region"
-            fi
-        done
-        
-        if [[ ${#valid_configs[@]} -eq 0 ]]; then
-            warning "No valid AMI+instance combinations available in $region"
-            continue
-        fi
-        
-        # Step 3: Get comprehensive spot pricing for this region
-        info "Step 3: Analyzing spot pricing in $region..."
-        local pricing_data=$(get_comprehensive_spot_pricing "$available_types" "$region")
-        
-        if [[ -z "$pricing_data" || "$pricing_data" == "[]" ]]; then
-            warning "No pricing data available for $region, skipping"
-            continue
-        fi
-        
-        # Step 4: Perform cost-performance analysis for this region
-        info "Step 4: Performing cost-performance analysis for $region..."
-        local analysis=$(analyze_cost_performance_matrix "$pricing_data")
-        
-        if [[ -z "$analysis" || "$analysis" == "[]" ]]; then
-            warning "No valid analysis results for $region, skipping"
-            continue
-        fi
-        
-        # Add region info to configs and find best in this region
-        for config in "${valid_configs[@]}"; do
-            all_valid_configs+=("$config")
-        done
-        
-        # Find best config in this region within budget
-        local region_best_config=$(echo "$analysis" | jq -r --arg budget "$max_budget" '
-            [.[] | select(.avg_spot_price <= ($budget | tonumber))] | 
-            if length > 0 then 
-                sort_by(-.price_performance_ratio)[0] | 
-                "\(.instance_type)|\(.avg_spot_price)"
-            else 
-                empty 
-            end')
-        
-        if [[ -n "$region_best_config" ]]; then
-            IFS='|' read -r region_instance region_price <<< "$region_best_config"
-            
-            # Check if this is better than our current best
-            if (( $(echo "$region_price < $best_price" | bc -l 2>/dev/null || echo "0") )); then
-                best_price="$region_price"
-                best_region="$region"
-                
-                # Find corresponding AMI for this config
-                for config in "${valid_configs[@]}"; do
-                    IFS=':' read -r inst ami type reg <<< "$config"
-                    if [[ "$inst" == "$region_instance" ]]; then
-                        best_config="$region_instance:$ami:$type:$region_price:$region"
-                        break
-                    fi
-                done
-            fi
-            
-            info "Best in $region: $region_instance at \$$region_price/hour"
-        fi
-    done
-    
-    # Step 5: Display comprehensive analysis if cross-region enabled
-    if [[ "$enable_cross_region" == "true" && ${#all_valid_configs[@]} -gt 0 ]]; then
-        info "Step 5: Cross-Region Configuration Analysis:"
-        echo ""
-        echo -e "${CYAN}┌─────────────────────────────────────────────────────────────────────────────────────┐${NC}"
-        echo -e "${CYAN}│                      CROSS-REGION COST-PERFORMANCE ANALYSIS                        │${NC}"
-        echo -e "${CYAN}├─────────────────┬─────────────┬──────────┬────────────┬─────────────┬─────────────────┤${NC}"
-        echo -e "${CYAN}│ Region          │ Best Instance│ Price/hr │ Perf Score │ Architecture│ Availability    │${NC}"
-        echo -e "${CYAN}├─────────────────┼─────────────┼──────────┼────────────┼─────────────┼─────────────────┤${NC}"
-        
-        # Show best option per region
-        for region in "${regions_to_check[@]}"; do
-            # Find best config for this region
-            local region_configs=()
-            for config in "${all_valid_configs[@]}"; do
-                if [[ "$config" == *":$region" ]]; then
-                    region_configs+=("$config")
-                fi
-            done
-            
-            if [[ ${#region_configs[@]} -gt 0 ]]; then
-                # Get pricing for first available instance in region
-                local sample_config="${region_configs[0]}"
-                IFS=':' read -r sample_inst sample_ami sample_type sample_region <<< "$sample_config"
-                
-                local region_pricing=$(get_comprehensive_spot_pricing "$sample_inst" "$region" 2>/dev/null || echo "[]")
-                if [[ "$region_pricing" != "[]" ]]; then
-                    local region_analysis=$(analyze_cost_performance_matrix "$region_pricing" 2>/dev/null || echo "[]")
-                    if [[ "$region_analysis" != "[]" ]]; then
-                        local region_best=$(echo "$region_analysis" | jq -r --arg budget "$max_budget" '
-                            [.[] | select(.avg_spot_price <= ($budget | tonumber))] | 
-                            if length > 0 then 
-                                sort_by(-.price_performance_ratio)[0] | 
-                                "\(.instance_type)|\(.avg_spot_price)|\(.performance_score)|\(.cpu_architecture)"
-                            else 
-                                "none|N/A|N/A|N/A"
-                            end')
-                        
-                        IFS='|' read -r r_inst r_price r_perf r_arch <<< "$region_best"
-                        local availability="✓ Available"
-                        if [[ "$r_inst" == "none" ]]; then
-                            availability="✗ Over budget"
-                        fi
-                        
-                        printf "${CYAN}│ %-15s │ %-11s │ %-8s │ %-10s │ %-11s │ %-15s │${NC}\n" \
-                            "$region" "$r_inst" "\$${r_price}" "$r_perf" "$r_arch" "$availability"
-                    fi
-                fi
-            else
-                printf "${CYAN}│ %-15s │ %-11s │ %-8s │ %-10s │ %-11s │ %-15s │${NC}\n" \
-                    "$region" "none" "N/A" "N/A" "N/A" "✗ No capacity"
-            fi
-        done
-        
-        echo -e "${CYAN}└─────────────────┴─────────────┴──────────┴────────────┴─────────────┴─────────────────┘${NC}"
-        echo ""
-    fi
-    
-    # Step 6: Select final configuration
-    if [[ -n "$best_config" ]]; then
-        IFS=':' read -r selected_instance selected_ami selected_type selected_price selected_region <<< "$best_config"
-        
-        success "🎯 OPTIMAL CONFIGURATION SELECTED:"
-        info "  Instance Type: $selected_instance"
-        info "  AMI: $selected_ami ($selected_type)"
-        info "  Region: $selected_region"
-        info "  Average Spot Price: \$$selected_price/hour"
-        info "  Performance Score: $(get_performance_score "$selected_instance")"
-        
-        # If different region selected, update global region
-        if [[ "$selected_region" != "$AWS_REGION" ]]; then
-            warning "Optimal configuration found in different region: $selected_region"
-            info "Updating deployment region from $AWS_REGION to $selected_region"
-            export AWS_REGION="$selected_region"
-        fi
-        
-        # Export variables for use by other functions - THIS IS THE KEY FIX
-        export SELECTED_INSTANCE_TYPE="$selected_instance"
-        export SELECTED_AMI="$selected_ami"
-        export SELECTED_AMI_TYPE="$selected_type"
-        export SELECTED_PRICE="$selected_price"
-        export SELECTED_REGION="$selected_region"
-        
-        # Return the configuration string
-        echo "$selected_instance:$selected_ami:$selected_type:$selected_price:$selected_region"
-        return 0
-        
-    else
-        error "No configurations available within budget of \$$max_budget/hour"
-        
-        # Try to suggest alternatives
-        if [[ ${#all_valid_configs[@]} -gt 0 ]]; then
-            warning "Available configurations exceed budget. Consider:"
-            warning "  1. Increase --max-spot-price (current: $max_budget)"
-            warning "  2. Try during off-peak hours for better pricing"
-            warning "  3. Use on-demand instances instead"
-            
-            # Show cheapest available option
-            local cheapest_found=""
-            local cheapest_price="999999"
-            
-            for region in "${regions_to_check[@]}"; do
-                local available_types=""
-                for instance_type in $(get_instance_type_list); do
-                    if check_instance_type_availability "$instance_type" "$region" >/dev/null 2>&1; then
-                        available_types="$available_types $instance_type"
-                    fi
-                done
-                
-                if [[ -n "$available_types" ]]; then
-                    local pricing_data=$(get_comprehensive_spot_pricing "$available_types" "$region" 2>/dev/null || echo "[]")
-                    if [[ "$pricing_data" != "[]" ]]; then
-                        local min_price=$(echo "$pricing_data" | jq -r 'min_by(.price | tonumber) | .price' 2>/dev/null || echo "999999")
-                        if (( $(echo "$min_price < $cheapest_price" | bc -l 2>/dev/null || echo "0") )); then
-                            cheapest_price="$min_price"
-                            cheapest_found="$region"
-                        fi
-                    fi
-                fi
-            done
-            
-            if [[ -n "$cheapest_found" ]]; then
-                info "Cheapest option found: \$$cheapest_price/hour in $cheapest_found"
-                info "Suggested budget: \$$(echo "scale=2; $cheapest_price * 1.2" | bc -l)/hour"
-            fi
-        fi
-        
-        # Always show comprehensive analysis when cross-region is enabled
-        if [[ "$enable_cross_region" == "true" ]]; then
-            echo ""
-            echo -e "${CYAN}═══════════════════════════════════════════════════════════════════════════════════${NC}"
-            echo -e "${YELLOW}🌍 COMPREHENSIVE CROSS-REGION ANALYSIS${NC}"
-            echo -e "${CYAN}═══════════════════════════════════════════════════════════════════════════════════${NC}"
-            
-            printf "${CYAN}│ %-15s │ %-11s │ %-8s │ %-10s │ %-11s │ %-15s │${NC}\n" \
-                "Region" "Instance" "Price" "Perf" "Arch" "Status"
-            echo -e "${CYAN}├─────────────────┼─────────────┼──────────┼────────────┼─────────────┼─────────────────┤${NC}"
-            
-            for region in "${regions_to_check[@]}"; do
-                # Check if region has data
-                local sample_inst="g4dn.xlarge"
-                local region_pricing=$(get_comprehensive_spot_pricing "$sample_inst" "$region" 2>/dev/null || echo "[]")
-                if [[ "$region_pricing" != "[]" ]]; then
-                    local region_analysis=$(analyze_cost_performance_matrix "$region_pricing" 2>/dev/null || echo "[]")
-                    if [[ "$region_analysis" != "[]" ]]; then
-                        local region_best=$(echo "$region_analysis" | jq -r --arg budget "$max_budget" '
-                            [.[] | select(.avg_spot_price <= ($budget | tonumber))] | 
-                            if length > 0 then 
-                                sort_by(-.price_performance_ratio)[0] | 
-                                "\(.instance_type)|\(.avg_spot_price)|\(.performance_score)|\(.cpu_architecture)"
-                            else 
-                                # Show cheapest even if over budget
-                                sort_by(.avg_spot_price)[0] | 
-                                "\(.instance_type)|\(.avg_spot_price)|\(.performance_score)|\(.cpu_architecture)"
-                            end')
-                        
-                        IFS='|' read -r r_inst r_price r_perf r_arch <<< "$region_best"
-                        local availability="✓ Available"
-                        if (( $(echo "$r_price > $max_budget" | bc -l 2>/dev/null || echo "0") )); then
-                            availability="💰 Over budget"
-                        fi
-                        
-                        printf "${CYAN}│ %-15s │ %-11s │ %-8s │ %-10s │ %-11s │ %-15s │${NC}\n" \
-                            "$region" "$r_inst" "\$${r_price}" "$r_perf" "$r_arch" "$availability"
-                    else
-                        printf "${CYAN}│ %-15s │ %-11s │ %-8s │ %-10s │ %-11s │ %-15s │${NC}\n" \
-                            "$region" "N/A" "N/A" "N/A" "N/A" "❌ No analysis"
-                    fi
-                else
-                    printf "${CYAN}│ %-15s │ %-11s │ %-8s │ %-10s │ %-11s │ %-15s │${NC}\n" \
-                        "$region" "N/A" "N/A" "N/A" "N/A" "❌ No pricing"
-                fi
-            done
-            
-            echo -e "${CYAN}└─────────────────┴─────────────┴──────────┴────────────┴─────────────┴─────────────────┘${NC}"
-            echo ""
-        fi
-        
+    if [[ -z "$configurations" ]]; then
+        error "No valid configurations found across all regions"
         return 1
     fi
+    
+    # Step 2: Get comprehensive spot pricing with dynamic budget optimization
+    step "Step 2: Analyzing comprehensive spot pricing..."
+    local pricing_data=$(get_comprehensive_spot_pricing_enhanced "$configurations" "$max_budget")
+    
+    if [[ -z "$pricing_data" || "$pricing_data" == "[]" ]]; then
+        error "No pricing data available for any configurations"
+        return 1
+    fi
+    
+    # Step 3: Use dynamic budget if available (set by pricing function)
+    local effective_budget="$max_budget"
+    if [[ -n "$DYNAMIC_BUDGET" && "$DYNAMIC_BUDGET" != "999999" ]]; then
+        effective_budget="$DYNAMIC_BUDGET"
+        info "Using dynamic budget: \$$effective_budget/hour (optimized from market data)"
+    fi
+    
+    # Step 4: Display comprehensive analysis
+    step "Step 3: Displaying comprehensive configuration analysis..."
+    local valid_configs=$(display_configuration_analysis "$configurations" "$pricing_data" "$effective_budget")
+    
+    # Step 5: Interactive user selection
+    step "Step 4: Interactive configuration selection..."
+    local selected_config=$(prompt_user_selection "$valid_configs" "$configurations")
+    
+    if [[ $? -ne 0 || -z "$selected_config" ]]; then
+        error "Configuration selection failed or cancelled"
+        return 1
+    fi
+    
+    # Step 6: Parse and validate selected configuration
+    IFS=':' read -r selected_instance selected_ami selected_type selected_region vcpus ram gpus gpu_type cpu_arch storage perf_score selected_price <<< "$selected_config"
+    
+    # Validate configuration
+    if [[ -z "$selected_instance" || -z "$selected_ami" || -z "$selected_type" || -z "$selected_region" ]]; then
+        error "Invalid configuration selected: $selected_config"
+        return 1
+    fi
+    
+    # Step 7: Final confirmation and region update
+    success "🎯 FINAL CONFIGURATION CONFIRMED:"
+    info "  Instance Type: $selected_instance ($vcpus vCPUs, ${ram}GB RAM, $gpus x $gpu_type)"
+    info "  AMI: $selected_ami ($selected_type)"
+    info "  Region: $selected_region"
+    info "  Price: \$$selected_price/hour"
+    info "  Performance Score: $perf_score"
+    info "  Architecture: $cpu_arch"
+    
+    # Update global region if different
+    if [[ "$selected_region" != "$AWS_REGION" ]]; then
+        warning "Selected configuration is in different region: $selected_region"
+        info "Updating deployment region from $AWS_REGION to $selected_region"
+        export AWS_REGION="$selected_region"
+    fi
+    
+    # Export variables for use by other functions
+    export SELECTED_INSTANCE_TYPE="$selected_instance"
+    export SELECTED_AMI="$selected_ami"
+    export SELECTED_AMI_TYPE="$selected_type"
+    export SELECTED_PRICE="$selected_price"
+    export SELECTED_REGION="$selected_region"
+    
+    # Return the configuration string in expected format
+    echo "$selected_instance:$selected_ami:$selected_type:$selected_price:$selected_region"
+    return 0
 }
 
 # =============================================================================
@@ -2251,21 +2367,31 @@ setup_cloudfront() {
 }
 
 wait_for_instance_ready() {
-    local PUBLIC_IP="$1"
+    local INSTANCE_ID="$1"
+    local INSTANCE_TYPE="${2:-}"
     
+    if [ -z "$INSTANCE_ID" ]; then
+        error "wait_for_instance_ready requires INSTANCE_ID parameter"
+        return 1
+    fi
+    
+    log "Getting current public IP for instance: $INSTANCE_ID"
+    
+    # Get the current public IP
+    local PUBLIC_IP
+    PUBLIC_IP=$(get_instance_public_ip "$INSTANCE_ID")
+    if [ $? -ne 0 ]; then
+        error "Failed to get public IP for instance: $INSTANCE_ID"
+        return 1
+    fi
+    
+    info "Instance public IP: $PUBLIC_IP"
     log "Waiting for instance to be ready for SSH..."
     
-    for i in {1..30}; do
-        if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i "${KEY_NAME}.pem" "ubuntu@$PUBLIC_IP" "test -f /tmp/user-data-complete" &> /dev/null; then
-            success "Instance is ready!"
-            return 0
-        fi
-        info "Attempt $i/30: Instance not ready yet, waiting 30 seconds..."
-        sleep 30
-    done
+    # Use the improved wait_for_ssh_ready function with instance ID for IP refresh
+    wait_for_ssh_ready "$PUBLIC_IP" "${KEY_NAME}.pem" 90 30 "$INSTANCE_TYPE" "$INSTANCE_ID"
     
-    error "Instance failed to become ready after 15 minutes"
-    return 1
+    return $?
 }
 
 deploy_application() {
@@ -2719,7 +2845,7 @@ EOF
     LOCAL_EFS_ID=$(echo "$EFS_DNS" | cut -d. -f1)
     create_efs_mount_target "$SG_ID" "$INSTANCE_AZ" "$LOCAL_EFS_ID"
     
-    wait_for_instance_ready "$PUBLIC_IP"
+    wait_for_instance_ready "$INSTANCE_ID" "$SELECTED_INSTANCE_TYPE"
     deploy_application "$PUBLIC_IP" "$EFS_DNS" "$INSTANCE_ID"
     setup_monitoring "$PUBLIC_IP"
     validate_deployment "$PUBLIC_IP"
