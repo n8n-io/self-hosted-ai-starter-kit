@@ -947,16 +947,35 @@ cleanup_instances() {
     
     log "Cleaning up instances for stack: $stack_name"
     
-    local instance_ids
-    instance_ids=$(aws ec2 describe-instances \
+    # Try multiple tagging strategies to find instances
+    local instance_ids=""
+    
+    # Strategy 1: Look for Stack tag (new tagging)
+    local stack_tagged_instances
+    stack_tagged_instances=$(aws ec2 describe-instances \
         --filters "Name=tag:Stack,Values=$stack_name" "Name=instance-state-name,Values=running,pending,stopped,stopping" \
         --query 'Reservations[].Instances[].InstanceId' \
         --output text \
-        --region "$AWS_REGION" 2>/dev/null)
+        --region "$AWS_REGION" 2>/dev/null || echo "")
+    
+    # Strategy 2: Look for Name tag with stack pattern (legacy tagging)
+    local name_tagged_instances
+    name_tagged_instances=$(aws ec2 describe-instances \
+        --filters "Name=tag:Name,Values=${stack_name}-*" "Name=instance-state-name,Values=running,pending,stopped,stopping" \
+        --query 'Reservations[].Instances[].InstanceId' \
+        --output text \
+        --region "$AWS_REGION" 2>/dev/null || echo "")
+    
+    # Combine results and remove duplicates
+    instance_ids=$(echo "$stack_tagged_instances $name_tagged_instances" | tr ' ' '\n' | grep -v "^$" | sort -u | tr '\n' ' ' | xargs)
 
     if [ -n "$instance_ids" ] && [ "$instance_ids" != "None" ]; then
-        aws ec2 terminate-instances --instance-ids "$instance_ids" --region "$AWS_REGION" > /dev/null
-        success "Terminated instances: $instance_ids"
+        echo "$instance_ids" | tr ' ' '\n' | while read -r instance_id; do
+            if [ -n "$instance_id" ] && [ "$instance_id" != "None" ]; then
+                aws ec2 terminate-instances --instance-ids "$instance_id" --region "$AWS_REGION" > /dev/null 2>&1 || true
+                success "Terminated instance: $instance_id"
+            fi
+        done
     else
         info "No instances found for cleanup"
     fi
@@ -967,16 +986,37 @@ cleanup_security_groups() {
     
     log "Cleaning up security groups for stack: $stack_name"
     
-    local sg_id
-    sg_id=$(aws ec2 describe-security-groups \
-        --filters "Name=group-name,Values=${stack_name}-sg" \
-        --query 'SecurityGroups[0].GroupId' \
+    # Try multiple strategies to find security groups
+    local sg_ids=""
+    
+    # Strategy 1: Look for Stack tag
+    local stack_tagged_sgs
+    stack_tagged_sgs=$(aws ec2 describe-security-groups \
+        --filters "Name=tag:Stack,Values=${stack_name}" \
+        --query 'SecurityGroups[].GroupId' \
         --output text \
-        --region "$AWS_REGION" 2>/dev/null)
+        --region "$AWS_REGION" 2>/dev/null || echo "")
+    
+    # Strategy 2: Look for group name pattern
+    local name_pattern_sgs
+    name_pattern_sgs=$(aws ec2 describe-security-groups \
+        --filters "Name=group-name,Values=${stack_name}-*" \
+        --query 'SecurityGroups[].GroupId' \
+        --output text \
+        --region "$AWS_REGION" 2>/dev/null || echo "")
+    
+    # Combine results and remove duplicates
+    sg_ids=$(echo "$stack_tagged_sgs $name_pattern_sgs" | tr ' ' '\n' | grep -v "^$" | sort -u | tr '\n' ' ' | xargs)
 
-    if [ -n "$sg_id" ] && [ "$sg_id" != "None" ]; then
-        aws ec2 delete-security-group --group-id "$sg_id" --region "$AWS_REGION" > /dev/null
-        success "Deleted security group: $sg_id"
+    if [ -n "$sg_ids" ] && [ "$sg_ids" != "None" ]; then
+        echo "$sg_ids" | tr ' ' '\n' | while read -r sg_id; do
+            if [ -n "$sg_id" ] && [ "$sg_id" != "None" ]; then
+                # Wait a bit for instances to be terminated first
+                sleep 5
+                aws ec2 delete-security-group --group-id "$sg_id" --region "$AWS_REGION" > /dev/null 2>&1 || true
+                success "Deleted security group: $sg_id"
+            fi
+        done
     else
         info "No security groups found for cleanup"
     fi

@@ -1594,18 +1594,22 @@ select_optimal_configuration() {
     fi
     
     # Step 6: Parse and validate selected configuration
-    # Extract configuration data and price (format: config_num:11_field_config:price:value_ratio)
+    # Handle two formats: 14-field (numbered selection) or 12-field (auto-selection)
     IFS=':' read -ra config_fields <<< "$selected_config"
     
-    if [[ ${#config_fields[@]} -ne 14 ]]; then
-        error "Invalid selected_config format: ${#config_fields[@]} fields, expected 14"
+    if [[ ${#config_fields[@]} -eq 14 ]]; then
+        # Format: config_num:11_field_config:price:value_ratio (numbered selection)
+        local config_data="${config_fields[1]}:${config_fields[2]}:${config_fields[3]}:${config_fields[4]}:${config_fields[5]}:${config_fields[6]}:${config_fields[7]}:${config_fields[8]}:${config_fields[9]}:${config_fields[10]}:${config_fields[11]}"
+        selected_price="${config_fields[12]}"
+    elif [[ ${#config_fields[@]} -eq 12 ]]; then
+        # Format: 11_field_config:price (auto-selection)
+        local config_data="${config_fields[0]}:${config_fields[1]}:${config_fields[2]}:${config_fields[3]}:${config_fields[4]}:${config_fields[5]}:${config_fields[6]}:${config_fields[7]}:${config_fields[8]}:${config_fields[9]}:${config_fields[10]}"
+        selected_price="${config_fields[11]}"
+    else
+        error "Invalid selected_config format: ${#config_fields[@]} fields, expected 12 or 14"
         error "Raw selected_config: $(echo "$selected_config" | cut -c1-100)..."
         return 1
     fi
-    
-    # Extract the 11-field config (fields 1-11, skipping config_num at 0)
-    local config_data="${config_fields[1]}:${config_fields[2]}:${config_fields[3]}:${config_fields[4]}:${config_fields[5]}:${config_fields[6]}:${config_fields[7]}:${config_fields[8]}:${config_fields[9]}:${config_fields[10]}:${config_fields[11]}"
-    selected_price="${config_fields[12]}"
     
     if ! parse_config_safely "$config_data" 11; then
         error "Failed to parse selected configuration: $(echo "$config_data" | cut -c1-50)..."
@@ -1623,6 +1627,13 @@ select_optimal_configuration() {
     cpu_arch="$CONFIG_CPU_ARCH"
     storage="$CONFIG_STORAGE"
     perf_score="$CONFIG_PERF_SCORE"
+    
+    # Export immediately to prevent variable loss (additional safety)
+    export SELECTED_INSTANCE_TYPE="$selected_instance"
+    export SELECTED_AMI="$selected_ami"
+    export SELECTED_AMI_TYPE="$selected_type"
+    export SELECTED_REGION="$selected_region"
+    export SELECTED_PRICE="$selected_price"
     
     # Validate configuration
     if [[ -z "$selected_instance" || -z "$selected_ami" || -z "$selected_type" || -z "$selected_region" ]]; then
@@ -2183,6 +2194,7 @@ EOF
                     --resources "$INSTANCE_ID" \
                     --tags \
                         Key=Name,Value="${STACK_NAME}-gpu-instance" \
+                        Key=Stack,Value="$STACK_NAME" \
                         Key=Project,Value="$PROJECT_NAME" \
                         Key=InstanceType,Value="$SELECTED_INSTANCE_TYPE" \
                         Key=AMI,Value="$SELECTED_AMI" \
@@ -2210,6 +2222,10 @@ EOF
                 export DEPLOYED_INSTANCE_TYPE="$SELECTED_INSTANCE_TYPE"
                 export DEPLOYED_AMI="$SELECTED_AMI"
                 export DEPLOYED_AMI_TYPE="$SELECTED_AMI_TYPE"
+                # Export SELECTED_* variables for backward compatibility
+                export SELECTED_INSTANCE_TYPE="$SELECTED_INSTANCE_TYPE"
+                export SELECTED_AMI="$SELECTED_AMI"
+                export SELECTED_AMI_TYPE="$SELECTED_AMI_TYPE"
                 
                 echo "$INSTANCE_ID:$PUBLIC_IP:$ACTUAL_AZ"
                 return 0
@@ -2475,6 +2491,15 @@ create_security_group() {
             log "[ERROR] Failed to create security group."
             exit 1
         fi
+        
+        # Tag the security group
+        aws ec2 create-tags \
+            --resources "$SG_ID" \
+            --tags \
+                Key=Name,Value="${STACK_NAME}-sg" \
+                Key=Stack,Value="$STACK_NAME" \
+                Key=Project,Value="$PROJECT_NAME" \
+            --region "$AWS_REGION" || true
     fi
     
     # Validate SG_ID format
@@ -2689,7 +2714,7 @@ create_efs() {
     # Tag EFS
     aws efs create-tags \
         --file-system-id "$EFS_ID" \
-        --tags Key=Name,Value="${STACK_NAME}-efs" Key=Project,Value="$PROJECT_NAME" \
+        --tags Key=Name,Value="${STACK_NAME}-efs" Key=Stack,Value="$STACK_NAME" Key=Project,Value="$PROJECT_NAME" \
         --region "$AWS_REGION"
     
     # Wait for EFS to be available
@@ -3050,13 +3075,13 @@ N8N_CORS_ALLOWED_ORIGINS=https://n8n.geuse.io,https://localhost:5678
 N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true
 
 # AWS Configuration
-EFS_DNS=$EFS_DNS
-INSTANCE_ID=$INSTANCE_ID
-AWS_DEFAULT_REGION=$AWS_REGION
+EFS_DNS="${EFS_DNS:-}"
+INSTANCE_ID="${INSTANCE_ID:-}"
+AWS_DEFAULT_REGION="${AWS_REGION:-us-east-1}"
 INSTANCE_TYPE=g4dn.xlarge
 
 # Image version control
-USE_LATEST_IMAGES=$USE_LATEST_IMAGES
+USE_LATEST_IMAGES="${USE_LATEST_IMAGES:-true}"
 
 # API Keys (empty by default - can be configured via SSM)
 OPENAI_API_KEY=
@@ -3457,7 +3482,7 @@ EOF
     LOCAL_EFS_ID=$(echo "$EFS_DNS" | cut -d. -f1)
     create_efs_mount_target "$SG_ID" "$INSTANCE_AZ" "$LOCAL_EFS_ID"
     
-    wait_for_instance_ready "$INSTANCE_ID" "$SELECTED_INSTANCE_TYPE"
+    wait_for_instance_ready "$INSTANCE_ID" "$DEPLOYED_INSTANCE_TYPE"
     deploy_application "$PUBLIC_IP" "$EFS_DNS" "$INSTANCE_ID"
     setup_monitoring "$PUBLIC_IP"
     validate_deployment "$PUBLIC_IP"
