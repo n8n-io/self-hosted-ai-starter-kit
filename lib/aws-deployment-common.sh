@@ -418,8 +418,8 @@ create_efs_mount_target_for_az() {
 wait_for_ssh_ready() {
     local instance_ip="$1"
     local key_file="$2"
-    local max_attempts="${3:-30}"
-    local sleep_interval="${4:-10}"
+    local max_attempts="${3:-60}"  # Increased from 30 to 60 attempts
+    local sleep_interval="${4:-15}"  # Increased from 10 to 15 seconds
     
     if [ -z "$instance_ip" ] || [ -z "$key_file" ]; then
         error "wait_for_ssh_ready requires instance_ip and key_file parameters"
@@ -427,20 +427,35 @@ wait_for_ssh_ready() {
     fi
 
     log "Waiting for SSH to be ready on $instance_ip..."
+    log "This may take up to $((max_attempts * sleep_interval / 60)) minutes for GPU instances with comprehensive setup"
     
     local attempt=1
     while [ $attempt -le $max_attempts ]; do
-        if ssh -i "$key_file" -o ConnectTimeout=5 -o StrictHostKeyChecking=no ubuntu@"$instance_ip" "echo 'SSH is ready'" &> /dev/null; then
-            success "SSH is ready on $instance_ip"
-            return 0
+        # First check if SSH port is open
+        if nc -z -w5 "$instance_ip" 22 2>/dev/null; then
+            # Then try SSH connection
+            if ssh -i "$key_file" -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=yes ubuntu@"$instance_ip" "echo 'SSH is ready'" &> /dev/null; then
+                success "SSH is ready on $instance_ip"
+                return 0
+            fi
         fi
         
-        info "SSH attempt $attempt/$max_attempts failed. Waiting ${sleep_interval}s..."
+        # Show progress every 10 attempts
+        if [ $((attempt % 10)) -eq 0 ]; then
+            info "SSH attempt $attempt/$max_attempts failed. Waiting ${sleep_interval}s... (${((attempt * 100 / max_attempts))}% complete)"
+        else
+            info "SSH attempt $attempt/$max_attempts failed. Waiting ${sleep_interval}s..."
+        fi
+        
         sleep $sleep_interval
         ((attempt++))
     done
 
-    error "SSH failed to become ready after $max_attempts attempts"
+    error "SSH failed to become ready after $max_attempts attempts (${((max_attempts * sleep_interval / 60))} minutes)"
+    error "This may indicate:"
+    error "1. User data script is still running (check CloudWatch logs)"
+    error "2. Security group doesn't allow SSH access"
+    error "3. Instance is having boot issues"
     return 1
 }
 
