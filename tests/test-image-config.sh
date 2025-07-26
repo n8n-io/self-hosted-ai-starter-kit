@@ -138,7 +138,7 @@ test_env_integration() {
     log "Set USE_LATEST_IMAGES=true"
     
     # Check if deployment scripts would honor this
-    if grep -q "USE_LATEST_IMAGES" "$SCRIPT_DIR/../scripts/aws-deployment.sh"; then
+    if grep -q "USE_LATEST_IMAGES" "$SCRIPT_DIR/../scripts/aws-deployment-unified.sh"; then
         success "AWS deployment script supports USE_LATEST_IMAGES"
     else
         warn "AWS deployment script doesn't support USE_LATEST_IMAGES"

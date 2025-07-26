@@ -10,23 +10,26 @@
 
 # Only define colors if not already set (to avoid conflicts with common library)
 if [[ -z "${RED:-}" ]]; then
-    RED='\033[0;31m'
-    GREEN='\033[0;32m'
-    YELLOW='\033[0;33m'
-    BLUE='\033[0;34m'
-    PURPLE='\033[0;35m'
-    CYAN='\033[0;36m'
-    NC='\033[0m'
+    readonly RED='\033[0;31m'
+    readonly GREEN='\033[0;32m'
+    readonly YELLOW='\033[0;33m'
+    readonly BLUE='\033[0;34m'
+    readonly PURPLE='\033[0;35m'
+    readonly CYAN='\033[0;36m'
+    readonly NC='\033[0m'
 fi
 
 # =============================================================================
 # ERROR HANDLING CONFIGURATION
 # =============================================================================
 
-# Error handling modes
-readonly ERROR_MODE_STRICT="strict"        # Exit on any error
-readonly ERROR_MODE_RESILIENT="resilient"  # Continue with warnings
-readonly ERROR_MODE_INTERACTIVE="interactive" # Prompt user on errors
+# Error handling modes (only define if not already set)
+if [[ -z "${ERROR_HANDLING_MODES_DEFINED:-}" ]]; then
+    readonly ERROR_MODE_STRICT="strict"        # Exit on any error
+    readonly ERROR_MODE_RESILIENT="resilient"  # Continue with warnings
+    readonly ERROR_MODE_INTERACTIVE="interactive" # Prompt user on errors
+    readonly ERROR_HANDLING_MODES_DEFINED=true
+fi
 
 # Default error handling configuration
 export ERROR_HANDLING_MODE="${ERROR_HANDLING_MODE:-$ERROR_MODE_STRICT}"

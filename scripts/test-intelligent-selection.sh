@@ -40,8 +40,8 @@ info() {
 
 # Import functions from the main deployment script
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/aws-deployment.sh" 2>/dev/null || {
-    error "Cannot source aws-deployment.sh. Make sure it exists in the same directory."
+source "$SCRIPT_DIR/aws-deployment-unified.sh" 2>/dev/null || {
+    error "Cannot source aws-deployment-unified.sh. Make sure it exists in the same directory."
     exit 1
 }
 
@@ -239,7 +239,7 @@ EOF
     echo "  ✅ Budget constraint handling"
     echo "  ✅ Improved debugging output"
     echo ""
-    echo "Ready for deployment with: ./aws-deployment.sh --cross-region"
+    echo "Ready for deployment with: ./aws-deployment-unified.sh --cross-region"
 }
 
 # =============================================================================

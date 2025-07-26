@@ -11,11 +11,19 @@
 set_default_configuration() {
     local deployment_type="${1:-spot}"
     
-    # Global defaults
-    export AWS_REGION="${AWS_REGION:-us-east-1}"
-    export ENVIRONMENT="${ENVIRONMENT:-development}"
-    export MAX_HEALTH_CHECK_ATTEMPTS="${MAX_HEALTH_CHECK_ATTEMPTS:-10}"
-    export HEALTH_CHECK_INTERVAL="${HEALTH_CHECK_INTERVAL:-15}"
+    # Try to use centralized configuration if available
+    if declare -f get_global_config >/dev/null 2>&1; then
+        export AWS_REGION="${AWS_REGION:-$(get_global_config "region" "us-east-1")}"
+        export ENVIRONMENT="${ENVIRONMENT:-development}"
+        export MAX_HEALTH_CHECK_ATTEMPTS="${MAX_HEALTH_CHECK_ATTEMPTS:-$(get_monitoring_config "health_checks.retries" "10")}"
+        export HEALTH_CHECK_INTERVAL="${HEALTH_CHECK_INTERVAL:-$(get_monitoring_config "health_checks.interval" "15s" | sed 's/s$//')}"
+    else
+        # Fallback to legacy defaults
+        export AWS_REGION="${AWS_REGION:-us-east-1}"
+        export ENVIRONMENT="${ENVIRONMENT:-development}"
+        export MAX_HEALTH_CHECK_ATTEMPTS="${MAX_HEALTH_CHECK_ATTEMPTS:-10}"
+        export HEALTH_CHECK_INTERVAL="${HEALTH_CHECK_INTERVAL:-15}"
+    fi
     
     # Instance configuration defaults
     case "$deployment_type" in

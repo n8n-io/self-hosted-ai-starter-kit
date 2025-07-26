@@ -80,7 +80,7 @@ fi
 
 ## Files Modified
 
-### 1. `scripts/aws-deployment.sh`
+### 1. `scripts/aws-deployment-unified.sh`
 - **Line 3122**: Renamed `install_docker_compose()` to `local_install_docker_compose()`
 - **Line 3142**: Fixed function availability check
 - **Line 3144**: Ensured proper shared library function call
@@ -150,7 +150,7 @@ $ ./scripts/test-docker-compose-fix.sh
 ./scripts/test-docker-compose-fix.sh
 
 # Test script syntax
-bash -n scripts/aws-deployment.sh
+bash -n scripts/aws-deployment-unified.sh
 ```
 
 ### 2. Function Availability Check
@@ -159,16 +159,16 @@ bash -n scripts/aws-deployment.sh
 grep -c "install_docker_compose()" lib/aws-deployment-common.sh
 
 # Verify no conflicts
-grep -c "install_docker_compose()" scripts/aws-deployment.sh
+grep -c "install_docker_compose()" scripts/aws-deployment-unified.sh
 ```
 
 ### 3. Infinite Loop Prevention
 ```bash
 # Check for recursive calls
-grep -n "install_docker_compose.*install_docker_compose" scripts/aws-deployment.sh
+grep -n "install_docker_compose.*install_docker_compose" scripts/aws-deployment-unified.sh
 
 # Verify proper function availability checking
-grep -n "command -v install_docker_compose" scripts/aws-deployment.sh
+grep -n "command -v install_docker_compose" scripts/aws-deployment-unified.sh
 ```
 
 ## Impact Assessment

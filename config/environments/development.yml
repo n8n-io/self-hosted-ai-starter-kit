@@ -28,10 +28,10 @@ infrastructure:
     efs_encryption: false  # Disabled for development
     backup_retention_days: 7
 
-# Application Configuration
+# Application Configuration (inherits from defaults.yml with overrides)
 applications:
   postgres:
-    image: postgres:16.1-alpine3.19
+    # Image version managed by image-versions.yml (uses latest strategy for development)
     resources:
       cpu_limit: "0.5"
       memory_limit: "1G"
@@ -45,7 +45,7 @@ applications:
       enabled: false  # Disabled for development
   
   n8n:
-    image: n8nio/n8n:1.19.4
+    # Image version managed by image-versions.yml (uses latest strategy for development)
     resources:
       cpu_limit: "0.5"
       memory_limit: "1G"
@@ -62,7 +62,7 @@ applications:
       max_replicas: 1
   
   ollama:
-    image: ollama/ollama:0.1.17
+    # Image version managed by image-versions.yml (uses latest strategy for development)
     resources:
       cpu_limit: "1.0"
       memory_limit: "4G"
@@ -77,7 +77,7 @@ applications:
       concurrent_requests: 2
   
   qdrant:
-    image: qdrant/qdrant:v1.7.3
+    # Image version managed by image-versions.yml (uses latest strategy for development)
     resources:
       cpu_limit: "0.5"
       memory_limit: "1G"
@@ -92,7 +92,7 @@ applications:
       default_distance: "Cosine"
   
   crawl4ai:
-    image: unclecode/crawl4ai:0.2.77
+    # Image version managed by image-versions.yml (uses latest strategy for development)
     resources:
       cpu_limit: "0.5"
       memory_limit: "1G"

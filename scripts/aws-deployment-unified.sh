@@ -794,12 +794,15 @@ setup_load_balancer() {
     
     log "Setting up load balancer..."
     
-    # Get additional subnets for ALB
-    local subnet_ids
-    mapfile -t subnet_ids < <(aws ec2 describe-subnets \
+    # Get additional subnets for ALB (bash 3.x compatible)
+    local subnet_ids_raw
+    subnet_ids_raw=$(aws ec2 describe-subnets \
         --filters "Name=vpc-id,Values=$VPC_ID" "Name=state,Values=available" \
         --query 'Subnets[].SubnetId' \
         --output text | tr '\t' '\n' | head -2)
+    # Convert to array bash 3.x compatible way
+    local subnet_ids
+    subnet_ids=($subnet_ids_raw)
     
     if [ ${#subnet_ids[@]} -lt 2 ]; then
         warning "Need at least 2 subnets for ALB. Skipping load balancer setup."

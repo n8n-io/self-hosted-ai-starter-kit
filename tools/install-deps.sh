@@ -15,32 +15,40 @@ if [ -f "$PROJECT_ROOT/lib/aws-deployment-common.sh" ]; then
 fi
 
 # =============================================================================
-# DEPENDENCY DEFINITIONS
+# DEPENDENCY DEFINITIONS (bash 3.x compatible - no associative arrays)
 # =============================================================================
 
-declare -A DEPS=(
-    ["aws"]="AWS CLI for cloud deployment"
-    ["docker"]="Docker for containerization"
-    ["docker-compose"]="Docker Compose for multi-container applications" 
-    ["terraform"]="Infrastructure as Code tool"
-    ["jq"]="JSON processor for AWS CLI output"
-    ["bc"]="Calculator for cost estimates"
-    ["curl"]="HTTP client for API testing"
-    ["git"]="Version control system"
-    ["make"]="Build automation tool"
-    ["python3"]="Python runtime for scripts"
-    ["pip3"]="Python package manager"
-)
+# Required dependencies list (bash 3.x compatible)
+REQUIRED_DEPS="aws docker docker-compose terraform jq bc curl git make python3 pip3"
 
-declare -A OPTIONAL_DEPS=(
-    ["yq"]="YAML processor for configuration files"
-    ["helm"]="Kubernetes package manager"
-    ["kubectl"]="Kubernetes CLI"
-    ["shellcheck"]="Shell script linter"
-    ["hadolint"]="Dockerfile linter"
-    ["trivy"]="Security scanner"
-    ["gh"]="GitHub CLI"
-)
+# Optional dependencies list (bash 3.x compatible)
+OPTIONAL_DEPS_LIST="yq helm kubectl shellcheck hadolint trivy gh"
+
+# Function to get description for dependency (bash 3.x compatible)
+get_dep_description() {
+    local dep="$1"
+    case "$dep" in
+        "aws") echo "AWS CLI for cloud deployment" ;;
+        "docker") echo "Docker for containerization" ;;
+        "docker-compose") echo "Docker Compose for multi-container applications" ;;
+        "terraform") echo "Infrastructure as Code tool" ;;
+        "jq") echo "JSON processor for AWS CLI output" ;;
+        "bc") echo "Calculator for cost estimates" ;;
+        "curl") echo "HTTP client for API testing" ;;
+        "git") echo "Version control system" ;;
+        "make") echo "Build automation tool" ;;
+        "python3") echo "Python runtime for scripts" ;;
+        "pip3") echo "Python package manager" ;;
+        "yq") echo "YAML processor for configuration files" ;;
+        "helm") echo "Kubernetes package manager" ;;
+        "kubectl") echo "Kubernetes CLI" ;;
+        "shellcheck") echo "Shell script linter" ;;
+        "hadolint") echo "Dockerfile linter" ;;
+        "trivy") echo "Security scanner" ;;
+        "gh") echo "GitHub CLI" ;;
+        *) echo "Unknown dependency" ;;
+    esac
+}
 
 # =============================================================================
 # INSTALLATION FUNCTIONS
@@ -186,8 +194,9 @@ install_optional_deps() {
     
     info "Installing optional dependencies..."
     
-    for dep in "${!OPTIONAL_DEPS[@]}"; do
-        local description="${OPTIONAL_DEPS[$dep]}"
+    for dep in $OPTIONAL_DEPS_LIST; do
+        local description
+        description=$(get_dep_description "$dep")
         
         if command -v "$dep" >/dev/null 2>&1; then
             success "$dep is already installed"
@@ -266,8 +275,9 @@ main() {
     
     # Install required dependencies
     log "Installing required dependencies..."
-    for dep in "${!DEPS[@]}"; do
-        local description="${DEPS[$dep]}"
+    for dep in $REQUIRED_DEPS; do
+        local description
+        description=$(get_dep_description "$dep")
         
         if command -v "$dep" >/dev/null 2>&1; then
             success "$dep is already installed"
@@ -299,15 +309,15 @@ main() {
     
     # Verify installations
     log "Verifying installations..."
-    local failed_deps=()
+    local failed_deps=""
     
-    for dep in "${!DEPS[@]}"; do
+    for dep in $REQUIRED_DEPS; do
         if ! command -v "$dep" >/dev/null 2>&1; then
-            failed_deps+=("$dep")
+            failed_deps="$failed_deps $dep"
         fi
     done
     
-    if [ ${#failed_deps[@]} -eq 0 ]; then
+    if [ -z "$failed_deps" ]; then
         success "All required dependencies installed successfully!"
         
         # Additional setup steps
@@ -321,7 +331,7 @@ main() {
         fi
         
     else
-        warning "Some dependencies failed to install: ${failed_deps[*]}"
+        warning "Some dependencies failed to install:$failed_deps"
         warning "Please install them manually or run with sudo if needed"
         exit 1
     fi

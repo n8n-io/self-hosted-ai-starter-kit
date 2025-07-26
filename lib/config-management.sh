@@ -20,15 +20,30 @@ readonly CONFIG_MANAGEMENT_LIB_LOADED=true
 
 # Project structure
 readonly CONFIG_MANAGEMENT_VERSION="1.0.0"
-readonly PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-readonly CONFIG_DIR="${PROJECT_ROOT}/config"
-readonly ENVIRONMENTS_DIR="${CONFIG_DIR}/environments"
-readonly LIB_DIR="${PROJECT_ROOT}/lib"
+if [[ -z "${PROJECT_ROOT:-}" ]]; then
+    PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    readonly PROJECT_ROOT
+fi
+if [[ -z "${CONFIG_DIR:-}" ]]; then
+    readonly CONFIG_DIR="${PROJECT_ROOT}/config"
+fi
+if [[ -z "${ENVIRONMENTS_DIR:-}" ]]; then
+    readonly ENVIRONMENTS_DIR="${CONFIG_DIR}/environments"
+fi
+if [[ -z "${LIB_DIR:-}" ]]; then
+    readonly LIB_DIR="${PROJECT_ROOT}/lib"
+fi
 
 # Default values (bash 3.x compatible)
-readonly DEFAULT_ENVIRONMENT="development"
-readonly DEFAULT_REGION="us-east-1"
-readonly DEFAULT_DEPLOYMENT_TYPE="simple"
+if [[ -z "${DEFAULT_ENVIRONMENT:-}" ]]; then
+    readonly DEFAULT_ENVIRONMENT="development"
+fi
+if [[ -z "${DEFAULT_REGION:-}" ]]; then
+    readonly DEFAULT_REGION="us-east-1"
+fi
+if [[ -z "${DEFAULT_DEPLOYMENT_TYPE:-}" ]]; then
+    readonly DEFAULT_DEPLOYMENT_TYPE="simple"
+fi
 
 # Valid options arrays (bash 3.x/4.x compatible)
 readonly VALID_ENVIRONMENTS="development staging production"
@@ -214,6 +229,50 @@ validate_stack_name() {
     return 0
 }
 
+# Validate configuration file structure
+validate_configuration() {
+    local config_file="$1"
+    
+    if [[ ! -f "$config_file" ]]; then
+        if declare -f error >/dev/null 2>&1; then
+            error "Configuration file not found: $config_file"
+        else
+            echo "ERROR: Configuration file not found: $config_file" >&2
+        fi
+        return 1
+    fi
+    
+    # Check for required sections (basic validation)
+    if ! grep -q "^global:" "$config_file"; then
+        if declare -f error >/dev/null 2>&1; then
+            error "Configuration file missing required 'global' section: $config_file"
+        else
+            echo "ERROR: Configuration file missing required 'global' section: $config_file" >&2
+        fi
+        return 1
+    fi
+    
+    if ! grep -q "^infrastructure:" "$config_file"; then
+        if declare -f error >/dev/null 2>&1; then
+            error "Configuration file missing required 'infrastructure' section: $config_file"
+        else
+            echo "ERROR: Configuration file missing required 'infrastructure' section: $config_file" >&2
+        fi
+        return 1
+    fi
+    
+    if ! grep -q "^applications:" "$config_file"; then
+        if declare -f error >/dev/null 2>&1; then
+            error "Configuration file missing required 'applications' section: $config_file"
+        else
+            echo "ERROR: Configuration file missing required 'applications' section: $config_file" >&2
+        fi
+        return 1
+    fi
+    
+    return 0
+}
+
 # =============================================================================
 # CONFIGURATION LOADING AND CACHING
 # =============================================================================
@@ -266,6 +325,9 @@ load_config() {
     
     # Set global variables
     export ENVIRONMENT="$env"
+    export CONFIG_ENVIRONMENT="$env"
+    export CONFIG_REGION="${AWS_REGION:-us-east-1}"
+    export CONFIG_STACK_NAME="${STACK_NAME:-}"
     export DEPLOYMENT_TYPE="$deployment_type"
     export CONFIG_FILE="$config_file"
     export CONFIG_FILE_PATH="$config_file"
@@ -515,6 +577,175 @@ generate_env_file() {
 }
 
 # =============================================================================
+# IMAGE VERSION MANAGEMENT
+# =============================================================================
+
+# Get image version based on environment strategy
+get_image_version() {
+    local service="$1"
+    local environment="${ENVIRONMENT:-$DEFAULT_ENVIRONMENT}"
+    local image_config_file="${CONFIG_DIR}/image-versions.yml"
+    
+    if [[ ! -f "$image_config_file" ]]; then
+        if declare -f warning >/dev/null 2>&1; then
+            warning "Image versions config not found: $image_config_file"
+        fi
+        return 1
+    fi
+    
+    # Get version strategy for environment
+    local version_strategy
+    version_strategy=$(yq eval ".environments.${environment}.version_strategy // .settings.version_strategy // \"stable\"" "$image_config_file" 2>/dev/null)
+    
+    # Get image name and version based on strategy
+    local image_base
+    local image_tag
+    image_base=$(yq eval ".services.${service}.image" "$image_config_file" 2>/dev/null)
+    
+    case "$version_strategy" in
+        "latest")
+            image_tag=$(yq eval ".services.${service}.versions.latest" "$image_config_file" 2>/dev/null)
+            ;;
+        "stable")
+            image_tag=$(yq eval ".services.${service}.versions.stable" "$image_config_file" 2>/dev/null)
+            ;;
+        "locked")
+            # Return full locked image with digest
+            echo "$(yq eval ".services.${service}.versions.locked" "$image_config_file" 2>/dev/null)"
+            return 0
+            ;;
+        *)
+            image_tag=$(yq eval ".services.${service}.versions.stable" "$image_config_file" 2>/dev/null)
+            ;;
+    esac
+    
+    if [[ "$image_base" == "null" || "$image_tag" == "null" ]]; then
+        if declare -f error >/dev/null 2>&1; then
+            error "Image configuration not found for service: $service"
+        fi
+        return 1
+    fi
+    
+    echo "${image_base}:${image_tag}"
+    return 0
+}
+
+# Validate image version configuration
+validate_image_versions() {
+    local image_config_file="${CONFIG_DIR}/image-versions.yml"
+    
+    if [[ ! -f "$image_config_file" ]]; then
+        if declare -f error >/dev/null 2>&1; then
+            error "Image versions config not found: $image_config_file"
+        fi
+        return 1
+    fi
+    
+    # Validate YAML syntax
+    if ! yq eval '.' "$image_config_file" >/dev/null 2>&1; then
+        if declare -f error >/dev/null 2>&1; then
+            error "Invalid YAML syntax in image versions config"
+        fi
+        return 1
+    fi
+    
+    # Validate required services are defined
+    local required_services=("postgres" "n8n" "ollama" "qdrant" "crawl4ai")
+    for service in "${required_services[@]}"; do
+        if ! yq eval ".services.${service}" "$image_config_file" >/dev/null 2>&1; then
+            if declare -f warning >/dev/null 2>&1; then
+                warning "Missing image configuration for service: $service"
+            fi
+        fi
+    done
+    
+    return 0
+}
+
+# Validate configuration file structure and syntax
+validate_configuration() {
+    local config_file="$1"
+    
+    if [[ ! -f "$config_file" ]]; then
+        if declare -f error >/dev/null 2>&1; then
+            error "Configuration file not found: $config_file"
+        fi
+        return 1
+    fi
+    
+    # Validate YAML syntax using yq if available, otherwise try python
+    if command -v yq >/dev/null 2>&1; then
+        if ! yq eval '.' "$config_file" >/dev/null 2>&1; then
+            if declare -f error >/dev/null 2>&1; then
+                error "Invalid YAML syntax in configuration file: $config_file"
+            fi
+            return 1
+        fi
+    elif command -v python3 >/dev/null 2>&1; then
+        if ! python3 -c "import yaml; yaml.safe_load(open('$config_file'))" 2>/dev/null; then
+            if declare -f error >/dev/null 2>&1; then
+                error "Invalid YAML syntax in configuration file: $config_file"
+            fi
+            return 1
+        fi
+    fi
+    
+    # Check for required sections
+    if command -v yq >/dev/null 2>&1; then
+        local required_sections=("global" "infrastructure" "application")
+        for section in "${required_sections[@]}"; do
+            if ! yq eval ".${section}" "$config_file" >/dev/null 2>&1; then
+                if declare -f error >/dev/null 2>&1; then
+                    error "Missing required section '$section' in configuration file"
+                fi
+                return 1
+            fi
+        done
+    fi
+    
+    return 0
+}
+
+# Generate Docker Compose image overrides
+generate_docker_image_overrides() {
+    local output_file="${1:-${PROJECT_ROOT}/docker-compose.images.yml}"
+    local environment="${ENVIRONMENT:-$DEFAULT_ENVIRONMENT}"
+    
+    if ! validate_image_versions; then
+        return 1
+    fi
+    
+    cat > "$output_file" << EOF
+# Generated Docker Compose Image Overrides
+# Environment: $environment
+# Generated at: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+# DO NOT EDIT MANUALLY - Use config-manager.sh to regenerate
+
+version: '3.8'
+
+services:
+EOF
+
+    # Generate image overrides for each service
+    local services=("postgres" "n8n" "ollama" "qdrant" "crawl4ai")
+    for service in "${services[@]}"; do
+        local image_version
+        if image_version=$(get_image_version "$service"); then
+            cat >> "$output_file" << EOF
+  ${service}:
+    image: ${image_version}
+EOF
+        fi
+    done
+    
+    if declare -f success >/dev/null 2>&1; then
+        success "Docker image overrides generated: $output_file"
+    fi
+    
+    return 0
+}
+
+# =============================================================================
 # DOCKER COMPOSE INTEGRATION
 # =============================================================================
 
@@ -599,16 +830,51 @@ EOF
 # Apply deployment type specific overrides
 apply_deployment_type_overrides() {
     local deployment_type="${DEPLOYMENT_TYPE:-$DEFAULT_DEPLOYMENT_TYPE}"
+    local deployment_config_file="${CONFIG_DIR}/deployment-types.yml"
     
+    # Load deployment type specific configuration if available
+    if [[ -f "$deployment_config_file" ]]; then
+        # Extract deployment type specific values using yq
+        if command -v yq >/dev/null 2>&1; then
+            # Infrastructure overrides
+            local min_capacity=$(yq eval ".${deployment_type}.infrastructure.auto_scaling.min_capacity // 1" "$deployment_config_file" 2>/dev/null)
+            local max_capacity=$(yq eval ".${deployment_type}.infrastructure.auto_scaling.max_capacity // 3" "$deployment_config_file" 2>/dev/null)
+            local target_util=$(yq eval ".${deployment_type}.infrastructure.auto_scaling.target_utilization // 70" "$deployment_config_file" 2>/dev/null)
+            
+            # Cost optimization overrides
+            local spot_enabled=$(yq eval ".${deployment_type}.cost_optimization.spot_instances.enabled // false" "$deployment_config_file" 2>/dev/null)
+            local spot_price=$(yq eval ".${deployment_type}.cost_optimization.spot_instances.max_price // 2.00" "$deployment_config_file" 2>/dev/null)
+            local auto_scaling=$(yq eval ".${deployment_type}.cost_optimization.auto_scaling.scale_down_enabled // true" "$deployment_config_file" 2>/dev/null)
+            
+            # Apply the extracted values
+            export ASG_MIN_CAPACITY="$min_capacity"
+            export ASG_MAX_CAPACITY="$max_capacity"
+            export ASG_TARGET_UTILIZATION="$target_util"
+            export SPOT_INSTANCES_ENABLED="$spot_enabled"
+            export SPOT_MAX_PRICE="$spot_price"
+            export AUTO_SCALING_ENABLED="$auto_scaling"
+            
+            if declare -f log >/dev/null 2>&1; then
+                log "Applied deployment type overrides from config: $deployment_type"
+            fi
+            return 0
+        fi
+    fi
+    
+    # Fallback to hardcoded values if config file not available
     case "$deployment_type" in
         spot)
             export SPOT_INSTANCES_ENABLED=true
             export SPOT_MAX_PRICE=$(get_cost_config "spot_instances.max_price" "2.00")
             export AUTO_SCALING_ENABLED=true
+            export ASG_MIN_CAPACITY=2
+            export ASG_MAX_CAPACITY=10
             ;;
         ondemand)
             export SPOT_INSTANCES_ENABLED=false
             export AUTO_SCALING_ENABLED=true
+            export ASG_MIN_CAPACITY=2
+            export ASG_MAX_CAPACITY=8
             ;;
         simple)  
             export SPOT_INSTANCES_ENABLED=false
@@ -693,6 +959,138 @@ EOF
 }
 
 # =============================================================================
+# ADDITIONAL HELPER FUNCTIONS FOR TESTING
+# =============================================================================
+
+# Generate environment file from configuration
+generate_environment_file() {
+    local config_file="$1"
+    local environment="${2:-development}"
+    local output_file="$3"
+    
+    if [[ ! -f "$config_file" ]]; then
+        log "Error: Configuration file not found: $config_file"
+        return 1
+    fi
+    
+    if [[ -z "$output_file" ]]; then
+        log "Error: Output file path required"
+        return 1
+    fi
+    
+    # Load configuration first
+    load_config "$environment" "${DEPLOYMENT_TYPE:-simple}"
+    
+    # Generate environment file using existing function
+    generate_env_file "$output_file"
+}
+
+# Generate Docker Compose file from configuration  
+generate_docker_compose() {
+    local config_file="$1"
+    local environment="${2:-development}"
+    local output_file="$3"
+    
+    if [[ ! -f "$config_file" ]]; then
+        log "Error: Configuration file not found: $config_file"
+        return 1
+    fi
+    
+    if [[ -z "$output_file" ]]; then
+        log "Error: Output file path required"
+        return 1
+    fi
+    
+    # Load configuration first
+    load_config "$environment" "${DEPLOYMENT_TYPE:-simple}"
+    
+    # Generate basic Docker Compose structure
+    cat > "$output_file" << EOF
+version: '3.8'
+
+services:
+  postgres:
+    image: $(get_image_version "postgres" "16.1-alpine3.19")
+    deploy:
+      resources:
+        limits:
+          cpus: '$(get_application_config "postgres.resources.cpu_limit" "0.5")'
+          memory: $(get_application_config "postgres.resources.memory_limit" "1G")
+    environment:
+      POSTGRES_DB: n8n
+      POSTGRES_USER: n8n
+      POSTGRES_PASSWORD: \${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - n8n-network
+
+  n8n:
+    image: $(get_image_version "n8n" "1.19.4")
+    deploy:
+      resources:
+        limits:
+          cpus: '$(get_application_config "n8n.resources.cpu_limit" "0.5")'
+          memory: $(get_application_config "n8n.resources.memory_limit" "1G")
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: n8n
+      DB_POSTGRESDB_PASSWORD: \${POSTGRES_PASSWORD}
+      N8N_HOST: 0.0.0.0
+      N8N_PORT: 5678
+    ports:
+      - "5678:5678"
+    depends_on:
+      - postgres
+    networks:
+      - n8n-network
+
+volumes:
+  postgres_data:
+
+networks:
+  n8n-network:
+    driver: bridge
+EOF
+    
+    return 0
+}
+
+# Validate security configuration
+validate_security_configuration() {
+    local config_file="${1:-}"
+    
+    if [[ ! -f "$config_file" ]]; then
+        log "Error: Configuration file not found: $config_file"
+        return 1
+    fi
+    
+    # Load configuration
+    load_config "${ENVIRONMENT:-development}" "${DEPLOYMENT_TYPE:-simple}"
+    
+    # Basic security validation - always pass for development environment
+    local environment=$(get_global_config "environment" "development")
+    
+    if [[ "$environment" == "development" ]]; then
+        # Development environment allows more relaxed security
+        return 0
+    elif [[ "$environment" == "production" ]]; then
+        # Production requires stricter security
+        local encryption_at_rest=$(get_security_config "secrets_management.encryption_at_rest" "false")
+        local use_secrets_manager=$(get_security_config "secrets_management.use_aws_secrets_manager" "false")
+        
+        if [[ "$encryption_at_rest" != "true" ]] || [[ "$use_secrets_manager" != "true" ]]; then
+            log "Error: Production environment requires encryption at rest and AWS Secrets Manager"
+            return 1
+        fi
+    fi
+    
+    return 0
+}
+
+# =============================================================================
 # LIBRARY INITIALIZATION
 # =============================================================================
 
@@ -707,6 +1105,8 @@ export -f load_config get_config_value get_global_config get_infrastructure_conf
 export -f get_application_config get_security_config get_monitoring_config get_cost_config
 export -f generate_env_file generate_docker_env_section init_config generate_all_config_files
 export -f get_config_summary apply_deployment_type_overrides check_config_dependencies
+export -f get_image_version validate_image_versions validate_configuration generate_docker_image_overrides
+export -f generate_environment_file generate_docker_compose validate_security_configuration
 
 if declare -f log >/dev/null 2>&1; then
     log "Configuration management library loaded (v${CONFIG_MANAGEMENT_VERSION})"

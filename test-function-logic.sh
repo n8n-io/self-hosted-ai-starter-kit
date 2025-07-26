@@ -20,7 +20,7 @@ echo "=============================================="
 
 # Check syntax of the main script
 test_log "Checking script syntax..."
-if bash -n scripts/aws-deployment.sh; then
+if bash -n scripts/aws-deployment-unified.sh; then
     test_success "Script syntax is valid"
 else
     test_error "Script has syntax errors"
@@ -38,7 +38,7 @@ echo "3. Multiple temporary file operations without proper error handling"
 # Extract the problematic jq command
 echo ""
 echo "Problematic jq command:"
-grep -A 1 -B 1 "group_by.*map.*instance_type" scripts/aws-deployment.sh
+grep -A 1 -B 1 "group_by.*map.*instance_type" scripts/aws-deployment-unified.sh
 
 echo ""
 test_log "Analyzing launch_spot_instance function..."
@@ -51,7 +51,7 @@ echo "3. Fallback logic for old vs new format parsing"
 # Show the problematic parsing logic
 echo ""
 echo "Problematic parsing logic:"
-grep -A 5 -B 2 "IFS=.*read.*SELECTED_" scripts/aws-deployment.sh
+grep -A 5 -B 2 "IFS=.*read.*SELECTED_" scripts/aws-deployment-unified.sh
 
 echo ""
 echo "=============================================="

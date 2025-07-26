@@ -240,14 +240,17 @@ cleanup_parameters() {
     
     log "Cleaning up parameters..."
     
-    # Get all parameter names
-    local param_names
-    mapfile -t param_names < <(aws ssm get-parameters-by-path \
+    # Get all parameter names (bash 3.x compatible)
+    local param_names_raw
+    param_names_raw=$(aws ssm get-parameters-by-path \
         --path "/aibuildkit" \
         --recursive \
         --query 'Parameters[].Name' \
         --output text \
         --region "$aws_region" | tr '\t' '\n')
+    # Convert to array bash 3.x compatible way
+    local param_names
+    param_names=($param_names_raw)
     
     # Delete each parameter
     for param_name in "${param_names[@]}"; do

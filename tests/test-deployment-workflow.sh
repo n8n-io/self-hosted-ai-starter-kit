@@ -190,7 +190,7 @@ test_deployment_scripts_security() {
     log_test "deployment_scripts_security"
     
     deployment_scripts=(
-        "aws-deployment.sh"
+        "aws-deployment-unified.sh"
         "aws-deployment-simple.sh"
         "aws-deployment-ondemand.sh"
     )
@@ -228,7 +228,7 @@ test_gitignore_protection() {
     )
     
     for pattern in "${sensitive_patterns[@]}"; do
-        if grep -q "$pattern" "$gitignore_path"; then
+        if grep -Fq "$pattern" "$gitignore_path"; then
             pass_test ".gitignore should protect sensitive files: $pattern"
         else
             fail_test ".gitignore should protect sensitive files: $pattern"

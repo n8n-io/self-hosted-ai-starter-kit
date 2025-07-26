@@ -41,16 +41,16 @@ test_deployment_script_generation() {
     local test_instance_id="i-1234567890abcdef0"
     
     # Source the deployment script to get the function
-    if [ -f "scripts/aws-deployment.sh" ]; then
+    if [ -f "scripts/aws-deployment-unified.sh" ]; then
         # Extract the deploy_application function
-        local deploy_function=$(grep -A 10 "deploy_application()" scripts/aws-deployment.sh | head -20 || grep -A 10 "deploy_application" scripts/aws-deployment.sh | head -20)
+        local deploy_function=$(grep -A 10 "deploy_application()" scripts/aws-deployment-unified.sh | head -20 || grep -A 10 "deploy_application" scripts/aws-deployment-unified.sh | head -20)
         
         if [ -n "$deploy_function" ]; then
             success "Deployment function found"
             
             # Test if the function generates the deploy-app.sh script correctly
             # We'll create a minimal test by extracting the script generation part
-            local script_generation=$(grep -A 50 "cat > deploy-app.sh" scripts/aws-deployment.sh | head -100)
+            local script_generation=$(grep -A 50 "cat > deploy-app.sh" scripts/aws-deployment-unified.sh | head -100)
             
             if [ -n "$script_generation" ]; then
                 success "Script generation logic found"
@@ -144,7 +144,7 @@ test_breaking_changes() {
     
     local missing_functions=0
     for func in "${required_functions[@]}"; do
-        if grep -q "${func}()" scripts/aws-deployment.sh || grep -q "${func}()" lib/aws-deployment-common.sh; then
+        if grep -q "${func}()" scripts/aws-deployment-unified.sh || grep -q "${func}()" lib/aws-deployment-common.sh; then
             success "Function $func found"
         else
             error "Required function $func not found"
@@ -166,7 +166,7 @@ test_script_syntax() {
     log "Testing script syntax..."
     
     local scripts_to_test=(
-        "scripts/aws-deployment.sh"
+        "scripts/aws-deployment-unified.sh"
         "lib/aws-deployment-common.sh"
         "scripts/test-docker-compose-fix.sh"
     )

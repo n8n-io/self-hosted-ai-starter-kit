@@ -15,22 +15,22 @@ The deployment system now supports optional ALB and CloudFront setup through com
 
 ### Deploy with ALB Only
 ```bash
-./scripts/aws-deployment.sh --setup-alb
+./scripts/aws-deployment-unified.sh --setup-alb
 ```
 
 ### Deploy with CloudFront Only (requires ALB)
 ```bash
-./scripts/aws-deployment.sh --setup-alb --setup-cloudfront
+./scripts/aws-deployment-unified.sh --setup-alb --setup-cloudfront
 ```
 
 ### Deploy with Both (Convenience Flag)
 ```bash
-./scripts/aws-deployment.sh --setup-cdn
+./scripts/aws-deployment-unified.sh --setup-cdn
 ```
 
 ### Full Production Setup
 ```bash
-./scripts/aws-deployment.sh --setup-cdn --cross-region
+./scripts/aws-deployment-unified.sh --setup-cdn --cross-region
 ```
 
 ## Command Line Options
@@ -53,7 +53,7 @@ export SETUP_ALB=true
 export SETUP_CLOUDFRONT=true
 
 # Run deployment
-./scripts/aws-deployment.sh
+./scripts/aws-deployment-unified.sh
 ```
 
 ## What Gets Created
@@ -101,31 +101,31 @@ EC2 Instance (AI Services)
 ### Development Environment
 ```bash
 # Basic deployment without load balancing
-./scripts/aws-deployment.sh
+./scripts/aws-deployment-unified.sh
 
 # Add load balancing for testing
-./scripts/aws-deployment.sh --setup-alb
+./scripts/aws-deployment-unified.sh --setup-alb
 ```
 
 ### Staging Environment
 ```bash
 # Full CDN setup for performance testing
-./scripts/aws-deployment.sh --setup-cdn
+./scripts/aws-deployment-unified.sh --setup-cdn
 ```
 
 ### Production Environment
 ```bash
 # Production deployment with best region selection
-./scripts/aws-deployment.sh --setup-cdn --cross-region --use-pinned-images
+./scripts/aws-deployment-unified.sh --setup-cdn --cross-region --use-pinned-images
 
 # Production deployment with specific instance type
-./scripts/aws-deployment.sh --setup-cdn --instance-type g4dn.2xlarge
+./scripts/aws-deployment-unified.sh --setup-cdn --instance-type g4dn.2xlarge
 ```
 
 ### Cost-Optimized Production
 ```bash
 # Production with budget constraints
-./scripts/aws-deployment.sh --setup-cdn --max-spot-price 1.50
+./scripts/aws-deployment-unified.sh --setup-cdn --max-spot-price 1.50
 ```
 
 ## Service URLs After Deployment
@@ -317,13 +317,13 @@ aws cloudwatch get-metric-statistics \
 ## Migration Guide
 
 ### From Direct Instance to ALB
-1. Deploy with ALB: `./scripts/aws-deployment.sh --setup-alb`
+1. Deploy with ALB: `./scripts/aws-deployment-unified.sh --setup-alb`
 2. Update application URLs to use ALB DNS name
 3. Test all services through ALB
 4. Update any hardcoded instance IP addresses
 
 ### From ALB to ALB + CloudFront
-1. Redeploy with CDN: `./scripts/aws-deployment.sh --setup-cdn`
+1. Redeploy with CDN: `./scripts/aws-deployment-unified.sh --setup-cdn`
 2. Update DNS records to point to CloudFront
 3. Test caching behavior
 4. Monitor cache hit ratios
@@ -335,7 +335,7 @@ aws cloudwatch get-metric-statistics \
 - [CloudFront Developer Guide](https://docs.aws.amazon.com/cloudfront/)
 
 ### GeuseMaker Resources
-- Main deployment script: `scripts/aws-deployment.sh`
+- Main deployment script: `scripts/aws-deployment-unified.sh`
 - Simple deployment: `scripts/aws-deployment-simple.sh`
 - Test script: `test-alb-cloudfront.sh`
 

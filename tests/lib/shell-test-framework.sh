@@ -322,11 +322,21 @@ mock_function() {
     
     # Create backup of original function
     if declare -f "$original_function" >/dev/null 2>&1; then
-        eval "${original_function}_original() $(declare -f "$original_function" | sed '1d')"
+        # Use a simpler backup method
+        declare -f "$original_function" > /tmp/${original_function}_backup.sh
+        sed -i.bak "1s/.*/${original_function}_original()/" /tmp/${original_function}_backup.sh
+        source /tmp/${original_function}_backup.sh
+        rm -f /tmp/${original_function}_backup.sh /tmp/${original_function}_backup.sh.bak
     fi
     
-    # Replace with mock
-    eval "$original_function() { $mock_implementation; }"
+    # Replace with mock using temporary file for complex implementations
+    local temp_mock=$(mktemp)
+    echo "$original_function() {" > "$temp_mock"
+    echo "$mock_implementation" >> "$temp_mock"
+    echo "}" >> "$temp_mock"
+    
+    source "$temp_mock"
+    rm -f "$temp_mock"
 }
 
 # Restore mocked function
@@ -334,7 +344,16 @@ restore_function() {
     local function_name="$1"
     
     if declare -f "${function_name}_original" >/dev/null 2>&1; then
-        eval "$function_name() $(declare -f "${function_name}_original" | sed '1d')"
+        # Unset the mock
+        unset -f "$function_name"
+        
+        # Restore using temporary file
+        local temp_restore=$(mktemp)
+        declare -f "${function_name}_original" | sed "s/${function_name}_original/${function_name}/" > "$temp_restore"
+        source "$temp_restore"
+        rm -f "$temp_restore"
+        
+        # Clean up the backup
         unset -f "${function_name}_original"
     fi
 }
@@ -346,7 +365,7 @@ restore_function() {
 # Run all test functions in current script
 run_all_tests() {
     local test_functions
-    test_functions=$(declare -F | grep -E '^declare -f test_' | awk '{print $3}' | grep -v '^test_\(init\|cleanup\|start\|pass\|fail\|skip\)$')
+    test_functions=$(declare -F | grep '^declare -f test_' | awk '{print $3}' | grep -v '^test_init$' | grep -v '^test_cleanup$' | grep -v '^test_start$' | grep -v '^test_pass$' | grep -v '^test_fail$' | grep -v '^test_skip$')
     
     for test_func in $test_functions; do
         test_start "$test_func"

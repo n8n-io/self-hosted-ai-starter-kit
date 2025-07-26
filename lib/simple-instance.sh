@@ -511,7 +511,7 @@ display_simple_deployment_summary() {
     echo
 }
 
-validate_simple_configuration() {
+validate_simple_instance_config() {
     local instance_type="$1"
     
     # Validate that instance type is appropriate for simple deployment

@@ -8,16 +8,21 @@
 # UNIFIED LOGGING AND OUTPUT FUNCTIONS
 # =============================================================================
 
-# Color definitions
-readonly RED='\033[0;31m'
-readonly GREEN='\033[0;32m'
-readonly YELLOW='\033[0;33m'
-readonly BLUE='\033[0;34m'
-readonly PURPLE='\033[0;35m'
-readonly MAGENTA='\033[0;35m'
-readonly CYAN='\033[0;36m'
-readonly BOLD='\033[1m'
-readonly NC='\033[0m'
+# Color definitions (only define if not already set to avoid conflicts)
+if [[ -z "${AWS_DEPLOY_COLORS_DEFINED:-}" ]]; then
+    if [[ -z "${RED:-}" ]]; then
+        readonly RED='\033[0;31m'
+        readonly GREEN='\033[0;32m'
+        readonly YELLOW='\033[0;33m'
+        readonly BLUE='\033[0;34m'
+        readonly PURPLE='\033[0;35m'
+        readonly MAGENTA='\033[0;35m'
+        readonly CYAN='\033[0;36m'
+        readonly BOLD='\033[1m'
+        readonly NC='\033[0m'
+        readonly AWS_DEPLOY_COLORS_DEFINED=true
+    fi
+fi
 
 # Log context detection and formatting
 get_log_context() {

@@ -355,7 +355,6 @@ All scripts that use the shared library system automatically benefit from the ce
 
 - `aws-deployment-unified.sh`
 - `check-instance-status.sh`
-- `quick-deploy.sh`
 - `cleanup-consolidated.sh`
 - `config-manager.sh`
 

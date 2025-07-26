@@ -174,7 +174,6 @@ test_script_integration() {
         "config-manager.sh"
         "aws-deployment-unified.sh"
         "check-instance-status.sh"
-        "quick-deploy.sh"
         "cleanup-consolidated.sh"
     )
     

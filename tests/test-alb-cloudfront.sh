@@ -6,7 +6,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MAIN_SCRIPT="$SCRIPT_DIR/../scripts/aws-deployment.sh"
+MAIN_SCRIPT="$SCRIPT_DIR/../scripts/aws-deployment-unified.sh"
 SIMPLE_SCRIPT="$SCRIPT_DIR/../scripts/aws-deployment-simple.sh"
 
 # Colors for output
@@ -350,16 +350,16 @@ main() {
         echo ""
         echo "🌐 Usage Examples:"
         echo "  # Deploy with ALB only"
-        echo "  ./scripts/aws-deployment.sh --setup-alb"
+        echo "  ./scripts/aws-deployment-unified.sh --setup-alb"
         echo ""
         echo "  # Deploy with CloudFront only (requires ALB)"
-        echo "  ./scripts/aws-deployment.sh --setup-alb --setup-cloudfront"
+        echo "  ./scripts/aws-deployment-unified.sh --setup-alb --setup-cloudfront"
         echo ""
         echo "  # Deploy with both (convenience flag)"
-        echo "  ./scripts/aws-deployment.sh --setup-cdn"
+        echo "  ./scripts/aws-deployment-unified.sh --setup-cdn"
         echo ""
         echo "  # Full deployment with cross-region and CDN"
-        echo "  ./scripts/aws-deployment.sh --setup-cdn --cross-region"
+        echo "  ./scripts/aws-deployment-unified.sh --setup-cdn --cross-region"
         echo ""
         echo "⚠️  Important Notes:"
         echo "  • ALB requires at least 2 availability zones"

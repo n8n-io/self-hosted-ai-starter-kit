@@ -24,7 +24,7 @@ Error: Could not install Docker Compose. Deployment cannot continue.
 
 ### 1. Enhanced Shared Library Integration
 
-**File**: `scripts/aws-deployment.sh`
+**File**: `scripts/aws-deployment-unified.sh`
 
 - Added proper shared library sourcing with availability detection
 - Implemented fallback to local implementation when shared library is unavailable
@@ -134,7 +134,7 @@ install_compose_manual() {
 
 ### 5. Comprehensive Local Fallback
 
-**File**: `scripts/aws-deployment.sh`
+**File**: `scripts/aws-deployment-unified.sh`
 
 - Added complete local implementation when shared library is unavailable
 - Implemented proper distribution detection and handling
@@ -201,7 +201,7 @@ install_compose_manual() {
 The fix is automatically applied when using the deployment script:
 
 ```bash
-./scripts/aws-deployment.sh
+./scripts/aws-deployment-unified.sh
 ```
 
 ### Testing the Fix

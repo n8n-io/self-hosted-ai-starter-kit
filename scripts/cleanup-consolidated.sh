@@ -139,7 +139,8 @@ CLEANUP MODES:
     failed-deployments       Cleanup specific failed deployment EFS file systems (051-efs through 059-efs)
     all                      Cleanup all resources for all stacks
     specific                 Cleanup specific resource types (use with resource flags)
-    codebase                 Cleanup local codebase files
+    codebase                 Cleanup local codebase files and redundant scripts
+    validate                 Validate cleanup script functionality
 
 EXAMPLES:
     $0 052                    # Cleanup stack named "052"
@@ -147,7 +148,8 @@ EXAMPLES:
     $0 --mode failed-deployments  # Cleanup failed deployment EFS file systems
     $0 --mode specific --efs --instances  # Cleanup specific resource types
     $0 --force 052            # Force cleanup without confirmation
-    $0 --mode codebase        # Cleanup local codebase files
+    $0 --mode codebase        # Cleanup local codebase files and redundant scripts
+    $0 --mode validate        # Validate cleanup script functionality
     $0 --dry-run --verbose 052 # Preview cleanup with detailed output
 
 EOF
@@ -952,8 +954,10 @@ cleanup_codebase_files() {
                 if rm "$file"; then
                     success "Removed backup file: $file"
                     ((removed_count++))
+                    increment_counter "deleted"
                 else
                     error "Failed to remove backup file: $file"
+                    increment_counter "failed"
                 fi
             fi
         fi
@@ -970,8 +974,10 @@ cleanup_codebase_files() {
                 if rm "$file"; then
                     success "Removed system file: $file"
                     ((removed_count++))
+                    increment_counter "deleted"
                 else
                     error "Failed to remove system file: $file"
+                    increment_counter "failed"
                 fi
             fi
         fi
@@ -979,7 +985,7 @@ cleanup_codebase_files() {
     
     # Cleanup temporary test files
     log "Cleaning up temporary test files..."
-    find "$PROJECT_ROOT" -name "test-*.sh" -path "*/scripts/*" | grep -v "test-cleanup-integration.sh" | while read -r file; do
+    find "$PROJECT_ROOT" -name "test-*.sh" -path "*/scripts/*" | grep -v "test-cleanup-integration.sh" | grep -v "test-cleanup-consolidated.sh" | while read -r file; do
         if [ -f "$file" ]; then
             if [ "$DRY_RUN" = true ]; then
                 info "Would remove test file: $file"
@@ -988,14 +994,138 @@ cleanup_codebase_files() {
                 if rm "$file"; then
                     success "Removed test file: $file"
                     ((removed_count++))
+                    increment_counter "deleted"
                 else
                     error "Failed to remove test file: $file"
+                    increment_counter "failed"
                 fi
             fi
         fi
     done
     
+    # Cleanup redundant cleanup scripts (from consolidate-cleanup.sh functionality)
+    log "Cleaning up redundant cleanup scripts..."
+    local redundant_cleanup_files=(
+        "cleanup-unified.sh"
+        "cleanup-comparison.sh"
+        "cleanup-codebase.sh"
+        "quick-cleanup-test.sh"
+        "test-cleanup-integration.sh"
+        "test-cleanup-unified.sh"
+        "test-cleanup-017.sh"
+        "test-cleanup-iam.sh"
+        "test-full-iam-cleanup.sh"
+        "test-inline-policy-cleanup.sh"
+    )
+    
+    for file in "${redundant_cleanup_files[@]}"; do
+        local file_path="$SCRIPT_DIR/$file"
+        # Also check in tests directory for test files
+        local test_file_path="$PROJECT_ROOT/tests/$file"
+        
+        for path in "$file_path" "$test_file_path"; do
+            if [ -f "$path" ]; then
+                if [ "$DRY_RUN" = true ]; then
+                    info "Would remove redundant cleanup script: $path"
+                    ((removed_count++))
+                else
+                    if rm "$path"; then
+                        success "Removed redundant cleanup script: $path"
+                        ((removed_count++))
+                        increment_counter "deleted"
+                    else
+                        error "Failed to remove redundant cleanup script: $path"
+                        increment_counter "failed"
+                    fi
+                fi
+            fi
+        done
+    done
+    
     success "Codebase cleanup completed. Removed $removed_count files."
+}
+
+# Comprehensive test validation function (from test-cleanup-consolidated.sh)
+validate_cleanup_script() {
+    step "Validating cleanup script functionality..."
+    
+    local validation_errors=0
+    
+    # Check script basics
+    if [ ! -f "$SCRIPT_DIR/cleanup-consolidated.sh" ]; then
+        error "Consolidated cleanup script not found!"
+        ((validation_errors++))
+    fi
+    
+    if [ ! -x "$SCRIPT_DIR/cleanup-consolidated.sh" ]; then
+        error "Consolidated cleanup script is not executable!"
+        ((validation_errors++))
+    fi
+    
+    # Check bash syntax
+    if ! bash -n "$SCRIPT_DIR/cleanup-consolidated.sh" 2>/dev/null; then
+        error "Bash syntax errors found in cleanup script!"
+        ((validation_errors++))
+    fi
+    
+    # Check required functions are defined
+    local required_functions=(
+        "show_usage"
+        "parse_arguments"
+        "confirm_cleanup"
+        "increment_counter"
+        "print_summary"
+        "cleanup_ec2_instances"
+        "cleanup_efs_resources"
+        "cleanup_single_efs"
+        "cleanup_network_resources"
+        "cleanup_load_balancers"
+        "cleanup_cloudfront_distributions"
+        "cleanup_monitoring_resources"
+        "cleanup_iam_resources"
+        "cleanup_storage_resources"
+        "cleanup_codebase_files"
+        "validate_cleanup_script"
+        "main"
+    )
+    
+    for func in "${required_functions[@]}"; do
+        if ! grep -q "^${func}()" "$SCRIPT_DIR/cleanup-consolidated.sh"; then
+            error "Required function $func not found in cleanup script!"
+            ((validation_errors++))
+        fi
+    done
+    
+    # Check library sourcing
+    if ! grep -q 'source.*error-handling.sh' "$SCRIPT_DIR/cleanup-consolidated.sh"; then
+        error "Error handling library not sourced!"
+        ((validation_errors++))
+    fi
+    
+    if ! grep -q 'source.*aws-deployment-common.sh' "$SCRIPT_DIR/cleanup-consolidated.sh"; then
+        error "AWS deployment common library not sourced!"
+        ((validation_errors++))
+    fi
+    
+    # Test help functionality
+    if ! "$SCRIPT_DIR/cleanup-consolidated.sh" --help >/dev/null 2>&1; then
+        error "Help functionality not working!"
+        ((validation_errors++))
+    fi
+    
+    # Test dry-run functionality
+    if ! "$SCRIPT_DIR/cleanup-consolidated.sh" --dry-run --force test-stack >/dev/null 2>&1; then
+        error "Dry-run functionality not working!"
+        ((validation_errors++))
+    fi
+    
+    if [ $validation_errors -eq 0 ]; then
+        success "Cleanup script validation passed! All $((${#required_functions[@]} + 4)) checks successful."
+        return 0
+    else
+        error "Cleanup script validation failed with $validation_errors errors!"
+        return 1
+    fi
 }
 
 # =============================================================================
@@ -1020,6 +1150,11 @@ main() {
         error "Pattern is required for efs mode (use STACK_NAME as pattern)"
         show_usage
         exit 1
+    fi
+    
+    # Skip confirmation for validation mode
+    if [ "$CLEANUP_MODE" = "validate" ]; then
+        FORCE=true
     fi
     
     # Show configuration
@@ -1049,6 +1184,10 @@ main() {
         "codebase")
             # Codebase cleanup only
             cleanup_codebase_files
+            ;;
+        "validate")
+            # Validate cleanup script functionality
+            validate_cleanup_script
             ;;
         "all")
             # Cleanup all resources

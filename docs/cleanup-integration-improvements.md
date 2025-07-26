@@ -128,7 +128,7 @@ The cleanup uses multiple strategies to find resources:
 
 The following deployment scripts have been updated with the improved cleanup integration:
 
-1. **`aws-deployment.sh`** - Main deployment script
+1. **`aws-deployment-unified.sh`** - Main deployment script
 2. **`aws-deployment-unified.sh`** - Unified deployment orchestrator
 3. **`aws-deployment-simple.sh`** - Simple deployment script
 4. **`aws-deployment-ondemand.sh`** - On-demand deployment script
@@ -154,13 +154,13 @@ A comprehensive test suite has been created to verify the cleanup integration:
 ### Automatic Cleanup (Default)
 When a deployment fails, cleanup runs automatically:
 ```bash
-./scripts/aws-deployment.sh 052
+./scripts/aws-deployment-unified.sh 052
 # If deployment fails, cleanup runs automatically
 ```
 
 ### Disable Automatic Cleanup
 ```bash
-CLEANUP_ON_FAILURE=false ./scripts/aws-deployment.sh 052
+CLEANUP_ON_FAILURE=false ./scripts/aws-deployment-unified.sh 052
 ```
 
 ### Manual Cleanup

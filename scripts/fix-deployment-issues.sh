@@ -175,11 +175,15 @@ create_efs_for_stack() {
         --output text \
         --region "$aws_region")
     
-    local subnet_ids
-    mapfile -t subnet_ids < <(aws ec2 describe-subnets \
+    # Get subnets (bash 3.x compatible)
+    local subnet_ids_raw
+    subnet_ids_raw=$(aws ec2 describe-subnets \
         --filters "Name=vpc-id,Values=$vpc_id" "Name=state,Values=available" \
         --query 'Subnets[].SubnetId' \
         --output text | tr '\t' '\n')
+    # Convert to array bash 3.x compatible way
+    local subnet_ids
+    subnet_ids=($subnet_ids_raw)
     
     # Create security group for EFS
     local efs_sg_id

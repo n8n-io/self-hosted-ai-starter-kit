@@ -100,7 +100,7 @@ services:
   # ---------------------------------------------------------------------------
   postgres:
     <<: [*logging-config, *restart-policy]
-    image: postgres:latest
+    image: postgres:16.1-alpine3.19
     container_name: postgres-gpu
     hostname: postgres
     user: "70:70"  # postgres user in alpine
@@ -186,7 +186,7 @@ services:
   # ---------------------------------------------------------------------------
   n8n:
     <<: [*logging-config, *restart-policy]
-    image: n8nio/n8n:latest
+    image: n8nio/n8n:1.19.4
     container_name: n8n-gpu
     hostname: n8n
     user: "1000:1000"  # n8n user
@@ -268,7 +268,7 @@ services:
   # ---------------------------------------------------------------------------
   qdrant:
     <<: [*logging-config, *restart-policy]
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:v1.7.3
     container_name: qdrant-gpu
     hostname: qdrant
     networks:
@@ -324,7 +324,7 @@ services:
   # ---------------------------------------------------------------------------
   ollama:
     <<: [*gpu-config, *logging-config, *restart-policy]
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.1.17
     container_name: ollama-gpu
     hostname: ollama
     networks:
@@ -397,7 +397,7 @@ services:
   # ---------------------------------------------------------------------------
   ollama-model-init:
     <<: [*gpu-config, *logging-config]
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.1.17
     container_name: ollama-model-init
     networks:
       - ai_network
@@ -686,7 +686,7 @@ services:
   # ---------------------------------------------------------------------------
   health-check:
     <<: [*logging-config, *restart-policy]
-    image: curlimages/curl:latest
+    image: curlimages/curl:8.5.0
     container_name: health-check
     hostname: health-check
     networks:
@@ -740,7 +740,7 @@ services:
   # ---------------------------------------------------------------------------
   crawl4ai:
     <<: [*logging-config, *restart-policy]
-    image: unclecode/crawl4ai:latest
+    image: unclecode/crawl4ai:0.2.75
     container_name: crawl4ai-gpu
     hostname: crawl4ai
     networks:

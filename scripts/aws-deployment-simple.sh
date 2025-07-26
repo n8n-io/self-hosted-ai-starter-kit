@@ -191,6 +191,20 @@ info() {
     echo -e "${CYAN}[INFO] $1${NC}" >&2
 }
 
+# =============================================================================
+# SECURITY VALIDATION
+# =============================================================================
+
+# Get script directory for sourcing
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source security validation functions if available
+if [ -f "$SCRIPT_DIR/security-validation.sh" ]; then
+    source "$SCRIPT_DIR/security-validation.sh"
+else
+    warning "Security validation script not found at $SCRIPT_DIR/security-validation.sh"
+fi
+
 check_prerequisites() {
     log "Checking prerequisites..."
     

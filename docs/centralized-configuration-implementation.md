@@ -33,7 +33,6 @@ This document summarizes the complete implementation of the centralized configur
 - **Scripts Updated**:
   - `scripts/aws-deployment-unified.sh` - Main deployment script
   - `scripts/check-instance-status.sh` - Instance status checking
-  - `scripts/quick-deploy.sh` - Quick deployment utility
   - `scripts/cleanup-consolidated.sh` - Resource cleanup
   - `scripts/config-manager.sh` - Configuration management utility
 
@@ -269,7 +268,6 @@ ondemand:
 The following scripts automatically use the centralized configuration:
 - `aws-deployment-unified.sh`
 - `check-instance-status.sh`
-- `quick-deploy.sh`
 - `cleanup-consolidated.sh`
 - `config-manager.sh`
 

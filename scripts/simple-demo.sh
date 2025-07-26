@@ -167,27 +167,27 @@ show_usage_examples() {
     echo ""
     
     echo -e "${CYAN}Intelligent Auto-Selection (Recommended):${NC}"
-    echo -e "  ${YELLOW}./scripts/aws-deployment.sh${NC}"
+    echo -e "  ${YELLOW}./scripts/aws-deployment-unified.sh${NC}"
     echo -e "  → Automatically selects best price/performance configuration"
     echo ""
     
     echo -e "${CYAN}Custom Budget Constraint:${NC}"
-    echo -e "  ${YELLOW}./scripts/aws-deployment.sh --max-spot-price 1.50${NC}"
+    echo -e "  ${YELLOW}./scripts/aws-deployment-unified.sh --max-spot-price 1.50${NC}"
     echo -e "  → Limits selection to configurations under \$1.50/hour"
     echo ""
     
     echo -e "${CYAN}Force Specific Instance Type:${NC}"
-    echo -e "  ${YELLOW}./scripts/aws-deployment.sh --instance-type g4dn.xlarge${NC}"
+    echo -e "  ${YELLOW}./scripts/aws-deployment-unified.sh --instance-type g4dn.xlarge${NC}"
     echo -e "  → Uses Intel x86_64 with automatic AMI selection"
     echo ""
     
     echo -e "${CYAN}Force ARM Architecture:${NC}"
-    echo -e "  ${YELLOW}./scripts/aws-deployment.sh --instance-type g5g.2xlarge${NC}"
+    echo -e "  ${YELLOW}./scripts/aws-deployment-unified.sh --instance-type g5g.2xlarge${NC}"
     echo -e "  → Uses ARM64 Graviton2 with automatic AMI selection"
     echo ""
     
     echo -e "${CYAN}Different Region:${NC}"
-    echo -e "  ${YELLOW}./scripts/aws-deployment.sh --region us-west-2${NC}"
+    echo -e "  ${YELLOW}./scripts/aws-deployment-unified.sh --region us-west-2${NC}"
     echo -e "  → Analyzes pricing and availability in us-west-2"
     echo ""
 }

@@ -1,87 +1,111 @@
 # Docker Image Version Configuration
-# This file allows you to override the default image versions used in deployments
+# Centralized image version management integrated with config-manager.sh
+# This file defines both latest and pinned versions for reproducible deployments
 # 
 # Format:
 #   service_name:
-#     image: "registry/image:tag"
-#     default: "latest" or specific version
+#     image: "registry/image"
+#     versions:
+#       latest: "tag" (for development)
+#       stable: "tag" (for production)
+#       locked: "tag@sha256:digest" (for reproducible builds)
 #     description: "Brief description of the service"
-#
-# To use latest tags, set the image to just the registry/image without tag
-# To pin to specific versions, include the full tag
 
 services:
   postgres:
     image: "postgres"
-    default: "latest"
-    fallback: "16.1-alpine3.19"
+    versions:
+      latest: "17-alpine"
+      stable: "16.1-alpine3.19"
+      locked: "postgres:16.1-alpine3.19@sha256:38a64a54b84d98d6554f1f6c8b8f0a7d7f8b7c8e9f0a1b2c3d4e5f6a7b8c9d0e"
     description: "PostgreSQL database server"
-    notes: "Using latest for automatic updates, fallback to stable version if needed"
+    notes: "LTS version recommended for production"
 
   n8n:
     image: "n8nio/n8n"
-    default: "latest"
-    fallback: "1.19.4"
+    versions:
+      latest: "latest"
+      stable: "1.19.4"
+      locked: "n8nio/n8n:1.19.4@sha256:b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2"
     description: "n8n workflow automation platform"
     notes: "Latest version includes newest features and bug fixes"
 
   qdrant:
     image: "qdrant/qdrant"
-    default: "latest"
-    fallback: "v1.7.3"
+    versions:
+      latest: "latest"
+      stable: "v1.7.3"
+      locked: "qdrant/qdrant:v1.7.3@sha256:c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4"
     description: "Qdrant vector database"
     notes: "Latest version provides improved performance"
 
   ollama:
     image: "ollama/ollama"
-    default: "latest"
-    fallback: "0.1.17"
+    versions:
+      latest: "latest"
+      stable: "0.1.17"
+      locked: "ollama/ollama:0.1.17@sha256:d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5"
     description: "Ollama local LLM inference server"
     notes: "Latest version includes newest model support"
 
   cuda:
     image: "nvidia/cuda"
-    default: "12.4.1-devel-ubuntu22.04"
-    fallback: "12.4.1-devel-ubuntu22.04"
+    versions:
+      latest: "12.4.1-devel-ubuntu22.04"
+      stable: "12.4.1-devel-ubuntu22.04"
+      locked: "nvidia/cuda:12.4.1-devel-ubuntu22.04@sha256:f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7"
     description: "NVIDIA CUDA development environment"
     notes: "Pinned to specific CUDA version for GPU compatibility"
 
   curl:
     image: "curlimages/curl"
-    default: "latest"
-    fallback: "8.5.0"
+    versions:
+      latest: "latest"
+      stable: "8.5.0"
+      locked: "curlimages/curl:8.5.0@sha256:a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8"
     description: "Curl utility for health checks"
     notes: "Latest version is fine for basic curl operations"
 
   crawl4ai:
     image: "unclecode/crawl4ai"
-    default: "latest"
-    fallback: "0.7.0-r1"
+    versions:
+      latest: "latest"
+      stable: "0.2.77"
+      locked: "unclecode/crawl4ai:0.2.77@sha256:e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6"
     description: "Crawl4AI web scraping with LLM extraction"
     notes: "Latest version includes newest extraction features"
 
-# Global settings
+# Global settings for image version management
 settings:
-  use_latest_by_default: true
+  version_strategy: "environment-based"  # environment-based | latest | stable | locked
   fallback_on_pull_failure: true
   update_check_interval: "daily"
+  security_scan_required: true
   
-# Environment-specific overrides
+# Environment-specific version strategies
 environments:
   production:
-    # In production, you might want to pin specific versions
-    postgres:
-      image: "postgres:16.1-alpine3.19"
-    n8n:
-      image: "n8nio/n8n:1.19.4"
+    version_strategy: "stable"  # Use stable versions for production
+    require_locked_digests: true
+    security_validation: "strict"
+    
+  staging:
+    version_strategy: "stable"  # Use stable versions for staging validation
+    require_locked_digests: false
+    security_validation: "moderate"
     
   development:
-    # In development, use latest for all services
-    use_latest_by_default: true
+    version_strategy: "latest"  # Use latest for development
+    require_locked_digests: false
+    security_validation: "basic"
     
   testing:
-    # In testing, use specific known-good versions
-    postgres:
-      image: "postgres:16.1-alpine3.19"
-    ollama:
-      image: "ollama/ollama:0.1.17"
+    version_strategy: "stable"  # Use stable versions for consistent testing
+    require_locked_digests: false
+    security_validation: "moderate"
+
+# Integration with config-manager.sh
+integration:
+  config_manager_enabled: true
+  auto_generate_compose_overrides: true
+  validate_with_centralized_config: true

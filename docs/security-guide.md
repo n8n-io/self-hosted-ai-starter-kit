@@ -95,7 +95,7 @@ Default security group rules:
 
 ```bash
 # Deploy with restricted access
-./scripts/aws-deployment.sh \
+./scripts/aws-deployment-unified.sh \
   --stack-name my-stack \
   --allowed-cidr "203.0.113.0/24"
 ```

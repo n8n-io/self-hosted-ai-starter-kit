@@ -197,15 +197,19 @@ load_config_management() {
 # CORE FUNCTION TESTS
 # =============================================================================
 
-test_load_configuration() {
-    log_test "Testing load_configuration function..."
+test_load_config() {
+    log_test "Testing load_config function..."
+    
+    # Set test environment variables
+    export STACK_NAME="test-stack"
+    export AWS_REGION="us-east-1"
     
     # Test successful loading
-    if load_configuration "$TEST_CONFIG_FILE" "test"; then
+    if load_config "development" "spot"; then
         pass_test "Configuration loaded successfully"
         
         # Verify key variables are set
-        if [ "${CONFIG_ENVIRONMENT:-}" = "test" ]; then
+        if [ "${CONFIG_ENVIRONMENT:-}" = "development" ]; then
             pass_test "Environment variable set correctly"
         else
             fail_test "Environment variable not set correctly"
@@ -255,10 +259,10 @@ test_generate_environment_file() {
     log_test "Testing generate_environment_file function..."
     
     # Load configuration first
-    load_configuration "$TEST_CONFIG_FILE" "test"
+    load_config "development" "spot"
     
     # Generate environment file
-    if generate_environment_file "$TEST_CONFIG_FILE" "test" "$TEST_ENV_FILE"; then
+    if generate_environment_file "$TEST_CONFIG_FILE" "development" "$TEST_ENV_FILE"; then
         pass_test "Environment file generated successfully"
         
         # Verify file exists and has content
@@ -266,7 +270,7 @@ test_generate_environment_file() {
             pass_test "Environment file created"
             
             # Check for key variables
-            if grep -q "ENVIRONMENT=test" "$TEST_ENV_FILE"; then
+            if grep -q "ENVIRONMENT=development" "$TEST_ENV_FILE"; then
                 pass_test "Environment variable in generated file"
             else
                 fail_test "Environment variable missing from generated file"
@@ -295,10 +299,10 @@ test_generate_docker_compose() {
     log_test "Testing generate_docker_compose function..."
     
     # Load configuration first
-    load_configuration "$TEST_CONFIG_FILE" "test"
+    load_config "development" "spot"
     
     # Generate Docker Compose file
-    if generate_docker_compose "$TEST_CONFIG_FILE" "test" "$TEST_COMPOSE_FILE"; then
+    if generate_docker_compose "$TEST_CONFIG_FILE" "development" "$TEST_COMPOSE_FILE"; then
         pass_test "Docker Compose file generated successfully"
         
         # Verify file exists and has content
@@ -336,7 +340,7 @@ test_apply_deployment_type_overrides() {
     log_test "Testing apply_deployment_type_overrides function..."
     
     # Load configuration first
-    load_configuration "$TEST_CONFIG_FILE" "test"
+    load_config "development" "spot"
     
     # Test simple deployment type
     if apply_deployment_type_overrides "simple"; then
@@ -371,7 +375,7 @@ test_validate_security_configuration() {
     log_test "Testing validate_security_configuration function..."
     
     # Load configuration first
-    load_configuration "$TEST_CONFIG_FILE" "test"
+    load_config "development" "spot"
     
     # Test security validation
     if validate_security_configuration "$TEST_CONFIG_FILE"; then
@@ -495,7 +499,7 @@ test_integration_with_shared_libraries() {
         source "$LIB_DIR/aws-deployment-common.sh"
         
         # Test that config functions work with common library
-        if load_configuration "$TEST_CONFIG_FILE" "test"; then
+        if load_config "development" "spot"; then
             pass_test "Configuration management integrates with aws-deployment-common.sh"
         else
             fail_test "Configuration management failed to integrate with aws-deployment-common.sh"
@@ -531,7 +535,7 @@ test_error_handling() {
     log_test "Testing error handling..."
     
     # Test with non-existent config file
-    if ! load_configuration "/non/existent/file.yml" "test" 2>/dev/null; then
+    if ! load_config "/non/existent/file.yml" "test" 2>/dev/null; then
         pass_test "Error handling for non-existent config file"
     else
         fail_test "Should have failed for non-existent config file"
@@ -591,7 +595,7 @@ test_performance() {
     local start_time=$(date +%s.%N)
     
     for i in {1..10}; do
-        load_configuration "$TEST_CONFIG_FILE" "test" >/dev/null 2>&1
+        load_config "development" "spot" >/dev/null 2>&1
     done
     
     local end_time=$(date +%s.%N)
@@ -626,7 +630,7 @@ run_all_tests() {
     
     # Run core function tests
     echo "Running core function tests..."
-    test_load_configuration
+    test_load_config
     test_validate_configuration
     test_generate_environment_file
     test_generate_docker_compose
@@ -714,7 +718,7 @@ case "${1:-}" in
         # Run only essential tests
         setup_test_environment
         load_config_management
-        test_load_configuration
+        test_load_config
         test_validate_configuration
         test_generate_environment_file
         test_error_handling

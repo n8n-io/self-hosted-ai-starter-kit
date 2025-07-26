@@ -347,6 +347,11 @@ generate_all_config_files() {
         return 1
     fi
     
+    # Generate Docker image overrides if image version management is available
+    if [ "$CONFIG_MANAGEMENT_AVAILABLE" = "true" ] && declare -f generate_docker_image_overrides >/dev/null 2>&1; then
+        generate_docker_image_overrides
+    fi
+    
     # Generate Terraform variables (if Terraform is used)
     if [ -d "$PROJECT_ROOT/terraform" ]; then
         generate_terraform_variables "$env"
@@ -497,6 +502,8 @@ COMMANDS:
     override <env>     Generate only Docker Compose override
     env <env>          Generate only environment file
     terraform <env>    Generate only Terraform variables
+    images <env>       Generate only Docker image overrides
+    validate-images    Validate image version configuration
     help              Show this help message
 
 ENVIRONMENTS:
@@ -509,9 +516,12 @@ EXAMPLES:
     $0 validate production      # Validate production configuration
     $0 show staging            # Show staging configuration summary
     $0 override development    # Generate only Docker Compose override
+    $0 images production       # Generate Docker image overrides for production
+    $0 validate-images         # Validate image version configuration
 
 FEATURES:
     ✅ Enhanced configuration management system (when available)
+    ✅ Centralized image version management with environment strategies
     ✅ Legacy mode fallback for backward compatibility
     ✅ Comprehensive validation and error handling
     ✅ Integration with shared libraries
@@ -524,6 +534,7 @@ DEPENDENCIES:
 
 FILES GENERATED:
     docker-compose.override.yml   Environment-specific Docker Compose overrides
+    docker-compose.images.yml     Environment-specific Docker image overrides
     .env.<environment>           Environment variables
     terraform/<env>.tfvars       Terraform variables file
 
@@ -586,6 +597,27 @@ main() {
                 exit 1
             fi
             generate_terraform_variables "$environment"
+            ;;
+        "images")
+            if [[ -z "$environment" ]]; then
+                error "Environment not specified"
+                show_help
+                exit 1
+            fi
+            if [ "$CONFIG_MANAGEMENT_AVAILABLE" = "true" ]; then
+                enhanced_load_environment_config "$environment" && generate_docker_image_overrides
+            else
+                error "Image management requires enhanced configuration system"
+                exit 1
+            fi
+            ;;
+        "validate-images")
+            if [ "$CONFIG_MANAGEMENT_AVAILABLE" = "true" ] && declare -f validate_image_versions >/dev/null 2>&1; then
+                validate_image_versions
+            else
+                error "Image validation requires enhanced configuration system"
+                exit 1
+            fi
             ;;
         "help"|"--help"|"-h")
             show_help

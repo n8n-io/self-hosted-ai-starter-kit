@@ -44,8 +44,8 @@ install_docker_compose() {
 }
 ```
 
-### 2. `scripts/aws-deployment.sh`
-**Location**: `scripts/aws-deployment.sh` (lines ~2957-3033)
+### 2. `scripts/aws-deployment-unified.sh`
+**Location**: `scripts/aws-deployment-unified.sh` (lines ~2957-3033)
 **Changes**: Updated the dynamically generated deployment script
 
 **Key Changes**:
@@ -193,7 +193,7 @@ If Docker Compose installation fails:
 ## Related Files
 
 - `deploy-app.sh` - Main deployment script with installation logic
-- `scripts/aws-deployment.sh` - AWS deployment automation
+- `scripts/aws-deployment-unified.sh` - AWS deployment automation
 - `lib/aws-deployment-common.sh` - Shared deployment functions
 - `scripts/simple-update-images.sh` - Image update script (already had detection)
 - `scripts/test-docker-compose-installation.sh` - Test script for verification
@@ -209,7 +209,7 @@ To verify the fix works:
 
 2. **Deployment Testing**:
    ```bash
-   ./scripts/aws-deployment.sh
+   ./scripts/aws-deployment-unified.sh
    ```
 
 3. **Manual Verification**:

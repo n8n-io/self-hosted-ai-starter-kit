@@ -27,15 +27,15 @@ export AWS_REGION="${AWS_REGION:-us-east-1}"
 export AWS_DEFAULT_REGION="$AWS_REGION"
 
 # Source the main script to get function definitions
-test_log "Loading functions from aws-deployment.sh..."
-if [[ ! -f "scripts/aws-deployment.sh" ]]; then
-    test_error "aws-deployment.sh not found in scripts/ directory"
+test_log "Loading functions from aws-deployment-unified.sh..."
+if [[ ! -f "scripts/aws-deployment-unified.sh" ]]; then
+    test_error "aws-deployment-unified.sh not found in scripts/ directory"
     exit 1
 fi
 
 # Extract and test functions in isolation
-source scripts/aws-deployment.sh 2>/dev/null || {
-    test_error "Failed to source aws-deployment.sh"
+source scripts/aws-deployment-unified.sh 2>/dev/null || {
+    test_error "Failed to source aws-deployment-unified.sh"
     exit 1
 }
 
@@ -161,19 +161,19 @@ analyze_issues() {
     test_log "Checking AWS CLI command patterns..."
     
     # Check get_comprehensive_spot_pricing for issues
-    grep -n "aws ec2 describe-spot-price-history" scripts/aws-deployment.sh | while read -r line; do
+    grep -n "aws ec2 describe-spot-price-history" scripts/aws-deployment-unified.sh | while read -r line; do
         test_log "Found AWS CLI command: $line"
     done
     
     # Check for jq usage issues
     test_log "Checking jq command patterns..."
-    grep -n "jq.*group_by" scripts/aws-deployment.sh | while read -r line; do
+    grep -n "jq.*group_by" scripts/aws-deployment-unified.sh | while read -r line; do
         test_warning "Complex jq command found: $line"
     done
     
     # Check for variable expansion issues
     test_log "Checking variable expansion patterns..."
-    grep -n '\$[A-Z_]*[^"]' scripts/aws-deployment.sh | head -5 | while read -r line; do
+    grep -n '\$[A-Z_]*[^"]' scripts/aws-deployment-unified.sh | head -5 | while read -r line; do
         test_warning "Potential unquoted variable: $line"
     done
 }

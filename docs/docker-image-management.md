@@ -16,7 +16,7 @@ The deployment system now supports flexible Docker image version management with
 ### Use Latest Images (Default)
 ```bash
 # All these commands use latest images by default
-./scripts/aws-deployment.sh
+./scripts/aws-deployment-unified.sh
 ./scripts/aws-deployment-simple.sh
 ./scripts/simple-update-images.sh update
 ```
@@ -24,7 +24,7 @@ The deployment system now supports flexible Docker image version management with
 ### Use Pinned/Stable Images
 ```bash
 # For production deployments with stable versions
-./scripts/aws-deployment.sh --use-pinned-images
+./scripts/aws-deployment-unified.sh --use-pinned-images
 ./scripts/aws-deployment-simple.sh  # Set USE_LATEST_IMAGES=false in env
 ```
 
@@ -85,13 +85,13 @@ environments:
 
 ```bash
 # Use latest images (default)
-./scripts/aws-deployment.sh
+./scripts/aws-deployment-unified.sh
 
 # Use pinned/stable versions
-./scripts/aws-deployment.sh --use-pinned-images
+./scripts/aws-deployment-unified.sh --use-pinned-images
 
 # Cross-region deployment with pinned images
-./scripts/aws-deployment.sh --cross-region --use-pinned-images
+./scripts/aws-deployment-unified.sh --cross-region --use-pinned-images
 ```
 
 ### Environment Variables
@@ -99,10 +99,10 @@ environments:
 ```bash
 # Control image versions via environment
 export USE_LATEST_IMAGES=false
-./scripts/aws-deployment.sh
+./scripts/aws-deployment-unified.sh
 
 # Or inline
-USE_LATEST_IMAGES=true ./scripts/aws-deployment.sh
+USE_LATEST_IMAGES=true ./scripts/aws-deployment-unified.sh
 ```
 
 ## Image Update Script
@@ -245,7 +245,7 @@ cp docker-compose.gpu-optimized.yml.backup-20250123-143022 docker-compose.gpu-op
 env | grep USE_LATEST_IMAGES
 
 # Debug deployment script
-bash -x ./scripts/aws-deployment.sh --use-pinned-images
+bash -x ./scripts/aws-deployment-unified.sh --use-pinned-images
 ```
 
 ## Migration Guide
@@ -271,10 +271,10 @@ If you're upgrading from a previous version with fixed image tags:
 4. **Deploy gradually**:
    ```bash
    # Test in development first
-   ./scripts/aws-deployment.sh
+   ./scripts/aws-deployment-unified.sh
    
    # Then use pinned versions in production
-   ./scripts/aws-deployment.sh --use-pinned-images
+   ./scripts/aws-deployment-unified.sh --use-pinned-images
    ```
 
 ### Custom Image Versions

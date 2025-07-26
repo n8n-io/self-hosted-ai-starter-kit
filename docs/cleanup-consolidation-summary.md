@@ -45,14 +45,14 @@ This document summarizes the successful consolidation of multiple cleanup script
 - `test-inline-policy-cleanup.sh` → Functionality integrated
 
 **Backup Files Removed**:
-- `aws-deployment.sh.backup`
-- `aws-deployment.sh.bak`
+- `aws-deployment-unified.sh.backup`
+- `aws-deployment-unified.sh.bak`
 - All other backup files with timestamps
 
 ### 🔄 Updated References
 
 **Deployment Scripts Updated**:
-- `aws-deployment.sh` → Now references `cleanup-consolidated.sh`
+- `aws-deployment-unified.sh` → Now references `cleanup-consolidated.sh`
 - `aws-deployment-unified.sh` → Now references `cleanup-consolidated.sh`
 - `aws-deployment-simple.sh` → Now references `cleanup-consolidated.sh`
 - `aws-deployment-ondemand.sh` → Now references `cleanup-consolidated.sh`

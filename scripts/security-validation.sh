@@ -291,9 +291,9 @@ validate_stack_name() {
 # Generate secure password with specified entropy
 generate_secure_password() {
     local bits="${1:-256}"  # Default to 256-bit entropy
-    local hex_chars=$((bits / 4))
+    local bytes=$((bits / 8))
     
-    openssl rand -hex "$hex_chars"
+    openssl rand -hex "$bytes"
 }
 
 # Validate password strength
