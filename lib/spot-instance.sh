@@ -624,3 +624,475 @@ calculate_spot_savings() {
     
     return 0
 }
+
+# =============================================================================
+# LOAD BALANCER SETUP (SPOT INSTANCE COMPATIBLE)
+# =============================================================================
+
+create_application_load_balancer() {
+    local stack_name="$1"
+    local security_group_id="$2"
+    local subnet_ids=("${@:3}")
+    
+    if [ -z "$stack_name" ] || [ -z "$security_group_id" ] || [ ${#subnet_ids[@]} -eq 0 ]; then
+        error "create_application_load_balancer requires stack_name, security_group_id, and subnet_ids parameters"
+        return 1
+    fi
+
+    local alb_name="${stack_name}-alb"
+    log "Creating Application Load Balancer: $alb_name"
+
+    # Check if ALB already exists
+    local alb_arn
+    alb_arn=$(aws elbv2 describe-load-balancers \
+        --names "$alb_name" \
+        --query 'LoadBalancers[0].LoadBalancerArn' \
+        --output text \
+        --region "$AWS_REGION" 2>/dev/null)
+
+    if [ "$alb_arn" != "None" ] && [ -n "$alb_arn" ]; then
+        warning "Load balancer $alb_name already exists: $alb_arn"
+        echo "$alb_arn"
+        return 0
+    fi
+
+    # Create the load balancer
+    alb_arn=$(aws elbv2 create-load-balancer \
+        --name "$alb_name" \
+        --subnets "${subnet_ids[@]}" \
+        --security-groups "$security_group_id" \
+        --scheme "$ALB_SCHEME" \
+        --type "$ALB_TYPE" \
+        --ip-address-type ipv4 \
+        --tags Key=Name,Value="$alb_name" Key=Stack,Value="$stack_name" \
+        --query 'LoadBalancers[0].LoadBalancerArn' \
+        --output text \
+        --region "$AWS_REGION")
+
+    if [ -z "$alb_arn" ] || [ "$alb_arn" = "None" ]; then
+        error "Failed to create Application Load Balancer"
+        return 1
+    fi
+
+    success "Application Load Balancer created: $alb_name"
+    
+    # Wait for ALB to be active
+    log "Waiting for load balancer to be active..."
+    aws elbv2 wait load-balancer-available \
+        --load-balancer-arns "$alb_arn" \
+        --region "$AWS_REGION"
+
+    echo "$alb_arn"
+    return 0
+}
+
+create_target_group() {
+    local stack_name="$1"
+    local service_name="$2"
+    local port="$3"
+    local vpc_id="$4"
+    local health_check_path="${5:-/}"
+    local health_check_port="${6:-traffic-port}"
+    
+    if [ -z "$stack_name" ] || [ -z "$service_name" ] || [ -z "$port" ] || [ -z "$vpc_id" ]; then
+        error "create_target_group requires stack_name, service_name, port, and vpc_id parameters"
+        return 1
+    fi
+
+    local tg_name="${stack_name}-${service_name}-tg"
+    log "Creating target group: $tg_name"
+
+    # Check if target group already exists
+    local tg_arn
+    tg_arn=$(aws elbv2 describe-target-groups \
+        --names "$tg_name" \
+        --query 'TargetGroups[0].TargetGroupArn' \
+        --output text \
+        --region "$AWS_REGION" 2>/dev/null)
+
+    if [ "$tg_arn" != "None" ] && [ -n "$tg_arn" ]; then
+        warning "Target group $tg_name already exists: $tg_arn"
+        echo "$tg_arn"
+        return 0
+    fi
+
+    # Create target group
+    tg_arn=$(aws elbv2 create-target-group \
+        --name "$tg_name" \
+        --protocol HTTP \
+        --port "$port" \
+        --vpc-id "$vpc_id" \
+        --health-check-protocol HTTP \
+        --health-check-path "$health_check_path" \
+        --health-check-port "$health_check_port" \
+        --health-check-interval-seconds 30 \
+        --health-check-timeout-seconds 5 \
+        --healthy-threshold-count 2 \
+        --unhealthy-threshold-count 3 \
+        --target-type instance \
+        --tags Key=Name,Value="$tg_name" Key=Stack,Value="$stack_name" Key=Service,Value="$service_name" \
+        --query 'TargetGroups[0].TargetGroupArn' \
+        --output text \
+        --region "$AWS_REGION")
+
+    if [ -z "$tg_arn" ] || [ "$tg_arn" = "None" ]; then
+        error "Failed to create target group: $tg_name"
+        return 1
+    fi
+
+    success "Target group created: $tg_name"
+    echo "$tg_arn"
+    return 0
+}
+
+register_instance_with_target_group() {
+    local target_group_arn="$1"
+    local instance_id="$2"
+    local port="$3"
+    
+    if [ -z "$target_group_arn" ] || [ -z "$instance_id" ] || [ -z "$port" ]; then
+        error "register_instance_with_target_group requires target_group_arn, instance_id, and port parameters"
+        return 1
+    fi
+
+    log "Registering instance $instance_id with target group on port $port..."
+
+    aws elbv2 register-targets \
+        --target-group-arn "$target_group_arn" \
+        --targets Id="$instance_id",Port="$port" \
+        --region "$AWS_REGION"
+
+    if [ $? -eq 0 ]; then
+        success "Instance registered with target group"
+        
+        # Wait for target to be healthy
+        log "Waiting for target to be healthy..."
+        local max_wait=300
+        local elapsed=0
+        local check_interval=15
+        
+        while [ $elapsed -lt $max_wait ]; do
+            local target_health
+            target_health=$(aws elbv2 describe-target-health \
+                --target-group-arn "$target_group_arn" \
+                --targets Id="$instance_id",Port="$port" \
+                --query 'TargetHealthDescriptions[0].TargetHealth.State' \
+                --output text \
+                --region "$AWS_REGION")
+
+            case "$target_health" in
+                "healthy")
+                    success "Target is healthy"
+                    return 0
+                    ;;
+                "unhealthy")
+                    warning "Target is unhealthy (${elapsed}s elapsed)"
+                    ;;
+                "initial"|"draining"|"unused")
+                    info "Target health check in progress: $target_health (${elapsed}s elapsed)"
+                    ;;
+            esac
+            
+            sleep $check_interval
+            elapsed=$((elapsed + check_interval))
+        done
+        
+        warning "Target health check timed out after ${max_wait}s"
+        return 1
+    else
+        error "Failed to register instance with target group"
+        return 1
+    fi
+}
+
+create_alb_listener() {
+    local alb_arn="$1"
+    local target_group_arn="$2"
+    local port="${3:-80}"
+    local protocol="${4:-HTTP}"
+    
+    if [ -z "$alb_arn" ] || [ -z "$target_group_arn" ]; then
+        error "create_alb_listener requires alb_arn and target_group_arn parameters"
+        return 1
+    fi
+
+    log "Creating ALB listener on port $port..."
+
+    local listener_arn
+    listener_arn=$(aws elbv2 create-listener \
+        --load-balancer-arn "$alb_arn" \
+        --protocol "$protocol" \
+        --port "$port" \
+        --default-actions Type=forward,TargetGroupArn="$target_group_arn" \
+        --query 'Listeners[0].ListenerArn' \
+        --output text \
+        --region "$AWS_REGION")
+
+    if [ -z "$listener_arn" ] || [ "$listener_arn" = "None" ]; then
+        error "Failed to create ALB listener"
+        return 1
+    fi
+
+    success "ALB listener created on port $port"
+    echo "$listener_arn"
+    return 0
+}
+
+# =============================================================================
+# CLOUDFRONT SETUP (SPOT INSTANCE COMPATIBLE)
+# =============================================================================
+
+setup_cloudfront_distribution() {
+    local stack_name="$1"
+    local alb_dns_name="$2"
+    local origin_path="${3:-}"
+    
+    if [ -z "$stack_name" ] || [ -z "$alb_dns_name" ]; then
+        error "setup_cloudfront_distribution requires stack_name and alb_dns_name parameters"
+        return 1
+    fi
+
+    log "Setting up CloudFront distribution for ALB: $alb_dns_name"
+
+    # Create distribution configuration
+    local distribution_config='{
+        "CallerReference": "'${stack_name}'-'$(date +%s)'",
+        "Comment": "CloudFront distribution for '${stack_name}' GeuseMaker",
+        "DefaultCacheBehavior": {
+            "TargetOriginId": "'${stack_name}'-alb-origin",
+            "ViewerProtocolPolicy": "redirect-to-https",
+            "AllowedMethods": {
+                "Quantity": 7,
+                "Items": ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+            },
+            "CachedMethods": {
+                "Quantity": 2,
+                "Items": ["GET", "HEAD"]
+            },
+            "ForwardedValues": {
+                "QueryString": true,
+                "Cookies": {"Forward": "all"},
+                "Headers": {
+                    "Quantity": 1,
+                    "Items": ["*"]
+                }
+            },
+            "MinTTL": '${CLOUDFRONT_MIN_TTL}',
+            "DefaultTTL": '${CLOUDFRONT_DEFAULT_TTL}',
+            "MaxTTL": '${CLOUDFRONT_MAX_TTL}',
+            "Compress": true
+        },
+        "Origins": {
+            "Quantity": 1,
+            "Items": [{
+                "Id": "'${stack_name}'-alb-origin",
+                "DomainName": "'${alb_dns_name}'",
+                "OriginPath": "'${origin_path}'",
+                "CustomOriginConfig": {
+                    "HTTPPort": 80,
+                    "HTTPSPort": 443,
+                    "OriginProtocolPolicy": "http-only",
+                    "OriginSslProtocols": {
+                        "Quantity": 1,
+                        "Items": ["TLSv1.2"]
+                    }
+                }
+            }]
+        },
+        "Enabled": true,
+        "PriceClass": "'${CLOUDFRONT_PRICE_CLASS}'",
+        "Tags": {
+            "Items": [
+                {"Key": "Name", "Value": "'${stack_name}'-cloudfront"},
+                {"Key": "Stack", "Value": "'${stack_name}'"},
+                {"Key": "Environment", "Value": "'${ENVIRONMENT}'"}
+            ]
+        }
+    }'
+
+    # Create the distribution
+    local distribution_id
+    distribution_id=$(aws cloudfront create-distribution \
+        --distribution-config "$distribution_config" \
+        --query 'Distribution.Id' \
+        --output text \
+        --region "$AWS_REGION")
+
+    if [ -z "$distribution_id" ] || [ "$distribution_id" = "None" ]; then
+        error "Failed to create CloudFront distribution"
+        return 1
+    fi
+
+    success "CloudFront distribution created: $distribution_id"
+    
+    # Get distribution domain name
+    local domain_name
+    domain_name=$(aws cloudfront get-distribution \
+        --id "$distribution_id" \
+        --query 'Distribution.DomainName' \
+        --output text \
+        --region "$AWS_REGION")
+
+    log "CloudFront distribution domain: $domain_name"
+    log "Note: Distribution deployment may take 15-20 minutes"
+
+    echo "${distribution_id}:${domain_name}"
+    return 0
+}
+
+# =============================================================================
+# SPOT INSTANCE ALB/CDN INTEGRATION
+# =============================================================================
+
+setup_spot_instance_load_balancing() {
+    local stack_name="$1"
+    local instance_id="$2"
+    local vpc_id="$3"
+    local subnet_ids=("${@:4}")
+    
+    if [ -z "$stack_name" ] || [ -z "$instance_id" ] || [ -z "$vpc_id" ] || [ ${#subnet_ids[@]} -eq 0 ]; then
+        error "setup_spot_instance_load_balancing requires stack_name, instance_id, vpc_id, and subnet_ids parameters"
+        return 1
+    fi
+
+    log "Setting up load balancing for spot instance: $instance_id"
+
+    # Create ALB security group
+    local alb_sg_name="${stack_name}-alb-sg"
+    local alb_sg_id
+    alb_sg_id=$(aws ec2 create-security-group \
+        --group-name "$alb_sg_name" \
+        --description "Security group for ALB" \
+        --vpc-id "$vpc_id" \
+        --query 'GroupId' \
+        --output text \
+        --region "$AWS_REGION")
+
+    if [ -z "$alb_sg_id" ] || [ "$alb_sg_id" = "None" ]; then
+        error "Failed to create ALB security group"
+        return 1
+    fi
+
+    # Configure ALB security group rules
+    aws ec2 authorize-security-group-ingress \
+        --group-id "$alb_sg_id" \
+        --protocol tcp \
+        --port 80 \
+        --cidr 0.0.0.0/0 \
+        --region "$AWS_REGION"
+
+    aws ec2 authorize-security-group-ingress \
+        --group-id "$alb_sg_id" \
+        --protocol tcp \
+        --port 443 \
+        --cidr 0.0.0.0/0 \
+        --region "$AWS_REGION"
+
+    # Tag ALB security group
+    aws ec2 create-tags \
+        --resources "$alb_sg_id" \
+        --tags Key=Name,Value="$alb_sg_name" Key=Stack,Value="$stack_name" \
+        --region "$AWS_REGION"
+
+    # Create Application Load Balancer
+    local alb_arn
+    alb_arn=$(create_application_load_balancer "$stack_name" "$alb_sg_id" "${subnet_ids[@]}")
+    
+    if [ $? -ne 0 ]; then
+        error "Failed to create Application Load Balancer"
+        return 1
+    fi
+
+    # Get ALB DNS name
+    local alb_dns_name
+    alb_dns_name=$(aws elbv2 describe-load-balancers \
+        --load-balancer-arns "$alb_arn" \
+        --query 'LoadBalancers[0].DNSName' \
+        --output text \
+        --region "$AWS_REGION")
+
+    # Create target groups for each service
+    local services=("n8n" "ollama" "qdrant" "crawl4ai")
+    local ports=(80 8080 8081 8082)
+    local target_groups=()
+
+    for i in "${!services[@]}"; do
+        local service="${services[$i]}"
+        local port="${ports[$i]}"
+        
+        local tg_arn
+        tg_arn=$(create_target_group "$stack_name" "$service" "$port" "$vpc_id")
+        
+        if [ $? -eq 0 ]; then
+            target_groups+=("$tg_arn")
+            
+            # Register instance with target group
+            register_instance_with_target_group "$tg_arn" "$instance_id" "$port"
+            
+            # Create ALB listener
+            create_alb_listener "$alb_arn" "$tg_arn" "$port"
+        else
+            warning "Failed to setup target group for $service"
+        fi
+    done
+
+    success "Load balancing setup complete for spot instance"
+    echo "$alb_arn:$alb_dns_name"
+    return 0
+}
+
+setup_spot_instance_cdn() {
+    local stack_name="$1"
+    local alb_dns_name="$2"
+    
+    if [ -z "$stack_name" ] || [ -z "$alb_dns_name" ]; then
+        error "setup_spot_instance_cdn requires stack_name and alb_dns_name parameters"
+        return 1
+    fi
+
+    log "Setting up CloudFront CDN for spot instance ALB: $alb_dns_name"
+
+    # Setup CloudFront distribution
+    local cdn_result
+    cdn_result=$(setup_cloudfront_distribution "$stack_name" "$alb_dns_name")
+    
+    if [ $? -ne 0 ]; then
+        error "Failed to setup CloudFront distribution"
+        return 1
+    fi
+
+    local distribution_id="${cdn_result%:*}"
+    local domain_name="${cdn_result#*:}"
+
+    success "CloudFront CDN setup complete for spot instance"
+    echo "$distribution_id:$domain_name"
+    return 0
+}
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+get_alb_dns_name() {
+    local alb_arn="$1"
+    
+    if [ -z "$alb_arn" ]; then
+        error "get_alb_dns_name requires alb_arn parameter"
+        return 1
+    fi
+
+    local dns_name
+    dns_name=$(aws elbv2 describe-load-balancers \
+        --load-balancer-arns "$alb_arn" \
+        --query 'LoadBalancers[0].DNSName' \
+        --output text \
+        --region "$AWS_REGION")
+
+    if [ -z "$dns_name" ] || [ "$dns_name" = "None" ]; then
+        error "Failed to get ALB DNS name"
+        return 1
+    fi
+
+    echo "$dns_name"
+    return 0
+}

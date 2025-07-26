@@ -776,12 +776,19 @@ deploy_application() {
 }
 
 # =============================================================================
-# LOAD BALANCER SETUP (ON-DEMAND ONLY)
+# LOAD BALANCER SETUP (ON-DEMAND AND SPOT)
 # =============================================================================
 
 setup_load_balancer() {
-    if [ "$DEPLOYMENT_TYPE" != "ondemand" ] || [ "${SKIP_LOAD_BALANCER:-false}" = "true" ]; then
+    # Check if ALB setup is requested via environment variable
+    if [ "${SETUP_ALB:-false}" != "true" ] && [ "${SKIP_LOAD_BALANCER:-false}" = "true" ]; then
         info "Skipping load balancer setup"
+        return 0
+    fi
+    
+    # For spot instances, check if ALB setup is explicitly requested
+    if [ "$DEPLOYMENT_TYPE" = "spot" ] && [ "${SETUP_ALB:-false}" != "true" ]; then
+        info "ALB setup not requested for spot instance (use SETUP_ALB=true to enable)"
         return 0
     fi
     
@@ -799,57 +806,107 @@ setup_load_balancer() {
         return 0
     fi
     
-    # Create ALB
-    ALB_ARN=$(create_application_load_balancer "$STACK_NAME" "$SECURITY_GROUP_ID" "${subnet_ids[@]}")
-    if [ -z "$ALB_ARN" ]; then
-        error "Failed to create load balancer"
-        return 1
-    fi
-    
-    # Create target groups and register instance
-    local services
-    IFS=' ' read -ra services <<< "$(get_standard_service_list "$DEPLOYMENT_TYPE")"
-    
-    for service_info in "${services[@]}"; do
-        local service_name="${service_info%:*}"
-        local service_port="${service_info#*:}"
-        
-        local tg_arn
-        tg_arn=$(create_target_group "$STACK_NAME" "$service_name" "$service_port" "$VPC_ID")
-        
-        if [ -n "$tg_arn" ]; then
-            register_instance_with_target_group "$tg_arn" "$INSTANCE_ID" "$service_port"
-            create_alb_listener "$ALB_ARN" "$tg_arn" "$service_port"
-        fi
-    done
-    
-    # Get ALB DNS name
-    ALB_DNS_NAME=$(get_alb_dns_name "$ALB_ARN")
+    # Create ALB based on deployment type
+    case "$DEPLOYMENT_TYPE" in
+        "spot")
+            # Use spot instance specific ALB setup
+            local alb_result
+            alb_result=$(setup_spot_instance_load_balancing "$STACK_NAME" "$INSTANCE_ID" "$VPC_ID" "${subnet_ids[@]}")
+            if [ $? -eq 0 ]; then
+                ALB_ARN="${alb_result%:*}"
+                ALB_DNS_NAME="${alb_result#*:}"
+                success "Spot instance load balancer setup completed: $ALB_DNS_NAME"
+            else
+                error "Failed to setup load balancer for spot instance"
+                return 1
+            fi
+            ;;
+        *)
+            # Use standard ALB setup for ondemand and simple
+            ALB_ARN=$(create_application_load_balancer "$STACK_NAME" "$SECURITY_GROUP_ID" "${subnet_ids[@]}")
+            if [ -z "$ALB_ARN" ]; then
+                error "Failed to create load balancer"
+                return 1
+            fi
+            
+            # Create target groups and register instance
+            local services
+            IFS=' ' read -ra services <<< "$(get_standard_service_list "$DEPLOYMENT_TYPE")"
+            
+            for service_info in "${services[@]}"; do
+                local service_name="${service_info%:*}"
+                local service_port="${service_info#*:}"
+                
+                local tg_arn
+                tg_arn=$(create_target_group "$STACK_NAME" "$service_name" "$service_port" "$VPC_ID")
+                
+                if [ -n "$tg_arn" ]; then
+                    register_instance_with_target_group "$tg_arn" "$INSTANCE_ID" "$service_port"
+                    create_alb_listener "$ALB_ARN" "$tg_arn" "$service_port"
+                fi
+            done
+            
+            # Get ALB DNS name
+            ALB_DNS_NAME=$(get_alb_dns_name "$ALB_ARN")
+            ;;
+    esac
     
     success "Load balancer setup completed: $ALB_DNS_NAME"
     return 0
 }
 
 # =============================================================================
-# CLOUDFRONT SETUP (ON-DEMAND ONLY)
+# CLOUDFRONT SETUP (ON-DEMAND AND SPOT)
 # =============================================================================
 
 setup_cloudfront() {
-    if [ "$DEPLOYMENT_TYPE" != "ondemand" ] || [ "${SKIP_CLOUDFRONT:-false}" = "true" ] || [ -z "${ALB_DNS_NAME:-}" ]; then
+    # Check if CloudFront setup is requested via environment variable
+    if [ "${SETUP_CLOUDFRONT:-false}" != "true" ] && [ "${SKIP_CLOUDFRONT:-false}" = "true" ]; then
         info "Skipping CloudFront setup"
+        return 0
+    fi
+    
+    # For spot instances, check if CloudFront setup is explicitly requested
+    if [ "$DEPLOYMENT_TYPE" = "spot" ] && [ "${SETUP_CLOUDFRONT:-false}" != "true" ]; then
+        info "CloudFront setup not requested for spot instance (use SETUP_CLOUDFRONT=true to enable)"
+        return 0
+    fi
+    
+    # Check if ALB is available (required for CloudFront)
+    if [ -z "${ALB_DNS_NAME:-}" ]; then
+        warning "No ALB DNS name available. Skipping CloudFront setup."
         return 0
     fi
     
     log "Setting up CloudFront distribution..."
     
-    local cloudfront_result
-    cloudfront_result=$(setup_cloudfront_distribution "$STACK_NAME" "$ALB_DNS_NAME")
-    
-    if [ -n "$cloudfront_result" ]; then
-        CLOUDFRONT_ID="${cloudfront_result%:*}"
-        CLOUDFRONT_DOMAIN="${cloudfront_result#*:}"
-        success "CloudFront setup completed: $CLOUDFRONT_DOMAIN"
-    fi
+    # Setup CloudFront based on deployment type
+    case "$DEPLOYMENT_TYPE" in
+        "spot")
+            # Use spot instance specific CloudFront setup
+            local cloudfront_result
+            cloudfront_result=$(setup_spot_instance_cdn "$STACK_NAME" "$ALB_DNS_NAME")
+            if [ $? -eq 0 ]; then
+                CLOUDFRONT_ID="${cloudfront_result%:*}"
+                CLOUDFRONT_DOMAIN="${cloudfront_result#*:}"
+                success "Spot instance CloudFront setup completed: $CLOUDFRONT_DOMAIN"
+            else
+                error "Failed to setup CloudFront for spot instance"
+                return 1
+            fi
+            ;;
+        *)
+            # Use standard CloudFront setup for ondemand and simple
+            local cloudfront_result
+            cloudfront_result=$(setup_cloudfront_distribution "$STACK_NAME" "$ALB_DNS_NAME")
+            
+            if [ -n "$cloudfront_result" ]; then
+                CLOUDFRONT_ID="${cloudfront_result%:*}"
+                CLOUDFRONT_DOMAIN="${cloudfront_result#*:}"
+                success "CloudFront setup completed: $CLOUDFRONT_DOMAIN"
+            fi
+            ;;
+    esac
     
     return 0
 }

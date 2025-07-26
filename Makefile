@@ -168,6 +168,24 @@ deploy-spot: ## Deploy with spot instances (requires STACK_NAME)
 	@echo "📋 Real-time provisioning logs will be shown during deployment"
 	@FORCE_YES=true FOLLOW_LOGS=true ./scripts/aws-deployment-unified.sh -t spot $(STACK_NAME)
 
+deploy-spot-alb: ## Deploy spot instance with ALB load balancer (requires STACK_NAME)
+	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
+	@echo "🚀 Deploying spot instance with ALB load balancer: $(STACK_NAME)"
+	@echo "📋 Real-time provisioning logs will be shown during deployment"
+	@FORCE_YES=true FOLLOW_LOGS=true SETUP_ALB=true ./scripts/aws-deployment-unified.sh -t spot $(STACK_NAME)
+
+deploy-spot-cdn: ## Deploy spot instance with ALB and CloudFront CDN (requires STACK_NAME)
+	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
+	@echo "🌐 Deploying spot instance with full CDN setup: $(STACK_NAME)"
+	@echo "📋 Real-time provisioning logs will be shown during deployment"
+	@FORCE_YES=true FOLLOW_LOGS=true SETUP_ALB=true SETUP_CLOUDFRONT=true ./scripts/aws-deployment-unified.sh -t spot $(STACK_NAME)
+
+deploy-spot-production: ## Deploy production-ready spot instance with CDN (requires STACK_NAME)
+	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
+	@echo "🏭 Deploying production-ready spot instance with CDN: $(STACK_NAME)"
+	@echo "📋 Real-time provisioning logs will be shown during deployment"
+	@FORCE_YES=true FOLLOW_LOGS=true SETUP_ALB=true SETUP_CLOUDFRONT=true USE_PINNED_IMAGES=true ./scripts/aws-deployment-unified.sh -t spot $(STACK_NAME)
+
 deploy-ondemand: validate ## Deploy with on-demand instances (requires STACK_NAME)
 	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
 	@FORCE_YES=true ./scripts/aws-deployment-unified.sh -t ondemand $(STACK_NAME)
