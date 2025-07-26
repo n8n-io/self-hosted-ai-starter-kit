@@ -8,21 +8,20 @@
 # UNIFIED LOGGING AND OUTPUT FUNCTIONS
 # =============================================================================
 
-# Color definitions (only define if not already set to avoid conflicts)
-if [[ -z "${AWS_DEPLOY_COLORS_DEFINED:-}" ]]; then
-    if [[ -z "${RED:-}" ]]; then
-        readonly RED='\033[0;31m'
-        readonly GREEN='\033[0;32m'
-        readonly YELLOW='\033[0;33m'
-        readonly BLUE='\033[0;34m'
-        readonly PURPLE='\033[0;35m'
-        readonly MAGENTA='\033[0;35m'
-        readonly CYAN='\033[0;36m'
-        readonly BOLD='\033[1m'
-        readonly NC='\033[0m'
-        readonly AWS_DEPLOY_COLORS_DEFINED=true
-    fi
-fi
+# Color definitions - always define with defaults to prevent unbound variable errors
+# Use parameter expansion to avoid conflicts with existing definitions
+RED="${RED:-\033[0;31m}"
+GREEN="${GREEN:-\033[0;32m}"
+YELLOW="${YELLOW:-\033[0;33m}"
+BLUE="${BLUE:-\033[0;34m}"
+PURPLE="${PURPLE:-\033[0;35m}"
+MAGENTA="${MAGENTA:-\033[0;35m}"
+CYAN="${CYAN:-\033[0;36m}"
+BOLD="${BOLD:-\033[1m}"
+NC="${NC:-\033[0m}"
+
+# Mark colors as defined to prevent redefinition
+AWS_DEPLOY_COLORS_DEFINED="${AWS_DEPLOY_COLORS_DEFINED:-true}"
 
 # Log context detection and formatting
 get_log_context() {
@@ -47,77 +46,78 @@ get_timestamp() {
 }
 
 # Core logging functions with unified formatting
+# Use parameter expansion with defaults to prevent unbound variable errors
 log() { 
     local context=$(get_log_context)
-    echo -e "${BLUE}${BOLD}[$(get_timestamp)]${NC} ${CYAN}${context}${NC} ${BLUE}📋 [LOG]${NC} $1" >&2
+    echo -e "${BLUE:-}${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${BLUE:-}📋 [LOG]${NC:-} $1" >&2
 }
 
 error() { 
     local context=$(get_log_context)
-    echo -e "${RED}${BOLD}[$(get_timestamp)]${NC} ${CYAN}${context}${NC} ${RED}❌ [ERROR]${NC} $1" >&2
+    echo -e "${RED:-}${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${RED:-}❌ [ERROR]${NC:-} $1" >&2
 }
 
 success() { 
     local context=$(get_log_context)
-    echo -e "${GREEN}${BOLD}[$(get_timestamp)]${NC} ${CYAN}${context}${NC} ${GREEN}✅ [SUCCESS]${NC} $1" >&2
+    echo -e "${GREEN:-}${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${GREEN:-}✅ [SUCCESS]${NC:-} $1" >&2
 }
 
 warning() { 
     local context=$(get_log_context)
-    echo -e "${YELLOW}${BOLD}[$(get_timestamp)]${NC} ${CYAN}${context}${NC} ${YELLOW}⚠️  [WARNING]${NC} $1" >&2
+    echo -e "${YELLOW:-}${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${YELLOW:-}⚠️  [WARNING]${NC:-} $1" >&2
 }
 
 info() { 
     local context=$(get_log_context)
-    echo -e "${CYAN}${BOLD}[$(get_timestamp)]${NC} ${CYAN}${context}${NC} ${CYAN}ℹ️  [INFO]${NC} $1" >&2
+    echo -e "${CYAN:-}${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${CYAN:-}ℹ️  [INFO]${NC:-} $1" >&2
 }
 
 # Deployment progress functions
 step() { 
     local context=$(get_log_context)
-    echo -e "${MAGENTA}${BOLD}[$(get_timestamp)]${NC} ${CYAN}${context}${NC} ${MAGENTA}🔸 [STEP]${NC} $1" >&2
+    echo -e "${MAGENTA:-}${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${MAGENTA:-}🔸 [STEP]${NC:-} $1" >&2
 }
 
 progress() { 
     local context=$(get_log_context)
-    echo -e "${BLUE}${BOLD}[$(get_timestamp)]${NC} ${CYAN}${context}${NC} ${BLUE}⏳ [PROGRESS]${NC} $1" >&2
+    echo -e "${BLUE:-}${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${BLUE:-}⏳ [PROGRESS]${NC:-} $1" >&2
 }
 
 # Special deployment status functions
 deploy_start() {
     local context=$(get_log_context)
-    echo -e "${BOLD}${GREEN}╔════════════════════════════════════════════════════════════════════════╗${NC}" >&2
-    echo -e "${BOLD}${GREEN}║${NC} ${BOLD}[$(get_timestamp)]${NC} ${CYAN}${context}${NC} ${GREEN}🚀 [DEPLOY-START]${NC} $1 ${BOLD}${GREEN}║${NC}" >&2
-    echo -e "${BOLD}${GREEN}╚════════════════════════════════════════════════════════════════════════╝${NC}" >&2
+    echo -e "${BOLD:-}${GREEN:-}╔════════════════════════════════════════════════════════════════════════╗${NC:-}" >&2
+    echo -e "${BOLD:-}${GREEN:-}║${NC:-} ${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${GREEN:-}🚀 [DEPLOY-START]${NC:-} $1 ${BOLD:-}${GREEN:-}║${NC:-}" >&2
+    echo -e "${BOLD:-}${GREEN:-}╚════════════════════════════════════════════════════════════════════════╝${NC:-}" >&2
 }
 
 deploy_complete() {
     local context=$(get_log_context)
-    echo -e "${BOLD}${GREEN}╔════════════════════════════════════════════════════════════════════════╗${NC}" >&2
-    echo -e "${BOLD}${GREEN}║${NC} ${BOLD}[$(get_timestamp)]${NC} ${CYAN}${context}${NC} ${GREEN}🎉 [DEPLOY-COMPLETE]${NC} $1 ${BOLD}${GREEN}║${NC}" >&2
-    echo -e "${BOLD}${GREEN}╚════════════════════════════════════════════════════════════════════════╝${NC}" >&2
+    echo -e "${BOLD:-}${GREEN:-}╔════════════════════════════════════════════════════════════════════════╗${NC:-}" >&2
+    echo -e "${BOLD:-}${GREEN:-}║${NC:-} ${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${GREEN:-}🎉 [DEPLOY-COMPLETE]${NC:-} $1 ${BOLD:-}${GREEN:-}║${NC:-}" >&2
+    echo -e "${BOLD:-}${GREEN:-}╚════════════════════════════════════════════════════════════════════════╝${NC:-}" >&2
 }
 
 deploy_failed() {
     local context=$(get_log_context)
-    echo -e "${BOLD}${RED}╔════════════════════════════════════════════════════════════════════════╗${NC}" >&2
-    echo -e "${BOLD}${RED}║${NC} ${BOLD}[$(get_timestamp)]${NC} ${CYAN}${context}${NC} ${RED}💥 [DEPLOY-FAILED]${NC} $1 ${BOLD}${RED}║${NC}" >&2
-    echo -e "${BOLD}${RED}╚════════════════════════════════════════════════════════════════════════╝${NC}" >&2
+    echo -e "${BOLD:-}${RED:-}╔════════════════════════════════════════════════════════════════════════╗${NC:-}" >&2
+    echo -e "${BOLD:-}${RED:-}║${NC:-} ${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${RED:-}💥 [DEPLOY-FAILED]${NC:-} $1 ${BOLD:-}${RED:-}║${NC:-}" >&2
+    echo -e "${BOLD:-}${RED:-}╚════════════════════════════════════════════════════════════════════════╝${NC:-}" >&2
 }
 
 # Section headers for better organization
 section() {
     local context=$(get_log_context)
-    echo -e "${BOLD}${PURPLE}╭─────────────────────────────────────────────────────────────────────────╮${NC}" >&2
-    echo -e "${BOLD}${PURPLE}│${NC} ${BOLD}[$(get_timestamp)]${NC} ${CYAN}${context}${NC} ${PURPLE}📂 [SECTION]${NC} $1 ${BOLD}${PURPLE}│${NC}" >&2
-    echo -e "${BOLD}${PURPLE}╰─────────────────────────────────────────────────────────────────────────╯${NC}" >&2
+    echo -e "${BOLD:-}${PURPLE:-}╭─────────────────────────────────────────────────────────────────────────╮${NC:-}" >&2
+    echo -e "${BOLD:-}${PURPLE:-}│${NC:-} ${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${PURPLE:-}📂 [SECTION]${NC:-} $1 ${BOLD:-}${PURPLE:-}│${NC:-}" >&2
+    echo -e "${BOLD:-}${PURPLE:-}╰─────────────────────────────────────────────────────────────────────────╯${NC:-}" >&2
 }
 
 # Debug logging (only shown when DEBUG=true)
 debug() {
     if [[ "${DEBUG:-false}" == "true" ]]; then
         local context=$(get_log_context)
-        echo -e "${PURPLE}${BOLD}[$(get_timestamp)]${NC} ${CYAN}${context}${NC} ${PURPLE}🐛 [DEBUG]${NC} $1" >&2
+        echo -e "${PURPLE:-}${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${PURPLE:-}🐛 [DEBUG]${NC:-} $1" >&2
     fi
 }
 
