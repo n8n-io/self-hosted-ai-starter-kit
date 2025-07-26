@@ -57,6 +57,7 @@ make deploy-simple STACK_NAME=my-dev-stack
 ### ⚙️ **Operations**
 - [**Monitoring**](docs/reference/api/monitoring.md) - System monitoring and observability
 - [**Backup & Recovery**](docs/setup/troubleshooting.md) - Data protection and disaster recovery procedures
+- [**EFS Cleanup Guide**](docs/efs-cleanup-guide.md) - EFS file system cleanup and management
 
 ## 🌟 Core Features
 
@@ -83,6 +84,8 @@ make deploy-simple STACK_NAME=my-dev-stack
 | `make test` | Run all tests |
 | `make status STACK_NAME=name` | Check deployment status (requires STACK_NAME) |
 | `make destroy STACK_NAME=name` | Destroy infrastructure (requires STACK_NAME) |
+| `./scripts/cleanup-consolidated.sh --mode failed-deployments` | Cleanup failed deployment EFS file systems |
+| `./scripts/cleanup-consolidated.sh --mode efs "pattern"` | Cleanup EFS file systems matching pattern |
 
 [**→ Complete CLI Reference**](docs/reference/cli/)
 
