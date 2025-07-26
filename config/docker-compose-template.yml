@@ -1,0 +1,366 @@
+# Docker Compose Template with Standardized Environment Variables
+# This template is used by the configuration management system to generate
+# environment-specific Docker Compose configurations
+
+version: '3.8'
+
+# =============================================================================
+# EXTENSION CONFIGURATIONS
+# =============================================================================
+
+# GPU configuration extension
+x-gpu-config: &gpu-config
+  runtime: nvidia
+  environment:
+    - NVIDIA_VISIBLE_DEVICES=all
+    - NVIDIA_DRIVER_CAPABILITIES=all
+
+# Common service configuration
+x-common-config: &common-config
+  restart: unless-stopped
+  networks:
+    - ai_network
+  logging:
+    driver: json-file
+    options:
+      max-size: "${DOCKER_LOG_MAX_SIZE:-10m}"
+      max-file: "${DOCKER_LOG_MAX_FILES:-3}"
+
+# Health check configuration
+x-health-check: &health-check
+  start_period: 60s
+  interval: 30s
+  timeout: 10s
+  retries: 3
+
+# =============================================================================
+# SERVICES
+# =============================================================================
+
+services:
+  # PostgreSQL Database
+  postgres:
+    <<: *common-config
+    image: "${POSTGRES_IMAGE:-postgres:16.1-alpine3.19}"
+    container_name: geuse_postgres
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      # Basic configuration
+      - POSTGRES_DB=${POSTGRES_DB:-n8n}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      
+      # Performance tuning
+      - POSTGRES_MAX_CONNECTIONS=${POSTGRES_MAX_CONNECTIONS:-100}
+      - POSTGRES_SHARED_BUFFERS=${POSTGRES_SHARED_BUFFERS:-256MB}
+      - POSTGRES_EFFECTIVE_CACHE_SIZE=${POSTGRES_EFFECTIVE_CACHE_SIZE:-1GB}
+      - POSTGRES_WAL_BUFFERS=${POSTGRES_WAL_BUFFERS:-16MB}
+      - POSTGRES_CHECKPOINT_COMPLETION_TARGET=${POSTGRES_CHECKPOINT_COMPLETION_TARGET:-0.9}
+      - POSTGRES_RANDOM_PAGE_COST=${POSTGRES_RANDOM_PAGE_COST:-1.1}
+    
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ${EFS_MOUNT_PATH:-./data/postgres}:/var/lib/postgresql/backup
+    
+    healthcheck:
+      <<: *health-check
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-n8n}"]
+    
+    deploy:
+      resources:
+        limits:
+          memory: ${POSTGRES_MEMORY_LIMIT:-2G}
+          cpus: '${POSTGRES_CPU_LIMIT:-1.0}'
+        reservations:
+          memory: ${POSTGRES_MEMORY_RESERVATION:-1G}
+          cpus: '${POSTGRES_CPU_RESERVATION:-0.5}'
+
+  # n8n Workflow Automation
+  n8n:
+    <<: *common-config
+    image: "${N8N_IMAGE:-n8nio/n8n:1.19.4}"
+    container_name: geuse_n8n
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      # Database connection
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB:-n8n}
+      - DB_POSTGRESDB_USER=${POSTGRES_USER:-postgres}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+      
+      # n8n configuration
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - N8N_USER_MANAGEMENT_JWT_SECRET=${N8N_USER_MANAGEMENT_JWT_SECRET}
+      - N8N_CORS_ENABLED=${N8N_CORS_ENABLED:-true}
+      - N8N_CORS_ALLOWED_ORIGINS=${N8N_CORS_ALLOWED_ORIGINS:-*}
+      - N8N_PAYLOAD_SIZE_MAX=${N8N_PAYLOAD_SIZE_MAX:-16}
+      - N8N_METRICS=${N8N_METRICS:-true}
+      - N8N_LOG_LEVEL=${N8N_LOG_LEVEL:-info}
+      
+      # Community packages
+      - N8N_COMMUNITY_PACKAGES_ENABLED=${N8N_COMMUNITY_PACKAGES_ENABLED:-false}
+      - N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=${N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE:-false}
+      
+      # Execution settings
+      - N8N_EXECUTION_DATA_SAVE_ON_ERROR=${N8N_EXECUTION_DATA_SAVE_ON_ERROR:-all}
+      - N8N_EXECUTION_DATA_SAVE_ON_SUCCESS=${N8N_EXECUTION_DATA_SAVE_ON_SUCCESS:-all}
+      - N8N_EXECUTION_TIMEOUT=${N8N_EXECUTION_TIMEOUT:-1200}
+      - N8N_MAX_EXECUTION_HISTORY=${N8N_MAX_EXECUTION_HISTORY:-10000}
+    
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ${EFS_MOUNT_PATH:-./data/n8n}:/home/node/.n8n/backup
+    
+    depends_on:
+      postgres:
+        condition: service_healthy
+    
+    healthcheck:
+      <<: *health-check
+      test: ["CMD-SHELL", "curl -f http://localhost:5678/healthz || exit 1"]
+    
+    deploy:
+      resources:
+        limits:
+          memory: ${N8N_MEMORY_LIMIT:-1G}
+          cpus: '${N8N_CPU_LIMIT:-0.5}'
+        reservations:
+          memory: ${N8N_MEMORY_RESERVATION:-512M}
+          cpus: '${N8N_CPU_RESERVATION:-0.25}'
+
+  # Qdrant Vector Database
+  qdrant:
+    <<: *common-config
+    image: "${QDRANT_IMAGE:-qdrant/qdrant:v1.7.3}"
+    container_name: geuse_qdrant
+    ports:
+      - "${QDRANT_HTTP_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    environment:
+      # Service configuration
+      - QDRANT__SERVICE__HTTP_PORT=${QDRANT_HTTP_PORT:-6333}
+      - QDRANT__SERVICE__GRPC_PORT=${QDRANT_GRPC_PORT:-6334}
+      
+      # Performance configuration
+      - QDRANT__STORAGE__PERFORMANCE__MAX_SEARCH_THREADS=${QDRANT_MAX_SEARCH_THREADS:-4}
+      - QDRANT__STORAGE__PERFORMANCE__MAX_OPTIMIZATION_THREADS=${QDRANT_MAX_OPTIMIZATION_THREADS:-2}
+      - QDRANT__STORAGE__WAL__WAL_CAPACITY_MB=${QDRANT_WAL_CAPACITY_MB:-128}
+      - QDRANT__STORAGE__PERFORMANCE__MAX_SEGMENT_SIZE_KB=${QDRANT_MAX_SEGMENT_SIZE_KB:-100000}
+      
+      # Collection defaults
+      - QDRANT__COLLECTION__DEFAULT_VECTOR_SIZE=${QDRANT_DEFAULT_VECTOR_SIZE:-384}
+      - QDRANT__COLLECTION__DEFAULT_DISTANCE=${QDRANT_DEFAULT_DISTANCE:-Cosine}
+      - QDRANT__COLLECTION__DEFAULT_ON_DISK_PAYLOAD=${QDRANT_DEFAULT_ON_DISK_PAYLOAD:-true}
+    
+    volumes:
+      - qdrant_data:/qdrant/storage
+      - ${EFS_MOUNT_PATH:-./data/qdrant}:/qdrant/backup
+    
+    healthcheck:
+      <<: *health-check
+      test: ["CMD-SHELL", "curl -f http://localhost:6333/health || exit 1"]
+    
+    deploy:
+      resources:
+        limits:
+          memory: ${QDRANT_MEMORY_LIMIT:-1G}
+          cpus: '${QDRANT_CPU_LIMIT:-0.5}'
+        reservations:
+          memory: ${QDRANT_MEMORY_RESERVATION:-512M}
+          cpus: '${QDRANT_CPU_RESERVATION:-0.25}'
+
+  # Ollama LLM Server
+  ollama:
+    <<: [*common-config, *gpu-config]
+    image: "${OLLAMA_IMAGE:-ollama/ollama:0.1.17}"
+    container_name: geuse_ollama
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    environment:
+      # Basic configuration
+      - OLLAMA_HOST=${OLLAMA_HOST:-0.0.0.0}
+      - OLLAMA_GPU_MEMORY_FRACTION=${OLLAMA_GPU_MEMORY_FRACTION:-0.80}
+      - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-2}
+      - OLLAMA_CONCURRENT_REQUESTS=${OLLAMA_CONCURRENT_REQUESTS:-4}
+      - OLLAMA_MODEL_CACHE_SIZE=${OLLAMA_MODEL_CACHE_SIZE:-4GB}
+      
+      # Model management
+      - OLLAMA_MODEL_PRELOADING=${OLLAMA_MODEL_PRELOADING:-false}
+      - OLLAMA_PERSISTENT_CACHE=${OLLAMA_PERSISTENT_CACHE:-true}
+    
+    volumes:
+      - ollama_data:/root/.ollama
+      - ${EFS_MOUNT_PATH:-./data/ollama}:/root/.ollama/backup
+    
+    healthcheck:
+      <<: *health-check
+      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
+    
+    deploy:
+      resources:
+        limits:
+          memory: ${OLLAMA_MEMORY_LIMIT:-4G}
+          cpus: '${OLLAMA_CPU_LIMIT:-1.0}'
+        reservations:
+          memory: ${OLLAMA_MEMORY_RESERVATION:-2G}
+          cpus: '${OLLAMA_CPU_RESERVATION:-0.5}'
+
+  # Crawl4AI Web Scraping Service
+  crawl4ai:
+    <<: *common-config
+    image: "${CRAWL4AI_IMAGE:-unclecode/crawl4ai:0.2.77}"
+    container_name: geuse_crawl4ai
+    ports:
+      - "${CRAWL4AI_PORT:-11235}:11235"
+    environment:
+      # Rate limiting configuration
+      - CRAWL4AI_RATE_LIMITING_ENABLED=${CRAWL4AI_RATE_LIMITING_ENABLED:-true}
+      - CRAWL4AI_DEFAULT_LIMIT=${CRAWL4AI_DEFAULT_LIMIT:-1000/minute}
+      - CRAWL4AI_MAX_CONCURRENT_SESSIONS=${CRAWL4AI_MAX_CONCURRENT_SESSIONS:-2}
+      - CRAWL4AI_BROWSER_POOL_SIZE=${CRAWL4AI_BROWSER_POOL_SIZE:-1}
+      
+      # Request configuration
+      - CRAWL4AI_REQUEST_TIMEOUT=${CRAWL4AI_REQUEST_TIMEOUT:-30}
+      - CRAWL4AI_MAX_RETRIES=${CRAWL4AI_MAX_RETRIES:-3}
+      
+      # LLM integration
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OLLAMA_HOST=ollama:11434
+    
+    volumes:
+      - crawl4ai_data:/app/data
+      - ${EFS_MOUNT_PATH:-./data/crawl4ai}:/app/backup
+    
+    depends_on:
+      ollama:
+        condition: service_healthy
+    
+    healthcheck:
+      <<: *health-check
+      test: ["CMD-SHELL", "curl -f http://localhost:11235/health || exit 1"]
+    
+    deploy:
+      resources:
+        limits:
+          memory: ${CRAWL4AI_MEMORY_LIMIT:-1G}
+          cpus: '${CRAWL4AI_CPU_LIMIT:-0.5}'
+        reservations:
+          memory: ${CRAWL4AI_MEMORY_RESERVATION:-512M}
+          cpus: '${CRAWL4AI_CPU_RESERVATION:-0.25}'
+
+  # Monitoring and Health Check Service
+  healthcheck:
+    <<: *common-config
+    image: "${CURL_IMAGE:-curlimages/curl:latest}"
+    container_name: geuse_healthcheck
+    environment:
+      - CHECK_INTERVAL=${HEALTH_CHECK_INTERVAL:-60}
+      - NOTIFICATION_WEBHOOK=${NOTIFICATION_WEBHOOK}
+      - HEALTH_CHECK_TIMEOUT=${HEALTH_CHECK_TIMEOUT:-10}
+      - HEALTH_CHECK_RETRIES=${HEALTH_CHECK_RETRIES:-3}
+    
+    command: >
+      sh -c "
+      while true; do
+        echo 'Running health checks...'
+        
+        # Check each service
+        for service in n8n:5678 qdrant:6333 ollama:11434 crawl4ai:11235; do
+          host=$$(echo $$service | cut -d: -f1)
+          port=$$(echo $$service | cut -d: -f2)
+          
+          if curl -f --max-time $${HEALTH_CHECK_TIMEOUT:-10} http://$$host:$$port/health >/dev/null 2>&1; then
+            echo \"✅ $$service is healthy\"
+          else
+            echo \"❌ $$service is unhealthy\"
+            if [ -n \"$${NOTIFICATION_WEBHOOK}\" ]; then
+              curl -X POST \"$${NOTIFICATION_WEBHOOK}\" \
+                -H \"Content-Type: application/json\" \
+                -d \"{\\\"text\\\": \\\"Service $$service is unhealthy\\\"}\" || true
+            fi
+          fi
+        done
+        
+        sleep $${CHECK_INTERVAL:-60}
+      done
+      "
+    
+    depends_on:
+      - n8n
+      - qdrant
+      - ollama
+      - crawl4ai
+
+# =============================================================================
+# NETWORKS
+# =============================================================================
+
+networks:
+  ai_network:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: "geuse_ai_bridge"
+    ipam:
+      config:
+        - subnet: "172.20.0.0/16"
+
+# =============================================================================
+# VOLUMES
+# =============================================================================
+
+volumes:
+  postgres_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_DIR:-./data}/postgres
+  
+  n8n_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_DIR:-./data}/n8n
+  
+  qdrant_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_DIR:-./data}/qdrant
+  
+  ollama_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_DIR:-./data}/ollama
+  
+  crawl4ai_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_DIR:-./data}/crawl4ai
+
+# =============================================================================
+# SECRETS (for production use)
+# =============================================================================
+
+secrets:
+  postgres_password:
+    file: ${SECRETS_DIR:-./secrets}/postgres_password.txt
+  
+  n8n_encryption_key:
+    file: ${SECRETS_DIR:-./secrets}/n8n_encryption_key.txt
+  
+  n8n_jwt_secret:
+    file: ${SECRETS_DIR:-./secrets}/n8n_jwt_secret.txt
+  
+  openai_api_key:
+    file: ${SECRETS_DIR:-./secrets}/openai_api_key.txt

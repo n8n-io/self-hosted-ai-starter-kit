@@ -6,8 +6,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COMPOSE_FILE="$SCRIPT_DIR/docker-compose.gpu-optimized.yml"
-SIMPLE_SCRIPT="$SCRIPT_DIR/scripts/simple-update-images.sh"
+COMPOSE_FILE="$SCRIPT_DIR/../docker-compose.gpu-optimized.yml"
+SIMPLE_SCRIPT="$SCRIPT_DIR/../scripts/simple-update-images.sh"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -78,7 +78,7 @@ test_show_versions() {
 test_config_exists() {
     log "Testing if configuration file exists..."
     
-    local config_file="$SCRIPT_DIR/config/image-versions.yml"
+    local config_file="$SCRIPT_DIR/../config/image-versions.yml"
     
     if [ -f "$config_file" ]; then
         success "Configuration file exists at $config_file"
@@ -138,13 +138,13 @@ test_env_integration() {
     log "Set USE_LATEST_IMAGES=true"
     
     # Check if deployment scripts would honor this
-    if grep -q "USE_LATEST_IMAGES" "$SCRIPT_DIR/scripts/aws-deployment.sh"; then
+    if grep -q "USE_LATEST_IMAGES" "$SCRIPT_DIR/../scripts/aws-deployment.sh"; then
         success "AWS deployment script supports USE_LATEST_IMAGES"
     else
         warn "AWS deployment script doesn't support USE_LATEST_IMAGES"
     fi
     
-    if grep -q "USE_LATEST_IMAGES" "$SCRIPT_DIR/scripts/aws-deployment-simple.sh"; then
+    if grep -q "USE_LATEST_IMAGES" "$SCRIPT_DIR/../scripts/aws-deployment-simple.sh"; then
         success "Simple deployment script supports USE_LATEST_IMAGES"
     else
         warn "Simple deployment script doesn't support USE_LATEST_IMAGES"

@@ -1,0 +1,420 @@
+# Deployment Type Specific Configuration
+# GeuseMaker - Configuration overrides for different deployment types
+# These configurations modify the base environment settings based on deployment type
+
+# =============================================================================
+# SIMPLE DEPLOYMENT TYPE
+# Single instance, minimal configuration for development/testing
+# =============================================================================
+simple:
+  description: "Single instance deployment for development and testing"
+  use_cases: ["development", "quick testing", "demo environments"]
+  
+  # Infrastructure overrides
+  infrastructure:
+    auto_scaling:
+      min_capacity: 1
+      max_capacity: 1
+      target_utilization: 80
+    
+    instance_types:
+      preferred: ["g4dn.xlarge"]
+      fallback: ["t3.large", "t3.medium"]
+  
+  # Cost optimization overrides
+  cost_optimization:
+    spot_instances:
+      enabled: false  # Use on-demand for stability
+    auto_scaling:
+      scale_down_enabled: false  # Fixed single instance
+      idle_timeout_minutes: 0
+  
+  # Monitoring overrides
+  monitoring:
+    metrics:
+      retention_days: 7  # Shorter retention for simple deployments
+    logging:
+      retention_days: 7
+      level: debug  # More verbose for development
+    alerting:
+      enabled: false  # Disable alerting for simple deployments
+  
+  # Security overrides (relaxed for development)
+  security:
+    container_security:
+      run_as_non_root: false  # Allow root for easier development
+      no_new_privileges: false
+    network_security:
+      cors_strict_mode: false
+      trusted_hosts_restriction: false
+  
+  # Application resource overrides (lighter resources)
+  applications:
+    postgres:
+      resources:
+        cpu_limit: "0.5"
+        memory_limit: "1G"
+        cpu_reservation: "0.25"
+        memory_reservation: "512M"
+    
+    n8n:
+      resources:
+        cpu_limit: "0.4"
+        memory_limit: "1G"
+        cpu_reservation: "0.2"
+        memory_reservation: "256M"
+    
+    ollama:
+      resources:
+        cpu_limit: "1.5"
+        memory_limit: "4G"
+        cpu_reservation: "1.0"
+        memory_reservation: "2G"
+        gpu_memory_fraction: 0.70
+      config:
+        max_loaded_models: 1
+        concurrent_requests: 2
+    
+    qdrant:
+      resources:
+        cpu_limit: "0.4"
+        memory_limit: "1G"
+        cpu_reservation: "0.2"
+        memory_reservation: "512M"
+    
+    crawl4ai:
+      resources:
+        cpu_limit: "0.4"
+        memory_limit: "1G"
+        cpu_reservation: "0.2"
+        memory_reservation: "512M"
+      config:
+        max_concurrent_sessions: 1
+        browser_pool_size: 1
+
+# =============================================================================
+# SPOT DEPLOYMENT TYPE  
+# Cost-optimized deployment using EC2 spot instances
+# =============================================================================
+spot:
+  description: "Cost-optimized deployment using EC2 spot instances"
+  use_cases: ["production workloads", "cost optimization", "batch processing"]
+  
+  # Infrastructure overrides
+  infrastructure:
+    auto_scaling:
+      min_capacity: 2
+      max_capacity: 10
+      target_utilization: 70  # Lower to handle spot interruptions
+    
+    instance_types:
+      preferred: ["g4dn.xlarge", "g5g.xlarge", "g4dn.2xlarge"]
+      fallback: ["g5g.2xlarge", "p3.2xlarge"]
+      diversified: true  # Use multiple instance types for better availability
+  
+  # Cost optimization settings
+  cost_optimization:
+    spot_instances:
+      enabled: true
+      max_price: 2.00  # Higher price for better availability
+      interruption_handling: true
+      diversified_allocation: true
+      capacity_rebalancing: true
+    
+    auto_scaling:
+      scale_down_enabled: true
+      scale_down_threshold: 20
+      idle_timeout_minutes: 15  # Aggressive scaling for cost savings
+      predictive_scaling: true
+  
+  # Enhanced monitoring for spot instances
+  monitoring:
+    metrics:
+      retention_days: 90  # Longer retention for cost analysis
+      spot_price_monitoring: true
+      capacity_monitoring: true
+    
+    alerting:
+      enabled: true
+      spot_interruption_alerts: true
+      cost_threshold_alerts: true
+    
+    logging:
+      level: info
+      spot_instance_events: true
+  
+  # Resilience configuration for spot interruptions
+  resilience:
+    multi_az_deployment: true
+    automatic_failover: true
+    data_persistence: true
+    graceful_shutdown_timeout: 120  # 2 minutes
+    
+  # Backup strategy for spot instances
+  backup:
+    automated_backups: true
+    backup_frequency: "*/30 * * * *"  # Every 30 minutes
+    backup_retention_days: 7
+    cross_region_replication: true
+    
+  # Application overrides for spot instances
+  applications:
+    postgres:  
+      backup:
+        enabled: true
+        schedule: "*/15 * * * *"  # More frequent backups
+        point_in_time_recovery: true
+    
+    n8n:
+      scaling:
+        replicas: 2  # Multiple replicas for availability
+        max_replicas: 5
+      config:
+        execution_data_save_on_error: "all"
+        execution_data_save_on_success: "all"
+    
+    ollama:
+      config:
+        model_preloading: true  # Preload models to reduce startup time
+        persistent_cache: true
+
+# =============================================================================
+# ON-DEMAND DEPLOYMENT TYPE
+# Reliable deployment using EC2 on-demand instances  
+# =============================================================================
+ondemand:
+  description: "Reliable deployment using EC2 on-demand instances"
+  use_cases: ["production workloads", "guaranteed availability", "enterprise environments"]
+  
+  # Infrastructure overrides
+  infrastructure:
+    auto_scaling:
+      min_capacity: 2
+      max_capacity: 8
+      target_utilization: 75
+    
+    instance_types:
+      preferred: ["g4dn.xlarge", "g5g.xlarge"]
+      fallback: ["g4dn.2xlarge", "g5g.2xlarge"]
+      dedicated_tenancy: false  # Can be enabled for compliance
+  
+  # Cost optimization (limited for on-demand)
+  cost_optimization:
+    spot_instances:
+      enabled: false
+    
+    auto_scaling:
+      scale_down_enabled: true
+      scale_down_threshold: 30  # More conservative scaling
+      idle_timeout_minutes: 45
+      scheduled_scaling: true  # Scale based on predicted usage
+    
+    resource_optimization:
+      right_sizing_enabled: true
+      unused_resource_detection: true
+      cost_alerts_enabled: true
+  
+  # Enhanced monitoring and alerting
+  monitoring:
+    metrics:
+      retention_days: 90
+      detailed_monitoring: true
+      custom_metrics: true
+    
+    alerting:
+      enabled: true
+      sla_monitoring: true
+      performance_alerts: true
+      capacity_alerts: true
+    
+    logging:
+      level: info
+      structured_logging: true
+      log_aggregation: true
+      
+    dashboards:
+      grafana_enabled: true
+      custom_dashboards:
+        - "application_performance"
+        - "infrastructure_health"
+        - "cost_analysis"
+        - "sla_compliance"
+  
+  # Enhanced security for production
+  security:
+    container_security:
+      run_as_non_root: true
+      read_only_root_filesystem: false
+      no_new_privileges: true
+      security_scanning: true
+    
+    network_security:
+      cors_strict_mode: true
+      trusted_hosts_restriction: true
+      waf_enabled: true
+      ddos_protection: true
+    
+    secrets_management:
+      use_aws_secrets_manager: true
+      rotate_secrets: true
+      encryption_at_rest: true
+      secrets_scanning: true
+  
+  # Compliance and governance
+  compliance:
+    audit_logging: true
+    encryption_in_transit: true
+    encryption_at_rest: true
+    access_logging: true
+    data_retention_policy: 90
+    compliance_scanning: true
+  
+  # High availability configuration
+  availability:
+    multi_az_deployment: true
+    load_balancing: true
+    health_checks:
+      enabled: true
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      
+  # Application overrides for production
+  applications:
+    postgres:
+      resources:
+        cpu_limit: "1.5"
+        memory_limit: "4G"
+        cpu_reservation: "1.0" 
+        memory_reservation: "2G"
+      config:
+        max_connections: 200
+        shared_buffers: "2GB"
+        effective_cache_size: "8GB"
+      backup:
+        enabled: true
+        schedule: "0 1 * * *"  # Daily at 1 AM
+        retention_days: 30
+        cross_region_replication: true
+    
+    n8n:
+      scaling:
+        replicas: 2
+        max_replicas: 6
+      resources:
+        cpu_limit: "1.0"
+        memory_limit: "2G"
+        cpu_reservation: "0.5"
+        memory_reservation: "1G"
+      config:
+        execution_timeout: 1200  # 20 minutes
+        max_execution_history: 10000
+    
+    ollama:
+      resources:
+        cpu_limit: "2.0"
+        memory_limit: "8G"
+        cpu_reservation: "1.5"
+        memory_reservation: "6G"
+        gpu_memory_fraction: 0.90
+      config:
+        max_loaded_models: 3
+        concurrent_requests: 8
+        model_cache_size: "6GB"
+    
+    qdrant:
+      resources:
+        cpu_limit: "1.0"
+        memory_limit: "3G"
+        cpu_reservation: "0.8"
+        memory_reservation: "2G"
+      config:
+        max_search_threads: 8
+        max_optimization_threads: 4
+        wal_capacity_mb: 256
+    
+    crawl4ai:
+      resources:
+        cpu_limit: "1.0"
+        memory_limit: "2G"
+        cpu_reservation: "0.8"
+        memory_reservation: "1.5G"
+      config:
+        max_concurrent_sessions: 6
+        browser_pool_size: 3
+        rate_limiting_enabled: true
+
+# =============================================================================
+# DEPLOYMENT TYPE SELECTION MATRIX
+# Guidelines for choosing appropriate deployment type
+# =============================================================================
+selection_matrix:
+  simple:
+    recommended_for:
+      - "Development environments"
+      - "Quick testing and demos"
+      - "Single developer workflows" 
+      - "CI/CD pipeline testing"
+    cost: "Low"
+    availability: "Basic"
+    scalability: "None"
+    complexity: "Low"
+    
+  spot:
+    recommended_for:
+      - "Cost-sensitive production workloads"
+      - "Batch processing jobs"
+      - "Development and staging environments"
+      - "Fault-tolerant applications"
+    cost: "Very Low (70% savings)"
+    availability: "Medium (interruption risk)"
+    scalability: "High"
+    complexity: "Medium"
+    
+  ondemand:
+    recommended_for:
+      - "Mission-critical production workloads"
+      - "Enterprise environments"
+      - "Applications requiring guaranteed availability"
+      - "Compliance-sensitive workloads"
+    cost: "High"
+    availability: "High"
+    scalability: "High"
+    complexity: "High"
+
+# =============================================================================
+# MIGRATION PATHS
+# Guidelines for migrating between deployment types
+# =============================================================================
+migration_paths:
+  simple_to_spot:
+    complexity: "Medium"
+    steps:
+      - "Enable backup and data persistence"
+      - "Configure spot instance settings"
+      - "Test interruption handling"
+      - "Update monitoring and alerting"
+    
+  simple_to_ondemand:
+    complexity: "High"
+    steps:
+      - "Enhance security configurations"
+      - "Configure high availability"
+      - "Setup comprehensive monitoring"
+      - "Enable compliance features"
+    
+  spot_to_ondemand:
+    complexity: "Low"
+    steps:
+      - "Disable spot instance settings"
+      - "Enhance security if needed"
+      - "Adjust scaling parameters"
+      - "Update cost monitoring"
+    
+  ondemand_to_spot:
+    complexity: "Medium"
+    steps:
+      - "Implement interruption handling"
+      - "Configure data persistence"
+      - "Setup spot-specific monitoring"
+      - "Test fault tolerance"

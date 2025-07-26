@@ -66,7 +66,7 @@ make deploy-simple STACK_NAME=my-dev-stack
 | **Infrastructure as Code** | Terraform and shell script automation | [Terraform Config](terraform/main.tf) |
 | **AI Services** | n8n, Ollama, Qdrant, Crawl4AI pre-configured | [API Reference](docs/reference/api/) |
 | **Monitoring Stack** | Docker logging and health checks | [Monitoring Guide](docs/reference/api/monitoring.md) |
-| **Cost Optimization** | Intelligent instance selection and scaling | [Cost Scripts](scripts/cost-optimization.py) |
+| **Cost Optimization** | Intelligent instance selection and scaling | [AWS Cost Explorer](https://console.aws.amazon.com/cost-explorer/) |
 | **Security Hardening** | Input sanitization, encrypted storage, IAM, advanced health checks | [Security Guide](docs/security-guide.md) |
 
 ## 🛠️ Available Commands

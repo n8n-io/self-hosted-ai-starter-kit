@@ -1,11 +1,31 @@
 {
-  "timestamp": "2025-07-25T22:47:40Z",
+  "timestamp": "2025-07-26T06:12:25Z",
   "project": "GeuseMaker",
-  "environment": "test",
+  "environment": "development",
   "results": {
+    "unit": {
+      "status": "failed",
+      "timestamp": "2025-07-26T06:12:32Z",
+      "exit_code": "1"
+    },
+    "integration": {
+      "status": "failed",
+      "timestamp": "2025-07-26T06:12:36Z",
+      "exit_code": "1"
+    },
+    "security": {
+      "status": "passed",
+      "timestamp": "2025-07-26T06:12:38Z",
+      "exit_code": "0"
+    },
     "deployment": {
       "status": "passed",
-      "timestamp": "2025-07-25T22:47:42Z",
+      "timestamp": "2025-07-26T06:12:39Z",
+      "exit_code": "0"
+    },
+    "smoke": {
+      "status": "passed",
+      "timestamp": "2025-07-26T06:12:39Z",
       "exit_code": "0"
     }
   }

@@ -57,8 +57,8 @@ Level 4: The Ear (Entry Point) - Information gathering
    # Make sure Qdrant is running
    curl http://localhost:6333/collections
    
-   # Run the collection setup script
-   python3 qdrant_collections.py
+   # Note: Python collection setup script removed - use Qdrant API directly
+   # Collections will be created automatically by n8n workflows
    ```
 
 2. **Verify Collections**

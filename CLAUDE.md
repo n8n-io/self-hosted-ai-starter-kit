@@ -12,6 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Work on feature branch `GeuseMaker`
 - Create PRs against `main` branch
 - Always run tests before committing: `make test`
+- Check git status with: `git status` to see current modified files
 
 ### Claude Code Agent Integration
 The project includes specialized Claude Code agents in `.claude/agents/` for automated assistance:
@@ -45,7 +46,7 @@ make destroy STACK_NAME=test        # Clean up test resources
 - **Shared Libraries**: `/lib/*.sh` - Common functions sourced by all scripts
   - Always source `aws-deployment-common.sh` and `error-handling.sh` in deployment scripts
 - **Deployment Scripts**: `/scripts/aws-deployment-*.sh` - Main orchestrators with unified deployment
-- **Testing Framework**: `/tests/` (pytest) + `/tools/test-runner.sh` (comprehensive orchestration)
+- **Testing Framework**: `/tests/` (shell-based) + `/tools/test-runner.sh` (comprehensive orchestration)
 - **Configuration**: `/config/` - Environment settings and version locks
 
 ## Project Overview
@@ -103,12 +104,14 @@ make setup                    # Complete setup with security validation
 make dev-setup               # Full development environment setup
 make validate                # Validate all configurations
 make help                    # Show all available commands
+make install-deps            # Install required dependencies
+make check-deps              # Check if all dependencies are available
 ```
 
 **Testing (MANDATORY before deployment):**
 ```bash
 make test                    # Run all tests via test-runner.sh
-make test-unit              # Python unit tests only
+make test-unit              # Shell-based unit tests
 make test-integration       # Component interaction tests
 make test-security          # Security vulnerability scans
 ```
@@ -127,7 +130,9 @@ make destroy STACK_NAME=name             # Destroy infrastructure
 ```bash
 make setup-secrets          # Setup all required secrets
 make security-check         # Run comprehensive security validation
+make security-validate      # Complete security setup and validation
 make rotate-secrets         # Rotate all secrets
+make security-scan          # Run comprehensive security scan
 ```
 
 ### Local Development
@@ -156,7 +161,8 @@ docker compose -f docker-compose.gpu-optimized.yml up
 
 ### Cost & Operations
 ```bash
-python3 scripts/cost-optimization.py --action report    # Cost optimization report
+# Cost optimization via AWS CLI and CloudWatch (Python dependency removed)
+aws ce get-cost-and-usage --time-period Start=2024-01-01,End=2024-01-31 --granularity MONTHLY --metrics BlendedCost
 ./scripts/setup-parameter-store.sh setup               # Setup Parameter Store
 ./scripts/fix-deployment-issues.sh STACK REGION        # Fix deployment issues
 ```
@@ -164,8 +170,8 @@ python3 scripts/cost-optimization.py --action report    # Cost optimization repo
 ### Testing Strategy & Commands
 
 **Test Categories:**
-- `unit` - Python unit tests (pytest)
-- `integration` - Component interaction tests  
+- `unit` - Shell-based unit tests (security validation, function testing)
+- `integration` - Component interaction tests (deployment workflow, docker validation)
 - `security` - Vulnerability scans (bandit, safety, trivy)
 - `performance` - Benchmarks and performance analysis
 - `deployment` - Script validation and Terraform checks
@@ -176,7 +182,7 @@ python3 scripts/cost-optimization.py --action report    # Cost optimization repo
 make test                                  # Run all tests (MANDATORY before deployment)
 ./tools/test-runner.sh unit security      # Run specific test categories
 ./tools/test-runner.sh --report           # Generate HTML test report
-./tools/test-runner.sh --coverage unit    # Run with coverage analysis
+./tools/test-runner.sh --environment staging  # Run environment-specific tests
 ```
 
 **Testing Without AWS Costs (CRITICAL):**
@@ -233,9 +239,9 @@ Test deployment logic without AWS costs using validation scripts:
 - `./scripts/simple-demo.sh` - Basic intelligent selection demo
 - `./scripts/test-intelligent-selection.sh` - Comprehensive testing with cross-region analysis
 - `./tests/test-alb-cloudfront.sh` - ALB/CloudFront functionality validation
-- **Python Test Framework**: pytest-based unit and integration tests in `/tests/`
+- **Shell Test Framework**: bash-based unit and integration tests in `/tests/`
 - **Configuration Testing**: Docker and image validation scripts
-- **Security Testing**: Automated security validation with `/tests/unit/test_security_validation.py`
+- **Security Testing**: Automated security validation with `/tests/test-security-validation.sh`
 
 ### Development Workflow
 The recommended development workflow follows this pattern:
@@ -264,6 +270,10 @@ make status STACK_NAME=my-stack      # Check deployment status
 make logs STACK_NAME=my-stack        # View application logs
 make monitor                         # Open monitoring dashboard
 make backup STACK_NAME=my-stack      # Create infrastructure backup
+make health-check-advanced STACK_NAME=my-stack  # Comprehensive health diagnostics
+make cost-estimate STACK_NAME=my-stack HOURS=24  # Estimate deployment costs
+make update-deps                     # Update dependencies
+make clean                          # Clean up temporary files and caches
 ```
 
 The Terraform configuration (`terraform/main.tf`) provides:
@@ -578,16 +588,36 @@ make test                                    # Run all tests via test-runner.sh
   ├── aws-deployment-common.sh # Core logging, prerequisites, progress tracking
   ├── error-handling.sh        # Centralized error handling and cleanup
   ├── spot-instance.sh         # Spot instance management and pricing
+  ├── ondemand-instance.sh     # On-demand instance specific operations
+  ├── simple-instance.sh       # Simple deployment specific functions
   └── aws-config.sh           # Configuration defaults and environment
 
 /scripts/                      # Main deployment orchestrators
   ├── aws-deployment-unified.sh # Main orchestrator (recommended)
   ├── aws-deployment.sh        # Intelligent deployment with cross-region analysis
   ├── aws-deployment-simple.sh # Simple on-demand deployment
-  └── simple-demo.sh           # Test deployment logic without AWS costs
+  ├── aws-deployment-ondemand.sh # Full on-demand deployment
+  ├── simple-demo.sh           # Test deployment logic without AWS costs
+  ├── setup-parameter-store.sh # Parameter Store management
+  ├── security-validation.sh   # Security validation functions
+  └── fix-deployment-issues.sh # Deployment troubleshooting
 
-/tools/test-runner.sh          # Comprehensive test orchestration (bash 3.x/4.x compatible)
-/tests/                        # Python pytest + shell validation scripts
+/tools/                        # Development and testing tools
+  ├── test-runner.sh          # Comprehensive test orchestration (bash 3.x/4.x compatible)
+  ├── install-deps.sh         # Dependency installation
+  ├── validate-config.sh      # Configuration validation
+  └── monitoring-setup.sh     # Monitoring configuration
+
+/tests/                        # Testing framework
+  ├── unit/                   # Python unit tests (pytest)
+  ├── integration/            # Integration tests
+  └── test-*.sh              # Shell-based validation scripts
+
 /config/                       # Environment settings and version locks
-/.cursor/rules/                # AWS and n8n development guidelines
+  ├── environments/          # Environment-specific configurations
+  └── image-versions.yml     # Container image version management
+
+/.cursor/rules/                # IDE development guidelines
+  ├── aws.mdc               # AWS architecture patterns and best practices
+  └── n8n-mcp.mdc          # n8n workflow development guidelines
 ```

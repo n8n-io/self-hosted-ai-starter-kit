@@ -5,7 +5,7 @@
 # =============================================================================
 
 # =============================================================================
-# SHARED LOGGING AND OUTPUT FUNCTIONS
+# UNIFIED LOGGING AND OUTPUT FUNCTIONS
 # =============================================================================
 
 # Color definitions
@@ -14,19 +14,263 @@ readonly GREEN='\033[0;32m'
 readonly YELLOW='\033[0;33m'
 readonly BLUE='\033[0;34m'
 readonly PURPLE='\033[0;35m'
+readonly MAGENTA='\033[0;35m'
 readonly CYAN='\033[0;36m'
+readonly BOLD='\033[1m'
 readonly NC='\033[0m'
 
-# Enhanced logging functions for human-readable output
-log() { echo -e "${BLUE}🕐 [$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}" >&2; }
-error() { echo -e "${RED}❌ [ERROR] $1${NC}" >&2; }
-success() { echo -e "${GREEN}✅ [SUCCESS] $1${NC}" >&2; }
-warning() { echo -e "${YELLOW}⚠️  [WARNING] $1${NC}" >&2; }
-info() { echo -e "${CYAN}ℹ️  [INFO] $1${NC}" >&2; }
+# Log context detection and formatting
+get_log_context() {
+    local context=""
+    
+    # Detect if we're running on AWS instance
+    if command -v curl >/dev/null 2>&1 && curl -s --max-time 2 http://169.254.169.254/latest/meta-data/instance-id >/dev/null 2>&1; then
+        local instance_id=$(curl -s --max-time 2 http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo "unknown")
+        local instance_type=$(curl -s --max-time 2 http://169.254.169.254/latest/meta-data/instance-type 2>/dev/null || echo "unknown")
+        context="[INSTANCE:${instance_id:0:8}:${instance_type}]"
+    else
+        # Local development context
+        context="[LOCAL:$(whoami)@$(hostname -s)]"
+    fi
+    
+    echo "$context"
+}
 
-# Deployment progress functions for better user experience
-step() { echo -e "${MAGENTA}🔸 [STEP] $1${NC}" >&2; }
-progress() { echo -e "${BLUE}⏳ [PROGRESS] $1${NC}" >&2; }
+# Unified timestamp format
+get_timestamp() {
+    date +'%Y-%m-%d %H:%M:%S'
+}
+
+# Core logging functions with unified formatting
+log() { 
+    local context=$(get_log_context)
+    echo -e "${BLUE}${BOLD}[$(get_timestamp)]${NC} ${CYAN}${context}${NC} ${BLUE}📋 [LOG]${NC} $1" >&2
+}
+
+error() { 
+    local context=$(get_log_context)
+    echo -e "${RED}${BOLD}[$(get_timestamp)]${NC} ${CYAN}${context}${NC} ${RED}❌ [ERROR]${NC} $1" >&2
+}
+
+success() { 
+    local context=$(get_log_context)
+    echo -e "${GREEN}${BOLD}[$(get_timestamp)]${NC} ${CYAN}${context}${NC} ${GREEN}✅ [SUCCESS]${NC} $1" >&2
+}
+
+warning() { 
+    local context=$(get_log_context)
+    echo -e "${YELLOW}${BOLD}[$(get_timestamp)]${NC} ${CYAN}${context}${NC} ${YELLOW}⚠️  [WARNING]${NC} $1" >&2
+}
+
+info() { 
+    local context=$(get_log_context)
+    echo -e "${CYAN}${BOLD}[$(get_timestamp)]${NC} ${CYAN}${context}${NC} ${CYAN}ℹ️  [INFO]${NC} $1" >&2
+}
+
+# Deployment progress functions
+step() { 
+    local context=$(get_log_context)
+    echo -e "${MAGENTA}${BOLD}[$(get_timestamp)]${NC} ${CYAN}${context}${NC} ${MAGENTA}🔸 [STEP]${NC} $1" >&2
+}
+
+progress() { 
+    local context=$(get_log_context)
+    echo -e "${BLUE}${BOLD}[$(get_timestamp)]${NC} ${CYAN}${context}${NC} ${BLUE}⏳ [PROGRESS]${NC} $1" >&2
+}
+
+# Special deployment status functions
+deploy_start() {
+    local context=$(get_log_context)
+    echo -e "${BOLD}${GREEN}╔════════════════════════════════════════════════════════════════════════╗${NC}" >&2
+    echo -e "${BOLD}${GREEN}║${NC} ${BOLD}[$(get_timestamp)]${NC} ${CYAN}${context}${NC} ${GREEN}🚀 [DEPLOY-START]${NC} $1 ${BOLD}${GREEN}║${NC}" >&2
+    echo -e "${BOLD}${GREEN}╚════════════════════════════════════════════════════════════════════════╝${NC}" >&2
+}
+
+deploy_complete() {
+    local context=$(get_log_context)
+    echo -e "${BOLD}${GREEN}╔════════════════════════════════════════════════════════════════════════╗${NC}" >&2
+    echo -e "${BOLD}${GREEN}║${NC} ${BOLD}[$(get_timestamp)]${NC} ${CYAN}${context}${NC} ${GREEN}🎉 [DEPLOY-COMPLETE]${NC} $1 ${BOLD}${GREEN}║${NC}" >&2
+    echo -e "${BOLD}${GREEN}╚════════════════════════════════════════════════════════════════════════╝${NC}" >&2
+}
+
+deploy_failed() {
+    local context=$(get_log_context)
+    echo -e "${BOLD}${RED}╔════════════════════════════════════════════════════════════════════════╗${NC}" >&2
+    echo -e "${BOLD}${RED}║${NC} ${BOLD}[$(get_timestamp)]${NC} ${CYAN}${context}${NC} ${RED}💥 [DEPLOY-FAILED]${NC} $1 ${BOLD}${RED}║${NC}" >&2
+    echo -e "${BOLD}${RED}╚════════════════════════════════════════════════════════════════════════╝${NC}" >&2
+}
+
+# Section headers for better organization
+section() {
+    local context=$(get_log_context)
+    echo -e "${BOLD}${PURPLE}╭─────────────────────────────────────────────────────────────────────────╮${NC}" >&2
+    echo -e "${BOLD}${PURPLE}│${NC} ${BOLD}[$(get_timestamp)]${NC} ${CYAN}${context}${NC} ${PURPLE}📂 [SECTION]${NC} $1 ${BOLD}${PURPLE}│${NC}" >&2
+    echo -e "${BOLD}${PURPLE}╰─────────────────────────────────────────────────────────────────────────╯${NC}" >&2
+}
+
+# Debug logging (only shown when DEBUG=true)
+debug() {
+    if [[ "${DEBUG:-false}" == "true" ]]; then
+        local context=$(get_log_context)
+        echo -e "${PURPLE}${BOLD}[$(get_timestamp)]${NC} ${CYAN}${context}${NC} ${PURPLE}🐛 [DEBUG]${NC} $1" >&2
+    fi
+}
+
+# =============================================================================
+# CONFIGURATION MANAGEMENT INTEGRATION
+# =============================================================================
+
+# Source configuration management library
+source_config_management() {
+    local lib_dir="${LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+    local config_lib="$lib_dir/config-management.sh"
+    
+    if [[ -f "$config_lib" ]]; then
+        source "$config_lib"
+        debug "Configuration management library loaded"
+        return 0
+    else
+        warning "Configuration management library not found: $config_lib"
+        return 1
+    fi
+}
+
+# Initialize configuration system for deployment
+init_deployment_config() {
+    local environment="${1:-${ENVIRONMENT:-development}}"
+    local deployment_type="${2:-${DEPLOYMENT_TYPE:-simple}}"
+    
+    log "Initializing deployment configuration..."
+    
+    # Source configuration management library
+    source_config_management || {
+        warning "Failed to load configuration management library, using legacy approach"
+        return 1
+    }
+    
+    # Initialize configuration
+    if ! init_config "$environment" "$deployment_type"; then
+        error "Failed to initialize configuration for environment: $environment, type: $deployment_type"
+        return 1
+    fi
+    
+    # Export key configuration values for backward compatibility
+    export AWS_REGION="${AWS_REGION:-$(get_global_config "region" "us-east-1")}"
+    export STACK_NAME="${STACK_NAME:-$(get_global_config "stack_name" "GeuseMaker-${environment}")}"
+    export PROJECT_NAME="${PROJECT_NAME:-$(get_global_config "project_name" "GeuseMaker")}"
+    export VPC_CIDR="${VPC_CIDR:-$(get_infrastructure_config "networking.vpc_cidr" "10.0.0.0/16")}"
+    
+    success "Configuration initialized for environment: $environment, deployment type: $deployment_type"
+    return 0
+}
+
+# Load environment variables from configuration
+load_deployment_env_vars() {
+    local env_file="${1:-}"
+    
+    # If no specific env file provided, use current environment
+    if [[ -z "$env_file" ]]; then
+        local current_env="${ENVIRONMENT:-development}"
+        env_file=".env.${current_env}"
+    fi
+    
+    if [[ -f "$env_file" ]]; then
+        log "Loading environment variables from: $env_file"
+        set -a  # automatically export all variables
+        source "$env_file"
+        set +a
+        success "Environment variables loaded from: $env_file"
+    else
+        warning "Environment file not found: $env_file"
+        return 1
+    fi
+}
+
+# Generate environment file if configuration management is available
+ensure_env_file() {
+    local environment="${ENVIRONMENT:-development}"
+    local env_file=".env.${environment}"
+    
+    # Check if env file exists and is recent (less than 1 hour old)
+    if [[ -f "$env_file" ]]; then
+        local file_age=$(($(date +%s) - $(stat -c %Y "$env_file" 2>/dev/null || stat -f %m "$env_file" 2>/dev/null || echo 0)))
+        if [[ $file_age -lt 3600 ]]; then
+            debug "Environment file is recent: $env_file"
+            return 0
+        fi
+    fi
+    
+    log "Generating environment file for: $environment"
+    
+    # Try to generate using configuration management
+    if declare -f generate_env_file >/dev/null 2>&1; then
+        if generate_env_file "$env_file"; then
+            success "Environment file generated: $env_file"
+            return 0
+        fi
+    fi
+    
+    warning "Failed to generate environment file, deployment may use default values"
+    return 1
+}
+
+# Validate configuration before deployment
+validate_deployment_config() {
+    local environment="${ENVIRONMENT:-development}"
+    local deployment_type="${DEPLOYMENT_TYPE:-simple}"
+    
+    log "Validating deployment configuration..."
+    
+    # Validate required variables
+    local required_vars=("AWS_REGION" "STACK_NAME" "PROJECT_NAME")
+    local missing_vars=()
+    
+    for var in "${required_vars[@]}"; do
+        if [[ -z "${!var}" ]]; then
+            missing_vars+=("$var")
+        fi
+    done
+    
+    if [[ ${#missing_vars[@]} -gt 0 ]]; then
+        error "Missing required configuration variables: ${missing_vars[*]}"
+        return 1
+    fi
+    
+    # Validate using configuration management functions if available
+    if declare -f validate_environment >/dev/null 2>&1; then
+        validate_environment "$environment" || return 1
+    fi
+    
+    if declare -f validate_deployment_type >/dev/null 2>&1; then
+        validate_deployment_type "$deployment_type" || return 1
+    fi
+    
+    if declare -f validate_aws_region >/dev/null 2>&1; then
+        validate_aws_region "$AWS_REGION" || return 1
+    fi
+    
+    success "Configuration validation passed"
+    return 0
+}
+
+# Display configuration summary
+show_deployment_config() {
+    log "Deployment Configuration Summary:"
+    echo "  Environment: ${ENVIRONMENT:-development}"
+    echo "  Deployment Type: ${DEPLOYMENT_TYPE:-simple}"
+    echo "  AWS Region: ${AWS_REGION:-us-east-1}"
+    echo "  Stack Name: ${STACK_NAME:-GeuseMaker}"
+    echo "  Project Name: ${PROJECT_NAME:-GeuseMaker}"
+    echo "  VPC CIDR: ${VPC_CIDR:-10.0.0.0/16}"
+    echo "  Spot Instances: ${SPOT_INSTANCES_ENABLED:-false}"
+    echo "  Auto Scaling: ${AUTO_SCALING_ENABLED:-true}"
+    
+    # Show detailed summary if configuration management is available
+    if declare -f get_config_summary >/dev/null 2>&1; then
+        echo
+        get_config_summary
+    fi
+}
 
 # =============================================================================
 # SHARED PREREQUISITE CHECKING
@@ -640,7 +884,11 @@ stream_provisioning_logs() {
         # Also stream any existing docker-compose logs
         if [ -d \"/home/ubuntu/GeuseMaker\" ]; then
             cd /home/ubuntu/GeuseMaker
-            if command -v docker-compose >/dev/null 2>&1; then
+            if command -v docker compose >/dev/null 2>&1; then
+                docker compose logs --tail=50 -f 2>/dev/null | while read -r line; do
+                    echo \"$log_prefix [COMPOSE] \$line\"
+                done &
+            elif command -v docker-compose >/dev/null 2>&1; then
                 docker-compose logs --tail=50 -f 2>/dev/null | while read -r line; do
                     echo \"$log_prefix [COMPOSE] \$line\"
                 done &
@@ -787,27 +1035,32 @@ echo "\$(date): Installing missing dependencies..." | tee -a "\$DEPLOY_LOG"
 sudo apt-get update -qq 2>&1 | tee -a "\$DEPLOY_LOG"
 
 # Install docker-compose and other dependencies
-if ! command -v docker-compose >/dev/null 2>&1; then
-    echo "\$(date): Installing docker-compose..." | tee -a "\$DEPLOY_LOG"
-    sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m)" -o /usr/local/bin/docker-compose
-    sudo chmod +x /usr/local/bin/docker-compose
+if ! command -v docker compose >/dev/null 2>&1 && ! command -v docker-compose >/dev/null 2>&1; then
+    echo "\$(date): Docker Compose not found, installation will be handled by user data script" | tee -a "\$DEPLOY_LOG"
 fi
 
 sudo apt-get install -y yq jq gettext-base 2>&1 | tee -a "\$DEPLOY_LOG"
 
-# Verify docker-compose installation
-if ! command -v docker-compose >/dev/null 2>&1; then
-    echo "\$(date): ERROR: docker-compose installation failed" | tee -a "\$DEPLOY_LOG"
+# Define docker compose command to use (check both)
+if command -v docker compose >/dev/null 2>&1; then
+    DOCKER_COMPOSE_CMD="docker compose"
+    echo "\$(date): Using docker compose plugin" | tee -a "\$DEPLOY_LOG"
+elif command -v docker-compose >/dev/null 2>&1; then
+    DOCKER_COMPOSE_CMD="docker-compose"
+    echo "\$(date): Using legacy docker-compose binary" | tee -a "\$DEPLOY_LOG"
+else
+    echo "\$(date): ERROR: Neither 'docker compose' nor 'docker-compose' command found" | tee -a "\$DEPLOY_LOG"
+    echo "\$(date): This should have been installed by the user data script" | tee -a "\$DEPLOY_LOG"
     exit 1
 fi
 
 # Pull latest images
 echo "\$(date): Pulling Docker images..." | tee -a "\$DEPLOY_LOG"
-docker-compose -f $compose_file pull 2>&1 | tee -a "\$DEPLOY_LOG"
+\$DOCKER_COMPOSE_CMD -f $compose_file pull 2>&1 | tee -a "\$DEPLOY_LOG"
 
 # Start services
 echo "\$(date): Starting Docker services..." | tee -a "\$DEPLOY_LOG"
-docker-compose -f $compose_file up -d 2>&1 | tee -a "\$DEPLOY_LOG"
+\$DOCKER_COMPOSE_CMD -f $compose_file up -d 2>&1 | tee -a "\$DEPLOY_LOG"
 
 # Wait for services to stabilize
 echo "\$(date): Waiting for services to stabilize..." | tee -a "\$DEPLOY_LOG"
@@ -815,7 +1068,7 @@ sleep 30
 
 # Check service status
 echo "\$(date): Checking service status..." | tee -a "\$DEPLOY_LOG"
-docker-compose -f $compose_file ps 2>&1 | tee -a "\$DEPLOY_LOG"
+\$DOCKER_COMPOSE_CMD -f $compose_file ps 2>&1 | tee -a "\$DEPLOY_LOG"
 
 echo "\$(date): Application deployment completed" | tee -a "\$DEPLOY_LOG"
 EOF
@@ -1169,6 +1422,7 @@ create_alb_alarms() {
 # UTILITY FUNCTIONS
 # =============================================================================
 
+
 generate_user_data_script() {
     local stack_name="$1"
     local additional_commands="$2"
@@ -1241,8 +1495,141 @@ usermod -aG docker ubuntu
 
 # Install Docker Compose
 echo "\$(date): Installing Docker Compose..."
-curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m)" -o /usr/local/bin/docker-compose
-chmod +x /usr/local/bin/docker-compose
+
+# Define Docker Compose installation functions
+install_docker_compose() {
+    # Detect distribution
+    local distro=""
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        distro="\$ID"
+    fi
+    
+    echo "\$(date): Detecting distribution: \$distro"
+    
+    # Check if Docker Compose is already installed
+    if command -v docker compose >/dev/null 2>&1 || command -v docker-compose >/dev/null 2>&1; then
+        echo "\$(date): Docker Compose already installed"
+        # Verify it works
+        if docker compose version >/dev/null 2>&1; then
+            echo "\$(date): Docker Compose plugin verified working"
+            return 0
+        elif docker-compose version >/dev/null 2>&1; then
+            echo "\$(date): Legacy docker-compose binary found, installing plugin version..."
+        else
+            echo "\$(date): Docker Compose found but not working, reinstalling..."
+        fi
+    fi
+    
+    # Install Docker Compose plugin (preferred method)
+    echo "\$(date): Installing Docker Compose plugin..."
+    
+    case "\$distro" in
+        ubuntu|debian)
+            # Install Docker Compose plugin via apt (Ubuntu 20.04+ and Debian 11+)
+            echo "\$(date): Attempting apt package manager installation..."
+            wait_for_apt_lock
+            if apt-get update -qq && apt-get install -y docker-compose-plugin; then
+                echo "\$(date): Docker Compose plugin installed via apt"
+                return 0
+            else
+                echo "\$(date): Package manager installation failed, trying manual download..."
+                install_compose_manual
+            fi
+            ;;
+        amzn|rhel|centos|fedora)
+            # For Amazon Linux and RHEL-based systems, use manual installation
+            echo "\$(date): Installing via manual download for RHEL-based system..."
+            install_compose_manual
+            ;;
+        *)
+            echo "\$(date): Unknown distribution, using manual installation..."
+            install_compose_manual
+            ;;
+    esac
+    
+    # Verify installation
+    verify_docker_compose_installation
+}
+
+install_compose_manual() {
+    local compose_version
+    # Use portable method instead of Perl regex
+    compose_version=\$(curl -s --connect-timeout 10 --retry 3 https://api.github.com/repos/docker/compose/releases/latest | grep '"tag_name":' | head -1 | sed 's/.*"tag_name": "\([^"]*\)".*/\1/' 2>/dev/null)
+    
+    if [ -z "\$compose_version" ]; then
+        echo "\$(date): Could not determine latest version, using fallback..."
+        compose_version="v2.24.5"
+    fi
+    
+    echo "\$(date): Installing Docker Compose \$compose_version manually..."
+    
+    # Create the Docker CLI plugins directory
+    sudo mkdir -p /usr/local/lib/docker/cli-plugins
+    
+    # Download Docker Compose plugin with proper architecture detection
+    local arch
+    arch=\$(uname -m)
+    case \$arch in
+        x86_64) arch="x86_64" ;;
+        aarch64) arch="aarch64" ;;
+        arm64) arch="aarch64" ;;
+        *) echo "\$(date): Unsupported architecture: \$arch"; return 1 ;;
+    esac
+    
+    local compose_url="https://github.com/docker/compose/releases/download/\${compose_version}/docker-compose-linux-\${arch}"
+    
+    echo "\$(date): Downloading from: \$compose_url"
+    if sudo curl -L --connect-timeout 30 --retry 3 "\$compose_url" -o /usr/local/lib/docker/cli-plugins/docker-compose; then
+        sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+        
+        # Also create a symlink for backwards compatibility
+        sudo ln -sf /usr/local/lib/docker/cli-plugins/docker-compose /usr/local/bin/docker-compose
+        
+        echo "\$(date): Docker Compose plugin installed successfully"
+        return 0
+    else
+        echo "\$(date): Failed to download Docker Compose, trying fallback method..."
+        # Fallback to older installation method
+        if sudo curl -L --connect-timeout 30 --retry 3 "https://github.com/docker/compose/releases/download/\${compose_version}/docker-compose-\$(uname -s)-\$(uname -m)" -o /usr/local/bin/docker-compose; then
+            sudo chmod +x /usr/local/bin/docker-compose
+            echo "\$(date): Fallback Docker Compose installation completed"
+            return 0
+        else
+            echo "\$(date): ERROR: All Docker Compose installation methods failed"
+            return 1
+        fi
+    fi
+}
+
+verify_docker_compose_installation() {
+    echo "\$(date): Verifying Docker Compose installation..."
+    
+    # Test Docker Compose plugin first (preferred)
+    if docker compose version >/dev/null 2>&1; then
+        local version
+        version=\$(docker compose version 2>/dev/null | head -1)
+        echo "\$(date): Docker Compose plugin verified: \$version"
+        return 0
+    fi
+    
+    # Test legacy docker-compose binary
+    if command -v docker-compose >/dev/null 2>&1 && docker-compose version >/dev/null 2>&1; then
+        local version
+        version=\$(docker-compose version 2>/dev/null | head -1)
+        echo "\$(date): Legacy docker-compose verified: \$version"
+        return 0
+    fi
+    
+    echo "\$(date): ERROR: Neither 'docker compose' nor 'docker-compose' command found or working"
+    return 1
+}
+
+# Install Docker Compose
+if ! install_docker_compose; then
+    echo "\$(date): ERROR: Docker Compose installation failed"
+    exit 1
+fi
 
 # Optimize Docker daemon for limited disk space
 echo "\$(date): Optimizing Docker configuration..."

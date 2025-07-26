@@ -18,6 +18,191 @@ if [[ -z "${RED:-}" ]]; then
 fi
 
 # =============================================================================
+# CONFIGURATION SECURITY INTEGRATION
+# =============================================================================
+
+# Load configuration management library if available
+load_config_management_for_security() {
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local project_root="$(cd "$script_dir/.." && pwd)"
+    local config_lib="$project_root/lib/config-management.sh"
+    
+    if [[ -f "$config_lib" ]]; then
+        source "$config_lib"
+        return 0
+    else
+        echo -e "${YELLOW}Warning: Configuration management library not found, using legacy validation${NC}" >&2
+        return 1
+    fi
+}
+
+# Validate configuration-based security settings
+validate_config_security() {
+    local environment="${1:-${ENVIRONMENT:-development}}"
+    local deployment_type="${2:-${DEPLOYMENT_TYPE:-simple}}"
+    
+    # Load configuration management if available
+    if load_config_management_for_security; then
+        # Use centralized configuration validation
+        if declare -f init_config >/dev/null 2>&1; then
+            init_config "$environment" "$deployment_type" || {
+                echo -e "${RED}Error: Failed to initialize configuration for security validation${NC}" >&2
+                return 1
+            }
+        fi
+        
+        # Validate security-specific configuration
+        validate_security_config_values "$environment" || return 1
+    else
+        # Fallback to basic validation
+        echo -e "${YELLOW}Warning: Using basic security validation without configuration management${NC}" >&2
+    fi
+    
+    return 0
+}
+
+# Validate security configuration values
+validate_security_config_values() {
+    local environment="$1"
+    
+    # Check container security settings
+    local container_security_enabled
+    container_security_enabled=$(get_security_config "container_security.run_as_non_root" "true" 2>/dev/null || echo "true")
+    
+    if [[ "$environment" == "production" && "$container_security_enabled" != "true" ]]; then
+        echo -e "${RED}Error: Container security must be enabled in production environment${NC}" >&2
+        return 1
+    fi
+    
+    # Check secrets management settings
+    local secrets_manager_enabled
+    secrets_manager_enabled=$(get_security_config "secrets_management.use_aws_secrets_manager" "true" 2>/dev/null || echo "true")
+    
+    if [[ "$environment" == "production" && "$secrets_manager_enabled" != "true" ]]; then
+        echo -e "${RED}Error: AWS Secrets Manager must be enabled in production environment${NC}" >&2
+        return 1
+    fi
+    
+    # Check encryption settings
+    local encryption_at_rest
+    encryption_at_rest=$(get_security_config "secrets_management.encryption_at_rest" "true" 2>/dev/null || echo "true")
+    
+    if [[ "$environment" == "production" && "$encryption_at_rest" != "true" ]]; then
+        echo -e "${RED}Error: Encryption at rest must be enabled in production environment${NC}" >&2
+        return 1
+    fi
+    
+    # Check network security settings
+    local cors_strict_mode
+    cors_strict_mode=$(get_security_config "network_security.cors_strict_mode" "true" 2>/dev/null || echo "true")
+    
+    if [[ "$environment" == "production" && "$cors_strict_mode" != "true" ]]; then
+        echo -e "${RED}Error: CORS strict mode must be enabled in production environment${NC}" >&2
+        return 1
+    fi
+    
+    echo -e "${GREEN}✓ Configuration security validation passed for $environment environment${NC}" >&2
+    return 0
+}
+
+# Validate environment-specific security requirements
+validate_environment_security_requirements() {
+    local environment="$1"
+    
+    case "$environment" in
+        "production")
+            # Production requires all security features enabled
+            echo -e "${YELLOW}Validating production security requirements...${NC}" >&2
+            
+            local required_security_features=(
+                "container_security"
+                "secrets_management"
+                "encryption_at_rest"
+                "encryption_in_transit"
+                "audit_logging"
+                "access_logging"
+            )
+            
+            for feature in "${required_security_features[@]}"; do
+                if ! validate_security_feature_enabled "$feature"; then
+                    echo -e "${RED}Error: Security feature '$feature' must be enabled in production${NC}" >&2
+                    return 1
+                fi
+            done
+            ;;
+            
+        "staging")
+            echo -e "${YELLOW}Validating staging security requirements...${NC}" >&2
+            # Staging requires most security features but allows some relaxation
+            local required_features=("container_security" "secrets_management" "encryption_at_rest")
+            
+            for feature in "${required_features[@]}"; do
+                if ! validate_security_feature_enabled "$feature"; then
+                    echo -e "${RED}Error: Security feature '$feature' must be enabled in staging${NC}" >&2
+                    return 1
+                fi
+            done
+            ;;
+            
+        "development")
+            echo -e "${YELLOW}Validating development security requirements...${NC}" >&2
+            # Development allows relaxed security but warns about potential issues
+            echo -e "${YELLOW}Warning: Development environment may have relaxed security settings${NC}" >&2
+            ;;
+            
+        *)
+            echo -e "${RED}Error: Unknown environment '$environment'${NC}" >&2
+            return 1
+            ;;
+    esac
+    
+    echo -e "${GREEN}✓ Environment-specific security validation passed for $environment${NC}" >&2
+    return 0
+}
+
+# Helper function to validate if a security feature is enabled
+validate_security_feature_enabled() {
+    local feature="$1"
+    
+    case "$feature" in
+        "container_security")
+            local enabled
+            enabled=$(get_security_config "container_security.run_as_non_root" "false" 2>/dev/null || echo "false")
+            [[ "$enabled" == "true" ]]
+            ;;
+        "secrets_management")
+            local enabled
+            enabled=$(get_security_config "secrets_management.use_aws_secrets_manager" "false" 2>/dev/null || echo "false")
+            [[ "$enabled" == "true" ]]
+            ;;
+        "encryption_at_rest")
+            local enabled
+            enabled=$(get_security_config "secrets_management.encryption_at_rest" "false" 2>/dev/null || echo "false")
+            [[ "$enabled" == "true" ]]
+            ;;
+        "encryption_in_transit")
+            local enabled
+            enabled=$(get_config_value ".compliance.encryption_in_transit" "false" 2>/dev/null || echo "false")
+            [[ "$enabled" == "true" ]]
+            ;;
+        "audit_logging")
+            local enabled
+            enabled=$(get_config_value ".compliance.audit_logging" "false" 2>/dev/null || echo "false")
+            [[ "$enabled" == "true" ]]
+            ;;
+        "access_logging")
+            local enabled
+            enabled=$(get_config_value ".compliance.access_logging" "false" 2>/dev/null || echo "false")
+            [[ "$enabled" == "true" ]]
+            ;;
+        *)
+            echo -e "${YELLOW}Warning: Unknown security feature '$feature'${NC}" >&2
+            return 1
+            ;;
+    esac
+}
+
+# =============================================================================
 # INPUT VALIDATION FUNCTIONS
 # =============================================================================
 

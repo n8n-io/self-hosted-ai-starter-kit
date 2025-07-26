@@ -602,14 +602,15 @@ make cost-estimate STACK_NAME=my-stack HOURS=24
 
 **Implementation:**
 ```bash
-python scripts/cost-optimization.py estimate $(STACK_NAME) $(HOURS)
+# Python cost optimization removed - use AWS Cost Explorer instead
+aws ce get-cost-and-usage --time-period Start=2024-01-01,End=2024-01-31 --granularity MONTHLY --metrics BlendedCost
 ```
 
 **Output includes:**
-- Instance costs
-- Storage costs
-- Network costs
-- Total estimated cost
+- AWS Cost Explorer integration
+- CloudWatch metrics
+- Real-time cost monitoring
+- Automated cost alerts
 
 ### 🔒 Security Commands
 

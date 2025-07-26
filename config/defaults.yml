@@ -1,0 +1,356 @@
+# Default Configuration Values
+# GeuseMaker - Baseline configuration applied to all environments
+# These values are used as fallbacks when environment-specific configs don't define them
+
+# =============================================================================
+# GLOBAL DEFAULTS
+# =============================================================================
+global:
+  project_name: GeuseMaker
+  region: us-east-1
+  default_tags:
+    Project: GeuseMaker
+    ManagedBy: "aws-deployment-scripts"
+    CreatedBy: "config-management"
+
+# =============================================================================
+# INFRASTRUCTURE DEFAULTS
+# =============================================================================
+infrastructure:
+  # Instance type preferences (in order of preference)
+  instance_types:
+    gpu_instances: ["g4dn.xlarge", "g5g.xlarge", "g4dn.2xlarge", "g5g.2xlarge"]
+    cpu_instances: ["t3.large", "t3.xlarge", "m5.large", "m5.xlarge"]
+    fallback_instances: ["t3.medium", "t2.medium"]
+  
+  # Network configuration
+  networking:
+    vpc_cidr: "10.0.0.0/16"
+    public_subnet_count: 2
+    private_subnet_count: 2
+    enable_nat_gateway: true
+    enable_internet_gateway: true
+  
+  # Storage defaults
+  storage:
+    efs_performance_mode: generalPurpose
+    efs_throughput_mode: provisioned
+    efs_encryption: true
+    ebs_encryption: true
+    backup_retention_days: 30
+    
+  # Auto scaling defaults
+  auto_scaling:
+    min_capacity: 1
+    max_capacity: 3
+    target_utilization: 70
+    scale_up_cooldown: 300
+    scale_down_cooldown: 300
+
+# =============================================================================
+# APPLICATION DEFAULTS
+# =============================================================================
+applications:
+  # PostgreSQL defaults
+  postgres:
+    image: postgres:16.1-alpine3.19
+    port: 5432
+    resources:
+      cpu_limit: "1.0"
+      memory_limit: "2G"
+      cpu_reservation: "0.5"
+      memory_reservation: "1G"
+    config:
+      max_connections: 100
+      shared_buffers: "512MB"
+      effective_cache_size: "1GB"
+      wal_buffers: "16MB"
+      checkpoint_completion_target: 0.9
+      random_page_cost: 1.1
+    backup:
+      enabled: true
+      schedule: "0 2 * * *"  # Daily at 2 AM
+      retention_days: 30
+  
+  # n8n defaults
+  n8n:
+    image: n8nio/n8n:1.19.4
+    port: 5678
+    resources:
+      cpu_limit: "0.5"
+      memory_limit: "1G"
+      cpu_reservation: "0.25"
+      memory_reservation: "512M"
+    config:
+      cors_enable: true
+      cors_allowed_origins: "*"
+      payload_size_max: 16
+      metrics: true
+      log_level: info
+      community_packages_enabled: false
+    scaling:
+      replicas: 1
+      max_replicas: 3
+  
+  # Ollama defaults
+  ollama:
+    image: ollama/ollama:0.1.17
+    port: 11434
+    resources:
+      cpu_limit: "1.0"
+      memory_limit: "4G"
+      cpu_reservation: "0.5"
+      memory_reservation: "2G"
+      gpu_memory_fraction: 0.80
+    config:
+      max_loaded_models: 2
+      concurrent_requests: 4
+      model_cache_size: "4GB"
+    models:
+      default:
+        - name: "llama2:7b"
+          preload: false
+  
+  # Qdrant defaults
+  qdrant:
+    image: qdrant/qdrant:v1.7.3
+    http_port: 6333
+    grpc_port: 6334
+    resources:
+      cpu_limit: "0.5"
+      memory_limit: "1G"
+      cpu_reservation: "0.25"
+      memory_reservation: "512M"
+    config:
+      max_search_threads: 4
+      max_optimization_threads: 2
+      wal_capacity_mb: 128
+      max_segment_size_kb: 100000
+    collections:
+      default_vector_size: 384
+      default_distance: "Cosine"
+      default_on_disk_payload: true
+  
+  # Crawl4AI defaults
+  crawl4ai:
+    image: unclecode/crawl4ai:0.2.77
+    port: 11235
+    resources:
+      cpu_limit: "0.5"
+      memory_limit: "1G"
+      cpu_reservation: "0.25"
+      memory_reservation: "512M"
+    config:
+      rate_limiting_enabled: true
+      default_limit: "1000/minute"
+      max_concurrent_sessions: 2
+      browser_pool_size: 1
+      request_timeout: 30
+      max_retries: 3
+
+# =============================================================================
+# SECURITY DEFAULTS
+# =============================================================================
+security:
+  # Container security
+  container_security:
+    run_as_non_root: true
+    read_only_root_filesystem: false
+    no_new_privileges: true
+    drop_capabilities: ["ALL"]
+    add_capabilities: []
+    security_opt: ["no-new-privileges:true"]
+  
+  # Network security
+  network_security:
+    cors_strict_mode: true
+    trusted_hosts_restriction: true
+    internal_communication_only: true
+    ssl_redirect: true
+    hsts_enabled: true
+  
+  # Secrets management
+  secrets_management:
+    use_aws_secrets_manager: true
+    rotate_secrets: true
+    encryption_at_rest: true
+    key_rotation_days: 90
+    
+  # Access control
+  access_control:
+    enable_rbac: true
+    session_timeout: 3600  # 1 hour
+    max_login_attempts: 5
+    lockout_duration: 900  # 15 minutes
+
+# =============================================================================
+# MONITORING DEFAULTS
+# =============================================================================
+monitoring:
+  # Metrics collection
+  metrics:
+    enabled: true
+    retention_days: 30
+    scrape_interval: 30s
+    evaluation_interval: 30s
+  
+  # Logging
+  logging:
+    level: info
+    centralized: true
+    retention_days: 30
+    format: json
+    max_file_size: "100MB"
+    max_files: 10
+  
+  # Health checks
+  health_checks:
+    enabled: true
+    interval: 30s
+    timeout: 10s
+    retries: 3
+    start_period: 60s
+  
+  # Alerting
+  alerting:
+    enabled: true
+    evaluation_interval: 30s
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 12h
+  
+  # Dashboards
+  dashboards:
+    grafana_enabled: false
+    prometheus_enabled: true
+    custom_dashboards: []
+
+# =============================================================================
+# COST OPTIMIZATION DEFAULTS
+# =============================================================================
+cost_optimization:
+  # Spot instances
+  spot_instances:
+    enabled: false
+    max_price: 1.00
+    interruption_handling: true
+    diversified_allocation: true
+  
+  # Auto scaling
+  auto_scaling:
+    scale_down_enabled: true
+    scale_down_threshold: 20
+    idle_timeout_minutes: 30
+    cooldown_period: 300
+  
+  # Resource optimization
+  resource_optimization:
+    right_sizing_enabled: false
+    unused_resource_detection: false
+    cost_alerts_enabled: false
+    budget_alerts_threshold: 80  # percentage
+
+# =============================================================================
+# BACKUP AND RECOVERY DEFAULTS
+# =============================================================================
+backup:
+  automated_backups: true
+  backup_schedule: "0 2 * * *"  # Daily at 2 AM
+  backup_retention_days: 30
+  cross_region_replication: false
+  point_in_time_recovery: false
+  backup_encryption: true
+  backup_storage_class: "STANDARD_IA"
+
+# =============================================================================
+# COMPLIANCE DEFAULTS
+# =============================================================================
+compliance:
+  audit_logging: false
+  encryption_in_transit: true
+  encryption_at_rest: true
+  access_logging: false
+  data_retention_policy: 90  # days
+  gdpr_compliance: false
+  hipaa_compliance: false
+  sox_compliance: false
+
+# =============================================================================
+# DEPLOYMENT DEFAULTS
+# =============================================================================
+deployment:
+  # Deployment strategy
+  strategy: rolling_update
+  max_unavailable: 25%
+  max_surge: 25%
+  
+  # Health check settings
+  readiness_probe:
+    initial_delay_seconds: 30
+    period_seconds: 10
+    timeout_seconds: 5
+    failure_threshold: 3
+    success_threshold: 1
+  
+  liveness_probe:
+    initial_delay_seconds: 60
+    period_seconds: 20
+    timeout_seconds: 10
+    failure_threshold: 3
+    success_threshold: 1
+  
+  # Resource limits
+  resource_limits:
+    cpu_request_ratio: 0.5  # reservation as ratio of limit
+    memory_request_ratio: 0.5
+    max_cpu_per_service: "2.0"
+    max_memory_per_service: "8G"
+
+# =============================================================================
+# DOCKER CONFIGURATION DEFAULTS
+# =============================================================================
+docker:
+  # Base configuration
+  restart_policy: unless-stopped
+  logging_driver: json-file
+  logging_options:
+    max-size: "10m"
+    max-file: "3"
+  
+  # Network configuration
+  networks:
+    default_driver: bridge
+    enable_ipv6: false
+    
+  # Volume configuration
+  volumes:
+    driver: local
+    
+  # GPU configuration
+  gpu:
+    runtime: nvidia
+    visible_devices: all
+    driver_capabilities: all
+
+# =============================================================================
+# DEVELOPMENT ENVIRONMENT DEFAULTS
+# =============================================================================
+development:
+  # Development-specific settings
+  hot_reload: true
+  debug_mode: true
+  test_data_enabled: true
+  mock_services_enabled: true
+  local_development_mode: true
+  
+  # Development tools
+  tools:
+    enable_debug_endpoints: true
+    enable_metrics_endpoint: true
+    enable_profiling: false
+    
+  # Relaxed security for development
+  security_overrides:
+    cors_strict_mode: false
+    trusted_hosts_restriction: false
+    container_security_relaxed: true

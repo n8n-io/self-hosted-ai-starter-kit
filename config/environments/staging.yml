@@ -1,0 +1,217 @@
+# Staging Environment Configuration
+# GeuseMaker - Staging Settings
+
+global:
+  environment: staging
+  region: us-east-1
+  stack_name: GeuseMaker-staging
+  project_name: GeuseMaker
+
+# Infrastructure Configuration
+infrastructure:
+  instance_types:
+    preferred: ["g4dn.xlarge", "g5g.xlarge"]
+    fallback: ["t3.large", "g4dn.2xlarge"]
+  
+  auto_scaling:
+    min_capacity: 1
+    max_capacity: 5
+    target_utilization: 75  # Balanced between cost and performance
+  
+  networking:
+    vpc_cidr: "10.2.0.0/16"
+    public_subnets: ["10.2.1.0/24", "10.2.2.0/24"]
+    private_subnets: ["10.2.10.0/24", "10.2.20.0/24"]
+  
+  storage:
+    efs_performance_mode: generalPurpose
+    efs_encryption: true
+    backup_retention_days: 14
+
+# Application Configuration
+applications:
+  postgres:
+    image: postgres:16.1-alpine3.19
+    resources:
+      cpu_limit: "0.8"
+      memory_limit: "2G"
+      cpu_reservation: "0.4"
+      memory_reservation: "1G"
+    config:
+      max_connections: 150
+      shared_buffers: "1GB"
+      effective_cache_size: "3GB"
+    backup:
+      enabled: true
+      schedule: "0 3 * * *"  # Daily at 3 AM
+  
+  n8n:
+    image: n8nio/n8n:1.19.4
+    resources:
+      cpu_limit: "0.6"
+      memory_limit: "1.5G"
+      cpu_reservation: "0.3"
+      memory_reservation: "512M"
+    config:
+      cors_enable: true
+      cors_allowed_origins: "https://n8n-staging.geuse.io,https://localhost:5678"
+      payload_size_max: 16
+      metrics: true
+      log_level: info
+    scaling:
+      replicas: 1
+      max_replicas: 3
+  
+  ollama:
+    image: ollama/ollama:0.1.17
+    resources:
+      cpu_limit: "1.5"
+      memory_limit: "6G"
+      cpu_reservation: "0.8"
+      memory_reservation: "3G"
+      gpu_memory_fraction: 0.85
+    models:
+      - name: "deepseek-r1:8b"
+        preload: true
+      - name: "llama2:7b"
+        preload: false  # Load on demand in staging
+    config:
+      max_loaded_models: 2
+      concurrent_requests: 4
+  
+  qdrant:
+    image: qdrant/qdrant:v1.7.3
+    resources:
+      cpu_limit: "0.8"
+      memory_limit: "2G"
+      cpu_reservation: "0.4"
+      memory_reservation: "1G"
+    config:
+      max_search_threads: 6
+      max_optimization_threads: 3
+      wal_capacity_mb: 128
+    collections:
+      default_vector_size: 384
+      default_distance: "Cosine"
+  
+  crawl4ai:
+    image: unclecode/crawl4ai:0.2.77
+    resources:
+      cpu_limit: "0.8"
+      memory_limit: "1.5G"
+      cpu_reservation: "0.4"
+      memory_reservation: "1G"
+    config:
+      rate_limiting_enabled: true
+      default_limit: "1500/minute"
+      max_concurrent_sessions: 3
+      browser_pool_size: 2
+
+# Security Configuration
+security:
+  container_security:
+    run_as_non_root: true
+    read_only_root_filesystem: false
+    no_new_privileges: true
+    drop_capabilities: ["ALL"]
+    add_capabilities: []
+  
+  network_security:
+    cors_strict_mode: true
+    trusted_hosts_restriction: true
+    internal_communication_only: true
+  
+  secrets_management:
+    use_aws_secrets_manager: true
+    rotate_secrets: true
+    encryption_at_rest: true
+
+# Monitoring Configuration
+monitoring:
+  metrics:
+    enabled: true
+    retention_days: 60
+    scrape_interval: 30s
+  
+  logging:
+    level: info
+    centralized: true
+    retention_days: 14
+    format: json
+  
+  alerting:
+    enabled: true
+    channels:
+      - type: email
+        address: "staging-alerts@company.com"
+      - type: slack
+        webhook: "${SLACK_WEBHOOK_URL}"
+  
+  health_checks:
+    enabled: true
+    interval: 45s
+    timeout: 10s
+    retries: 3
+    
+  dashboards:
+    grafana_enabled: true
+    custom_dashboards:
+      - ai_workload_performance
+      - cost_optimization_metrics
+
+# Cost Optimization Configuration
+cost_optimization:
+  spot_instances:
+    enabled: true
+    max_price: 1.50
+    interruption_handling: true
+  
+  auto_scaling:
+    scale_down_enabled: true
+    scale_down_threshold: 25
+    idle_timeout_minutes: 20
+  
+  resource_optimization:
+    right_sizing_enabled: true
+    unused_resource_detection: true
+    cost_alerts_enabled: true
+
+# Backup and Recovery Configuration
+backup:
+  automated_backups: true
+  backup_schedule: "0 3 * * *"  # Daily at 3 AM
+  backup_retention_days: 14
+  cross_region_replication: false
+  point_in_time_recovery: true
+
+# Compliance Configuration
+compliance:
+  audit_logging: true
+  encryption_in_transit: true
+  encryption_at_rest: true
+  access_logging: true
+  data_retention_policy: 30  # days
+
+# Staging-specific Configuration
+staging:
+  test_data_enabled: true
+  mock_services_enabled: false  # Use real services in staging
+  load_testing_enabled: true
+  
+  # Testing configuration
+  testing:
+    unit_tests_enabled: true
+    integration_tests_enabled: true
+    e2e_tests_enabled: true
+    performance_tests_enabled: true
+    
+  # Preview features
+  preview_features:
+    enable_beta_models: true
+    enable_experimental_features: false
+    
+  # Deployment validation
+  validation:
+    smoke_tests_required: true
+    health_check_timeout: 300  # 5 minutes
+    rollback_on_failure: true

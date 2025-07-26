@@ -62,14 +62,70 @@ validate: ## Validate all configurations
 	@./tools/validate-config.sh
 	@echo "✅ Configuration validation complete"
 
+# =============================================================================
+# CONFIGURATION MANAGEMENT
+# =============================================================================
+
+config-generate: ## Generate all configuration files (requires ENV)
+	@if [ -z "$(ENV)" ]; then echo "❌ Error: ENV is required. Use: make config-generate ENV=development"; exit 1; fi
+	@echo "Generating configuration files for environment: $(ENV)"
+	@chmod +x scripts/config-manager.sh
+	@./scripts/config-manager.sh generate $(ENV)
+	@echo "✅ Configuration files generated"
+
+config-validate: ## Validate configuration for environment (requires ENV)
+	@if [ -z "$(ENV)" ]; then echo "❌ Error: ENV is required. Use: make config-validate ENV=development"; exit 1; fi
+	@echo "Validating configuration for environment: $(ENV)"
+	@chmod +x scripts/config-manager.sh
+	@./scripts/config-manager.sh validate $(ENV)
+	@echo "✅ Configuration validation complete"
+
+config-show: ## Show configuration summary (requires ENV)
+	@if [ -z "$(ENV)" ]; then echo "❌ Error: ENV is required. Use: make config-show ENV=development"; exit 1; fi
+	@echo "Showing configuration summary for environment: $(ENV)"
+	@chmod +x scripts/config-manager.sh
+	@./scripts/config-manager.sh show $(ENV)
+
+config-env: ## Generate environment file only (requires ENV)
+	@if [ -z "$(ENV)" ]; then echo "❌ Error: ENV is required. Use: make config-env ENV=development"; exit 1; fi
+	@echo "Generating environment file for: $(ENV)"
+	@chmod +x scripts/config-manager.sh
+	@./scripts/config-manager.sh env $(ENV)
+	@echo "✅ Environment file generated"
+
+config-override: ## Generate Docker Compose override only (requires ENV)
+	@if [ -z "$(ENV)" ]; then echo "❌ Error: ENV is required. Use: make config-override ENV=development"; exit 1; fi
+	@echo "Generating Docker Compose override for: $(ENV)"
+	@chmod +x scripts/config-manager.sh
+	@./scripts/config-manager.sh override $(ENV)
+	@echo "✅ Docker Compose override generated"
+
+config-terraform: ## Generate Terraform variables only (requires ENV)
+	@if [ -z "$(ENV)" ]; then echo "❌ Error: ENV is required. Use: make config-terraform ENV=development"; exit 1; fi
+	@echo "Generating Terraform variables for: $(ENV)"
+	@chmod +x scripts/config-manager.sh
+	@./scripts/config-manager.sh terraform $(ENV)
+	@echo "✅ Terraform variables generated"
+
+config-test: ## Run configuration management tests
+	@echo "Running configuration management tests..."
+	@chmod +x tests/test-config-management.sh
+	@./tests/test-config-management.sh
+	@echo "✅ Configuration management tests complete"
+
+config-test-quick: ## Run quick configuration tests
+	@echo "Running quick configuration tests..."
+	@chmod +x tests/test-config-management.sh
+	@./tests/test-config-management.sh --quick
+	@echo "✅ Quick configuration tests complete"
+
 lint: ## Run linting on all code
 	@echo "Running linters..."
-	@./tools/lint.sh
+	@./scripts/security-validation.sh
 	@echo "✅ Linting complete"
 
 format: ## Format all code
-	@echo "Formatting code..."
-	@./tools/format.sh
+	@echo "Code formatting not needed for shell scripts..."
 	@echo "✅ Code formatting complete"
 
 # =============================================================================
@@ -83,15 +139,15 @@ test: ## Run all tests
 
 test-unit: ## Run unit tests only
 	@echo "Running unit tests..."
-	@python -m pytest tests/unit/ -v
+	@./tests/test-security-validation.sh
 
 test-integration: ## Run integration tests only
 	@echo "Running integration tests..."
-	@python -m pytest tests/integration/ -v
+	@./tests/test-deployment-workflow.sh
 
 test-security: ## Run security tests
 	@echo "Running security tests..."
-	@./tools/security-scan.sh
+	@./scripts/security-check.sh
 
 # =============================================================================
 # DEPLOYMENT
@@ -151,7 +207,7 @@ tf-destroy: ## Destroy Terraform resources (requires STACK_NAME)
 
 status: ## Check deployment status (requires STACK_NAME)
 	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
-	@./tools/check-status.sh $(STACK_NAME)
+	@./scripts/check-instance-status.sh $(STACK_NAME)
 
 logs: ## View application logs (requires STACK_NAME)
 	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
@@ -193,26 +249,26 @@ docs-serve: ## Serve documentation locally
 
 clean: ## Clean up temporary files and caches
 	@echo "Cleaning up..."
-	@rm -rf .pytest_cache/
-	@rm -rf __pycache__/
+	@rm -rf test-reports/
 	@rm -f *.log
 	@rm -f *.tmp
-	@find . -name "*.pyc" -delete
-	@find . -name "*.pyo" -delete
+	@rm -f *.temp
+	@find . -name "*.backup.*" -delete 2>/dev/null || true
 	@echo "✅ Cleanup complete"
 
 cost-estimate: ## Estimate deployment costs (requires STACK_NAME and HOURS)
 	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
-	@python scripts/cost-optimization.py estimate $(STACK_NAME) $(HOURS)
+	@echo "⚠️  Cost estimation feature removed - Python dependency eliminated"
+	@echo "💡 Use AWS Cost Explorer or CloudWatch for cost monitoring"
 
 security-scan: ## Run comprehensive security scan
 	@echo "Running security scan..."
-	@./tools/security-scan.sh
+	@./scripts/security-check.sh
 	@echo "✅ Security scan complete"
 
 update-deps: ## Update dependencies
 	@echo "Updating dependencies..."
-	@./tools/update-deps.sh
+	@./scripts/simple-update-images.sh
 	@echo "✅ Dependencies updated"
 
 # =============================================================================

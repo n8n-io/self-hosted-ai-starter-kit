@@ -1,0 +1,942 @@
+#!/bin/bash
+# =============================================================================
+# Unified AWS Resource Cleanup Script
+# Comprehensive cleanup for all AWS resources with intelligent detection
+# =============================================================================
+
+# Use set -euo pipefail but handle AWS command failures gracefully
+set -euo pipefail
+
+# =============================================================================
+# CONFIGURATION AND SETUP
+# =============================================================================
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+LIB_DIR="$PROJECT_ROOT/lib"
+
+# Source required libraries
+source "$LIB_DIR/error-handling.sh"
+source "$LIB_DIR/aws-deployment-common.sh"
+source "$LIB_DIR/aws-config.sh"
+
+# Set AWS region if not already set
+export AWS_REGION="${AWS_REGION:-us-east-1}"
+
+# =============================================================================
+# ENHANCED LOGGING AND OUTPUT
+# =============================================================================
+
+log() { echo -e "\033[0;34m[$(date +'%Y-%m-%d %H:%M:%S')] $1\033[0m" >&2; }
+error() { echo -e "\033[0;31m❌ [ERROR] $1\033[0m" >&2; }
+success() { echo -e "\033[0;32m✅ [SUCCESS] $1\033[0m" >&2; }
+warning() { echo -e "\033[0;33m⚠️  [WARNING] $1\033[0m" >&2; }
+info() { echo -e "\033[0;36mℹ️  [INFO] $1\033[0m" >&2; }
+step() { echo -e "\033[0;35m🔸 [STEP] $1\033[0m" >&2; }
+
+# =============================================================================
+# GLOBAL VARIABLES AND CONFIGURATION
+# =============================================================================
+
+# Default values
+STACK_NAME=""
+CLEANUP_MODE="stack"  # stack, efs, all, specific
+DRY_RUN=false
+FORCE=false
+VERBOSE=false
+CLEANUP_EFS=false
+CLEANUP_INSTANCES=false
+CLEANUP_IAM=false
+CLEANUP_NETWORK=false
+CLEANUP_MONITORING=false
+CLEANUP_STORAGE=false
+
+# Resource counters
+RESOURCES_DELETED=0
+RESOURCES_SKIPPED=0
+RESOURCES_FAILED=0
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+# Safe AWS command execution that doesn't exit on failure
+safe_aws() {
+    local aws_command="$1"
+    local description="$2"
+    
+    if [ "$VERBOSE" = true ]; then
+        log "Executing: $aws_command"
+    fi
+    
+    # Execute AWS command and capture exit code
+    local output
+    local exit_code
+    output=$(eval "$aws_command" 2>&1) || exit_code=$?
+    
+    if [ ${exit_code:-0} -eq 0 ]; then
+        echo "$output"
+        return 0
+    else
+        # Log the error but don't exit
+        if [ "$VERBOSE" = true ]; then
+            warning "$description failed (exit code: ${exit_code:-0}): $output"
+        fi
+        return ${exit_code:-1}
+    fi
+}
+
+show_usage() {
+    cat << EOF
+Usage: $0 [OPTIONS] [STACK_NAME]
+
+Unified AWS Resource Cleanup Script
+
+OPTIONS:
+    -m, --mode MODE           Cleanup mode: stack, efs, all, specific (default: stack)
+    -r, --region REGION       AWS region (default: us-east-1)
+    -d, --dry-run            Show what would be deleted without actually deleting
+    -f, --force              Force deletion without confirmation prompts
+    -v, --verbose            Verbose output
+    -h, --help               Show this help message
+
+RESOURCE TYPES:
+    --instances              Cleanup EC2 instances and related resources
+    --efs                    Cleanup EFS file systems and mount targets
+    --iam                    Cleanup IAM roles, policies, and instance profiles
+    --network                Cleanup VPC, security groups, load balancers
+    --monitoring             Cleanup CloudWatch alarms, logs, and dashboards
+    --storage                Cleanup EBS volumes, snapshots, and other storage
+
+EXAMPLES:
+    $0 052                    # Cleanup stack named "052"
+    $0 --mode efs --pattern "test-*"  # Cleanup EFS matching pattern
+    $0 --mode all --dry-run   # Show what would be cleaned up
+    $0 --mode specific --efs --instances  # Cleanup specific resource types
+    $0 --force 052            # Force cleanup without confirmation
+
+EOF
+}
+
+parse_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -m|--mode)
+                CLEANUP_MODE="$2"
+                shift 2
+                ;;
+            -r|--region)
+                export AWS_REGION="$2"
+                shift 2
+                ;;
+            -d|--dry-run)
+                DRY_RUN=true
+                shift
+                ;;
+            -f|--force)
+                FORCE=true
+                shift
+                ;;
+            -v|--verbose)
+                VERBOSE=true
+                shift
+                ;;
+            --instances)
+                CLEANUP_INSTANCES=true
+                shift
+                ;;
+            --efs)
+                CLEANUP_EFS=true
+                shift
+                ;;
+            --iam)
+                CLEANUP_IAM=true
+                shift
+                ;;
+            --network)
+                CLEANUP_NETWORK=true
+                shift
+                ;;
+            --monitoring)
+                CLEANUP_MONITORING=true
+                shift
+                ;;
+            --storage)
+                CLEANUP_STORAGE=true
+                shift
+                ;;
+            -h|--help)
+                show_usage
+                exit 0
+                ;;
+            -*)
+                error "Unknown option: $1"
+                show_usage
+                exit 1
+                ;;
+            *)
+                if [ -z "$STACK_NAME" ]; then
+                    STACK_NAME="$1"
+                else
+                    error "Multiple stack names provided: $STACK_NAME and $1"
+                    exit 1
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    # Set default cleanup types based on mode
+    if [ "$CLEANUP_MODE" = "stack" ] && [ -n "$STACK_NAME" ]; then
+        CLEANUP_INSTANCES=true
+        CLEANUP_EFS=true
+        CLEANUP_IAM=true
+        CLEANUP_NETWORK=true
+        CLEANUP_MONITORING=true
+        CLEANUP_STORAGE=true
+    elif [ "$CLEANUP_MODE" = "all" ]; then
+        CLEANUP_INSTANCES=true
+        CLEANUP_EFS=true
+        CLEANUP_IAM=true
+        CLEANUP_NETWORK=true
+        CLEANUP_MONITORING=true
+        CLEANUP_STORAGE=true
+    fi
+}
+
+confirm_cleanup() {
+    if [ "$FORCE" = true ]; then
+        return 0
+    fi
+
+    echo "=============================================="
+    echo "⚠️  CONFIRMATION REQUIRED"
+    echo "=============================================="
+    echo "Stack Name: ${STACK_NAME:-'N/A'}"
+    echo "Mode: $CLEANUP_MODE"
+    echo "Region: $AWS_REGION"
+    echo "Dry Run: $DRY_RUN"
+    echo ""
+    echo "Resource types to cleanup:"
+    [ "$CLEANUP_INSTANCES" = true ] && echo "  ✅ EC2 Instances and related resources"
+    [ "$CLEANUP_EFS" = true ] && echo "  ✅ EFS File Systems and mount targets"
+    [ "$CLEANUP_IAM" = true ] && echo "  ✅ IAM Roles, policies, and instance profiles"
+    [ "$CLEANUP_NETWORK" = true ] && echo "  ✅ Network resources (VPC, SG, ALB)"
+    [ "$CLEANUP_MONITORING" = true ] && echo "  ✅ Monitoring resources (CloudWatch)"
+    [ "$CLEANUP_STORAGE" = true ] && echo "  ✅ Storage resources (EBS, snapshots)"
+    echo ""
+    
+    if [ "$DRY_RUN" = true ]; then
+        echo "This is a DRY RUN - no resources will be deleted."
+        read -p "Continue? (y/N): " -n 1 -r
+        echo
+        [[ $REPLY =~ ^[Yy]$ ]] || exit 0
+    else
+        echo "⚠️  WARNING: This will permanently delete AWS resources!"
+        read -p "Are you sure you want to continue? (y/N): " -n 1 -r
+        echo
+        [[ $REPLY =~ ^[Yy]$ ]] || exit 0
+    fi
+}
+
+increment_counter() {
+    local type="$1"
+    case $type in
+        "deleted") ((RESOURCES_DELETED++)) ;;
+        "skipped") ((RESOURCES_SKIPPED++)) ;;
+        "failed") ((RESOURCES_FAILED++)) ;;
+    esac
+}
+
+print_summary() {
+    echo "=============================================="
+    echo "📊 CLEANUP SUMMARY"
+    echo "=============================================="
+    echo "Stack Name: ${STACK_NAME:-'N/A'}"
+    echo "Mode: $CLEANUP_MODE"
+    echo "Region: $AWS_REGION"
+    echo "Dry Run: $DRY_RUN"
+    echo ""
+    echo "Resources processed:"
+    echo "  ✅ Successfully deleted: $RESOURCES_DELETED"
+    echo "  ⚠️  Skipped: $RESOURCES_SKIPPED"
+    echo "  ❌ Failed: $RESOURCES_FAILED"
+    echo ""
+    
+    if [ "$DRY_RUN" = true ]; then
+        success "Dry run completed - no resources were actually deleted"
+    else
+        success "Cleanup completed successfully!"
+    fi
+    
+    echo "=============================================="
+}
+
+# =============================================================================
+# RESOURCE CLEANUP FUNCTIONS
+# =============================================================================
+
+cleanup_ec2_instances() {
+    step "Cleaning up EC2 instances and related resources"
+    
+    # Find instances by multiple strategies
+    local instance_ids=""
+    
+    if [ -n "$STACK_NAME" ]; then
+        # Strategy 1: Look for Stack tag
+        local stack_tagged_instances
+        stack_tagged_instances=$(safe_aws "aws ec2 describe-instances \
+            --filters \"Name=tag:Stack,Values=$STACK_NAME\" \"Name=instance-state-name,Values=running,pending,stopped,stopping\" \
+            --query 'Reservations[].Instances[].InstanceId' \
+            --output text --region \"$AWS_REGION\"" "Finding instances with Stack tag") || stack_tagged_instances=""
+        
+        # Strategy 2: Look for Name tag with stack pattern
+        local name_tagged_instances
+        name_tagged_instances=$(safe_aws "aws ec2 describe-instances \
+            --filters \"Name=tag:Name,Values=${STACK_NAME}-*\" \"Name=instance-state-name,Values=running,pending,stopped,stopping\" \
+            --query 'Reservations[].Instances[].InstanceId' \
+            --output text --region \"$AWS_REGION\"" "Finding instances with Name tag") || name_tagged_instances=""
+        
+        # Combine results
+        instance_ids=$(echo "$stack_tagged_instances $name_tagged_instances" | tr ' ' '\n' | grep -v "^$" | sort -u | tr '\n' ' ' | xargs)
+    fi
+    
+    if [ -n "$instance_ids" ] && [ "$instance_ids" != "None" ]; then
+        log "Found instances to cleanup: $instance_ids"
+        
+        for instance_id in $instance_ids; do
+            if [ -n "$instance_id" ] && [ "$instance_id" != "None" ]; then
+                if [ "$DRY_RUN" = true ]; then
+                    info "Would terminate instance: $instance_id"
+                    increment_counter "deleted"
+                else
+                    if safe_aws "aws ec2 terminate-instances --instance-ids \"$instance_id\" --region \"$AWS_REGION\"" "Terminating instance $instance_id" >/dev/null; then
+                        success "Terminated instance: $instance_id"
+                        increment_counter "deleted"
+                    else
+                        error "Failed to terminate instance: $instance_id"
+                        increment_counter "failed"
+                    fi
+                fi
+            fi
+        done
+    else
+        info "No instances found for cleanup"
+        increment_counter "skipped"
+    fi
+    
+    # Cleanup spot instance requests
+    if [ -n "$STACK_NAME" ]; then
+        step "Cleaning up spot instance requests"
+        local spot_requests
+        spot_requests=$(safe_aws "aws ec2 describe-spot-instance-requests \
+            --filters \"Name=tag:Stack,Values=${STACK_NAME}\" \"Name=state,Values=open,active\" \
+            --query 'SpotInstanceRequests[].SpotInstanceRequestId' \
+            --output text --region \"$AWS_REGION\"" "Finding spot instance requests") || spot_requests=""
+        
+        if [ -n "$spot_requests" ] && [ "$spot_requests" != "None" ]; then
+            for spot_id in $spot_requests; do
+                if [ -n "$spot_id" ] && [ "$spot_id" != "None" ]; then
+                    if [ "$DRY_RUN" = true ]; then
+                        info "Would cancel spot instance request: $spot_id"
+                        increment_counter "deleted"
+                    else
+                        if safe_aws "aws ec2 cancel-spot-instance-requests --spot-instance-request-ids \"$spot_id\" --region \"$AWS_REGION\"" "Cancelling spot instance request $spot_id" >/dev/null; then
+                            success "Cancelled spot instance request: $spot_id"
+                            increment_counter "deleted"
+                        else
+                            error "Failed to cancel spot instance request: $spot_id"
+                            increment_counter "failed"
+                        fi
+                    fi
+                fi
+            done
+        else
+            info "No spot instance requests found for cleanup"
+            increment_counter "skipped"
+        fi
+    fi
+}
+
+cleanup_efs_resources() {
+    step "Cleaning up EFS file systems and related resources"
+    
+    local efs_ids=""
+    
+    if [ -n "$STACK_NAME" ]; then
+        # Find EFS by stack name pattern
+        efs_ids=$(safe_aws "aws efs describe-file-systems \
+            --query \"FileSystems[?contains(Name, '$STACK_NAME')].FileSystemId\" \
+            --output text --region \"$AWS_REGION\"" "Finding EFS file systems") || efs_ids=""
+    fi
+    
+    if [ -z "$efs_ids" ] || [ "$efs_ids" = "None" ]; then
+        info "No EFS file systems found for cleanup"
+        increment_counter "skipped"
+        return 0
+    fi
+    
+    for efs_id in $efs_ids; do
+        if [ -n "$efs_id" ] && [ "$efs_id" != "None" ]; then
+            cleanup_single_efs "$efs_id"
+        fi
+    done
+}
+
+cleanup_single_efs() {
+    local efs_id="$1"
+    local efs_name
+    
+    # Get EFS name
+    efs_name=$(safe_aws "aws efs describe-file-systems \
+        --file-system-ids \"$efs_id\" \
+        --query 'FileSystems[0].Name' \
+        --output text --region \"$AWS_REGION\"" "Getting EFS name for $efs_id") || efs_name="unknown"
+    
+    log "Cleaning up EFS: $efs_name ($efs_id)"
+    
+    # Check if EFS exists
+    if ! safe_aws "aws efs describe-file-systems --file-system-ids \"$efs_id\"" "Checking EFS existence" &>/dev/null; then
+        warning "EFS $efs_id does not exist or is already deleted"
+        increment_counter "skipped"
+        return 0
+    fi
+    
+    # Delete mount targets first
+    local mount_targets
+    mount_targets=$(safe_aws "aws efs describe-mount-targets \
+        --file-system-id \"$efs_id\" \
+        --query 'MountTargets[].MountTargetId' \
+        --output text --region \"$AWS_REGION\"" "Finding mount targets for EFS $efs_id") || mount_targets=""
+    
+    if [ -n "$mount_targets" ] && [ "$mount_targets" != "None" ]; then
+        log "Found mount targets: $mount_targets"
+        for mt_id in $mount_targets; do
+            if [ -n "$mt_id" ] && [ "$mt_id" != "None" ]; then
+                if [ "$DRY_RUN" = true ]; then
+                    info "Would delete mount target: $mt_id"
+                    increment_counter "deleted"
+                else
+                    if safe_aws "aws efs delete-mount-target --mount-target-id \"$mt_id\" --region \"$AWS_REGION\"" "Deleting mount target $mt_id" >/dev/null; then
+                        success "Deleted mount target: $mt_id"
+                        increment_counter "deleted"
+                    else
+                        error "Failed to delete mount target: $mt_id"
+                        increment_counter "failed"
+                    fi
+                fi
+            fi
+        done
+        
+        if [ "$DRY_RUN" = false ]; then
+            log "Waiting for mount targets to be fully deleted..."
+            sleep 15
+        fi
+    fi
+    
+    # Delete access points
+    local access_points
+    access_points=$(safe_aws "aws efs describe-access-points \
+        --file-system-id \"$efs_id\" \
+        --query 'AccessPoints[].AccessPointId' \
+        --output text --region \"$AWS_REGION\"" "Finding access points for EFS $efs_id") || access_points=""
+    
+    if [ -n "$access_points" ] && [ "$access_points" != "None" ]; then
+        for ap_id in $access_points; do
+            if [ -n "$ap_id" ] && [ "$ap_id" != "None" ]; then
+                if [ "$DRY_RUN" = true ]; then
+                    info "Would delete access point: $ap_id"
+                    increment_counter "deleted"
+                else
+                    if safe_aws "aws efs delete-access-point --access-point-id \"$ap_id\" --region \"$AWS_REGION\"" "Deleting access point $ap_id" >/dev/null; then
+                        success "Deleted access point: $ap_id"
+                        increment_counter "deleted"
+                    else
+                        error "Failed to delete access point: $ap_id"
+                        increment_counter "failed"
+                    fi
+                fi
+            fi
+        done
+    fi
+    
+    # Delete the file system
+    if [ "$DRY_RUN" = true ]; then
+        info "Would delete EFS file system: $efs_id"
+        increment_counter "deleted"
+    else
+        if safe_aws "aws efs delete-file-system --file-system-id \"$efs_id\" --region \"$AWS_REGION\"" "Deleting EFS file system $efs_id" >/dev/null; then
+            success "Deleted EFS file system: $efs_name ($efs_id)"
+            increment_counter "deleted"
+        else
+            error "Failed to delete EFS file system: $efs_id"
+            increment_counter "failed"
+        fi
+    fi
+}
+
+cleanup_network_resources() {
+    step "Cleaning up network resources"
+    
+    if [ -z "$STACK_NAME" ]; then
+        info "No stack name provided, skipping network cleanup"
+        increment_counter "skipped"
+        return 0
+    fi
+    
+    # Cleanup security groups
+    local sg_ids
+    sg_ids=$(safe_aws "aws ec2 describe-security-groups \
+        --filters \"Name=group-name,Values=${STACK_NAME}-*\" \
+        --query 'SecurityGroups[].GroupId' \
+        --output text --region \"$AWS_REGION\"" "Finding security groups") || sg_ids=""
+    
+    if [ -n "$sg_ids" ] && [ "$sg_ids" != "None" ]; then
+        for sg_id in $sg_ids; do
+            if [ -n "$sg_id" ] && [ "$sg_id" != "None" ]; then
+                if [ "$DRY_RUN" = true ]; then
+                    info "Would delete security group: $sg_id"
+                    increment_counter "deleted"
+                else
+                    # Wait a bit for instances to be terminated first
+                    sleep 5
+                    if safe_aws "aws ec2 delete-security-group --group-id \"$sg_id\" --region \"$AWS_REGION\"" "Deleting security group $sg_id" >/dev/null; then
+                        success "Deleted security group: $sg_id"
+                        increment_counter "deleted"
+                    else
+                        error "Failed to delete security group: $sg_id"
+                        increment_counter "failed"
+                    fi
+                fi
+            fi
+        done
+    else
+        info "No security groups found for cleanup"
+        increment_counter "skipped"
+    fi
+    
+    # Cleanup load balancers
+    cleanup_load_balancers
+    
+    # Cleanup CloudFront distributions
+    cleanup_cloudfront_distributions
+}
+
+cleanup_load_balancers() {
+    step "Cleaning up Application Load Balancers"
+    
+    local alb_list
+    alb_list=$(safe_aws "aws elbv2 describe-load-balancers --output json --region \"$AWS_REGION\"" "Finding load balancers") || alb_list='{"LoadBalancers":[]}'
+    
+    if [ "$alb_list" != '{"LoadBalancers":[]}' ]; then
+        local alb_arns
+        alb_arns=$(echo "$alb_list" | jq -r ".LoadBalancers[]? | select(.LoadBalancerName | contains(\"${STACK_NAME}\")) | .LoadBalancerArn" 2>/dev/null || echo "")
+        
+        if [ -n "$alb_arns" ] && [ "$alb_arns" != "None" ] && [ "$alb_arns" != "null" ]; then
+            for alb_arn in $alb_arns; do
+                if [ -n "$alb_arn" ] && [ "$alb_arn" != "None" ] && [ "$alb_arn" != "null" ]; then
+                    # Delete associated target groups first
+                    local tg_list
+                    tg_list=$(safe_aws "aws elbv2 describe-target-groups --load-balancer-arn \"$alb_arn\" --output json --region \"$AWS_REGION\"" "Finding target groups for ALB") || tg_list='{"TargetGroups":[]}'
+                    
+                    if [ "$tg_list" != '{"TargetGroups":[]}' ]; then
+                        local tg_arns
+                        tg_arns=$(echo "$tg_list" | jq -r '.TargetGroups[]?.TargetGroupArn' 2>/dev/null || echo "")
+                        
+                        for tg_arn in $tg_arns; do
+                            if [ -n "$tg_arn" ] && [ "$tg_arn" != "null" ]; then
+                                if [ "$DRY_RUN" = true ]; then
+                                    info "Would delete target group: $tg_arn"
+                                    increment_counter "deleted"
+                                else
+                                    if safe_aws "aws elbv2 delete-target-group --target-group-arn \"$tg_arn\" --region \"$AWS_REGION\"" "Deleting target group $tg_arn" >/dev/null; then
+                                        success "Deleted target group: $tg_arn"
+                                        increment_counter "deleted"
+                                    else
+                                        error "Failed to delete target group: $tg_arn"
+                                        increment_counter "failed"
+                                    fi
+                                fi
+                            fi
+                        done
+                    fi
+                    
+                    # Delete the ALB
+                    if [ "$DRY_RUN" = true ]; then
+                        info "Would delete ALB: $alb_arn"
+                        increment_counter "deleted"
+                    else
+                        if safe_aws "aws elbv2 delete-load-balancer --load-balancer-arn \"$alb_arn\" --region \"$AWS_REGION\"" "Deleting ALB $alb_arn" >/dev/null; then
+                            success "Deleted ALB: $alb_arn"
+                            increment_counter "deleted"
+                        else
+                            error "Failed to delete ALB: $alb_arn"
+                            increment_counter "failed"
+                        fi
+                    fi
+                fi
+            done
+        else
+            info "No load balancers found for cleanup"
+            increment_counter "skipped"
+        fi
+    fi
+}
+
+cleanup_cloudfront_distributions() {
+    step "Cleaning up CloudFront distributions"
+    
+    local distributions
+    distributions=$(safe_aws "aws cloudfront list-distributions --output json --region \"$AWS_REGION\"" "Finding CloudFront distributions") || distributions='{"DistributionList":{"Items":[]}}'
+    
+    if [ "$distributions" != '{"DistributionList":{"Items":[]}}' ]; then
+        local dist_ids
+        dist_ids=$(echo "$distributions" | jq -r ".DistributionList.Items[]? | select(.Comment // \"\" | contains(\"${STACK_NAME}\")) | .Id" 2>/dev/null || echo "")
+        
+        if [ -n "$dist_ids" ] && [ "$dist_ids" != "None" ] && [ "$dist_ids" != "null" ]; then
+            for dist_id in $dist_ids; do
+                if [ -n "$dist_id" ] && [ "$dist_id" != "null" ] && [ "$dist_id" != "None" ]; then
+                    if [ "$DRY_RUN" = true ]; then
+                        info "Would disable CloudFront distribution: $dist_id"
+                        increment_counter "deleted"
+                    else
+                        # First disable the distribution
+                        local config
+                        config=$(safe_aws "aws cloudfront get-distribution-config --id \"$dist_id\" --query DistributionConfig --output json --region \"$AWS_REGION\"" "Getting CloudFront config") || continue
+                        local etag
+                        etag=$(safe_aws "aws cloudfront get-distribution-config --id \"$dist_id\" --query ETag --output text --region \"$AWS_REGION\"" "Getting CloudFront ETag") || continue
+                        
+                        if [ -n "$config" ] && [ -n "$etag" ] && [ "$config" != "null" ] && [ "$etag" != "null" ]; then
+                            echo "$config" | jq '.Enabled = false' > "/tmp/disabled-config-${dist_id}.json" 2>/dev/null || continue
+                            if safe_aws "aws cloudfront update-distribution \
+                                --id \"$dist_id\" \
+                                --distribution-config \"file:///tmp/disabled-config-${dist_id}.json\" \
+                                --if-match \"$etag\" --region \"$AWS_REGION\"" "Disabling CloudFront distribution $dist_id" >/dev/null; then
+                                success "Disabled CloudFront distribution: $dist_id (deletion will occur after deployment completes)"
+                                increment_counter "deleted"
+                            else
+                                error "Failed to disable CloudFront distribution: $dist_id"
+                                increment_counter "failed"
+                            fi
+                            rm -f "/tmp/disabled-config-${dist_id}.json"
+                        fi
+                    fi
+                fi
+            done
+        else
+            info "No CloudFront distributions found for cleanup"
+            increment_counter "skipped"
+        fi
+    fi
+}
+
+cleanup_monitoring_resources() {
+    step "Cleaning up monitoring resources"
+    
+    if [ -z "$STACK_NAME" ]; then
+        info "No stack name provided, skipping monitoring cleanup"
+        increment_counter "skipped"
+        return 0
+    fi
+    
+    # Cleanup CloudWatch alarms
+    local alarm_names
+    alarm_names=$(safe_aws "aws cloudwatch describe-alarms \
+        --query \"MetricAlarms[?starts_with(AlarmName, '${STACK_NAME}-')].AlarmName\" \
+        --output text --region \"$AWS_REGION\"" "Finding CloudWatch alarms") || alarm_names=""
+    
+    if [ -n "$alarm_names" ] && [ "$alarm_names" != "None" ]; then
+        for alarm_name in $alarm_names; do
+            if [ -n "$alarm_name" ]; then
+                if [ "$DRY_RUN" = true ]; then
+                    info "Would delete alarm: $alarm_name"
+                    increment_counter "deleted"
+                else
+                    if safe_aws "aws cloudwatch delete-alarms --alarm-names \"$alarm_name\" --region \"$AWS_REGION\"" "Deleting CloudWatch alarm $alarm_name" >/dev/null; then
+                        success "Deleted alarm: $alarm_name"
+                        increment_counter "deleted"
+                    else
+                        error "Failed to delete alarm: $alarm_name"
+                        increment_counter "failed"
+                    fi
+                fi
+            fi
+        done
+    else
+        info "No CloudWatch alarms found for cleanup"
+        increment_counter "skipped"
+    fi
+    
+    # Cleanup CloudWatch log groups
+    local log_groups
+    log_groups=$(safe_aws "aws logs describe-log-groups \
+        --query \"logGroups[?contains(logGroupName, '${STACK_NAME}')].logGroupName\" \
+        --output text --region \"$AWS_REGION\"" "Finding CloudWatch log groups") || log_groups=""
+    
+    if [ -n "$log_groups" ] && [ "$log_groups" != "None" ]; then
+        for log_group in $log_groups; do
+            if [ -n "$log_group" ]; then
+                if [ "$DRY_RUN" = true ]; then
+                    info "Would delete log group: $log_group"
+                    increment_counter "deleted"
+                else
+                    if safe_aws "aws logs delete-log-group --log-group-name \"$log_group\" --region \"$AWS_REGION\"" "Deleting CloudWatch log group $log_group" >/dev/null; then
+                        success "Deleted log group: $log_group"
+                        increment_counter "deleted"
+                    else
+                        error "Failed to delete log group: $log_group"
+                        increment_counter "failed"
+                    fi
+                fi
+            fi
+        done
+    else
+        info "No CloudWatch log groups found for cleanup"
+        increment_counter "skipped"
+    fi
+}
+
+cleanup_iam_resources() {
+    step "Cleaning up IAM resources"
+    
+    if [ -z "$STACK_NAME" ]; then
+        info "No stack name provided, skipping IAM cleanup"
+        increment_counter "skipped"
+        return 0
+    fi
+    
+    # Get the profile name based on stack name
+    local profile_name=""
+    if [[ "${STACK_NAME}" =~ ^[0-9] ]]; then
+        local clean_name
+        clean_name=$(echo "${STACK_NAME}" | sed 's/[^a-zA-Z0-9]//g')
+        profile_name="app-${clean_name}-profile"
+    else
+        profile_name="${STACK_NAME}-instance-profile"
+    fi
+    
+    # Remove role from instance profile first
+    if safe_aws "aws iam get-instance-profile --instance-profile-name \"$profile_name\"" "Checking instance profile existence" &>/dev/null; then
+        log "Removing roles from instance profile: $profile_name"
+        local role_names
+        role_names=$(safe_aws "aws iam get-instance-profile --instance-profile-name \"$profile_name\" \
+            --query 'InstanceProfile.Roles[].RoleName' --output text" "Getting roles from instance profile") || role_names=""
+        
+        for role_name in $role_names; do
+            if [ -n "$role_name" ]; then
+                if [ "$DRY_RUN" = true ]; then
+                    info "Would remove role $role_name from instance profile"
+                    increment_counter "deleted"
+                else
+                    if safe_aws "aws iam remove-role-from-instance-profile \
+                        --instance-profile-name \"$profile_name\" \
+                        --role-name \"$role_name\"" "Removing role from instance profile" >/dev/null; then
+                        success "Removed role $role_name from instance profile"
+                        increment_counter "deleted"
+                    else
+                        error "Failed to remove role $role_name from instance profile"
+                        increment_counter "failed"
+                    fi
+                fi
+            fi
+        done
+        
+        # Delete instance profile
+        if [ "$DRY_RUN" = true ]; then
+            info "Would delete instance profile: $profile_name"
+            increment_counter "deleted"
+        else
+            if safe_aws "aws iam delete-instance-profile --instance-profile-name \"$profile_name\"" "Deleting instance profile $profile_name" >/dev/null; then
+                success "Deleted instance profile: $profile_name"
+                increment_counter "deleted"
+            else
+                error "Failed to delete instance profile: $profile_name"
+                increment_counter "failed"
+            fi
+        fi
+    else
+        info "No instance profile found: $profile_name"
+        increment_counter "skipped"
+    fi
+    
+    # Delete IAM role
+    local role_name="${STACK_NAME}-role"
+    if safe_aws "aws iam get-role --role-name \"$role_name\"" "Checking IAM role existence" &>/dev/null; then
+        log "Cleaning up IAM role: $role_name"
+        
+        # Detach policies first
+        local policy_arns
+        policy_arns=$(safe_aws "aws iam list-attached-role-policies --role-name \"$role_name\" \
+            --query 'AttachedPolicies[].PolicyArn' --output text" "Finding attached policies") || policy_arns=""
+        
+        for policy_arn in $policy_arns; do
+            if [ -n "$policy_arn" ]; then
+                if [ "$DRY_RUN" = true ]; then
+                    info "Would detach policy: $policy_arn"
+                    increment_counter "deleted"
+                else
+                    if safe_aws "aws iam detach-role-policy --role-name \"$role_name\" --policy-arn \"$policy_arn\"" "Detaching policy $policy_arn" >/dev/null; then
+                        success "Detached policy: $policy_arn"
+                        increment_counter "deleted"
+                    else
+                        error "Failed to detach policy: $policy_arn"
+                        increment_counter "failed"
+                    fi
+                fi
+            fi
+        done
+        
+        # Delete the role
+        if [ "$DRY_RUN" = true ]; then
+            info "Would delete IAM role: $role_name"
+            increment_counter "deleted"
+        else
+            if safe_aws "aws iam delete-role --role-name \"$role_name\"" "Deleting IAM role $role_name" >/dev/null; then
+                success "Deleted IAM role: $role_name"
+                increment_counter "deleted"
+            else
+                error "Failed to delete IAM role: $role_name"
+                increment_counter "failed"
+            fi
+        fi
+    else
+        info "No IAM role found: $role_name"
+        increment_counter "skipped"
+    fi
+}
+
+cleanup_storage_resources() {
+    step "Cleaning up storage resources"
+    
+    if [ -z "$STACK_NAME" ]; then
+        info "No stack name provided, skipping storage cleanup"
+        increment_counter "skipped"
+        return 0
+    fi
+    
+    # Cleanup EBS volumes
+    local volume_ids
+    volume_ids=$(safe_aws "aws ec2 describe-volumes \
+        --filters \"Name=tag:Stack,Values=${STACK_NAME}\" \"Name=status,Values=available\" \
+        --query 'Volumes[].VolumeId' \
+        --output text --region \"$AWS_REGION\"" "Finding EBS volumes") || volume_ids=""
+    
+    if [ -n "$volume_ids" ] && [ "$volume_ids" != "None" ]; then
+        for volume_id in $volume_ids; do
+            if [ -n "$volume_id" ] && [ "$volume_id" != "None" ]; then
+                if [ "$DRY_RUN" = true ]; then
+                    info "Would delete EBS volume: $volume_id"
+                    increment_counter "deleted"
+                else
+                    if safe_aws "aws ec2 delete-volume --volume-id \"$volume_id\" --region \"$AWS_REGION\"" "Deleting EBS volume $volume_id" >/dev/null; then
+                        success "Deleted EBS volume: $volume_id"
+                        increment_counter "deleted"
+                    else
+                        error "Failed to delete EBS volume: $volume_id"
+                        increment_counter "failed"
+                    fi
+                fi
+            fi
+        done
+    else
+        info "No EBS volumes found for cleanup"
+        increment_counter "skipped"
+    fi
+    
+    # Cleanup snapshots
+    local snapshot_ids
+    snapshot_ids=$(safe_aws "aws ec2 describe-snapshots \
+        --owner-ids self \
+        --filters \"Name=tag:Stack,Values=${STACK_NAME}\" \
+        --query 'Snapshots[].SnapshotId' \
+        --output text --region \"$AWS_REGION\"" "Finding EBS snapshots") || snapshot_ids=""
+    
+    if [ -n "$snapshot_ids" ] && [ "$snapshot_ids" != "None" ]; then
+        for snapshot_id in $snapshot_ids; do
+            if [ -n "$snapshot_id" ] && [ "$snapshot_id" != "None" ]; then
+                if [ "$DRY_RUN" = true ]; then
+                    info "Would delete snapshot: $snapshot_id"
+                    increment_counter "deleted"
+                else
+                    if safe_aws "aws ec2 delete-snapshot --snapshot-id \"$snapshot_id\" --region \"$AWS_REGION\"" "Deleting EBS snapshot $snapshot_id" >/dev/null; then
+                        success "Deleted snapshot: $snapshot_id"
+                        increment_counter "deleted"
+                    else
+                        error "Failed to delete snapshot: $snapshot_id"
+                        increment_counter "failed"
+                    fi
+                fi
+            fi
+        done
+    else
+        info "No snapshots found for cleanup"
+        increment_counter "skipped"
+    fi
+}
+
+# =============================================================================
+# MAIN EXECUTION
+# =============================================================================
+
+main() {
+    echo "=============================================="
+    echo "🗑️  UNIFIED AWS RESOURCE CLEANUP"
+    echo "=============================================="
+    
+    # Parse command line arguments
+    parse_arguments "$@"
+    
+    # Validate prerequisites
+    if ! command -v aws &>/dev/null; then
+        error "AWS CLI is not installed or not in PATH"
+        exit 1
+    fi
+    
+    if ! aws sts get-caller-identity &>/dev/null; then
+        error "AWS credentials are not configured or invalid"
+        exit 1
+    fi
+    
+    # Show configuration
+    info "Configuration:"
+    info "  Stack Name: ${STACK_NAME:-'N/A'}"
+    info "  Mode: $CLEANUP_MODE"
+    info "  Region: $AWS_REGION"
+    info "  Dry Run: $DRY_RUN"
+    info "  Force: $FORCE"
+    info "  Verbose: $VERBOSE"
+    
+    # Confirm cleanup unless force is enabled
+    confirm_cleanup
+    
+    # Execute cleanup based on mode and resource types
+    if [ "$CLEANUP_INSTANCES" = true ]; then
+        cleanup_ec2_instances
+    fi
+    
+    if [ "$CLEANUP_EFS" = true ]; then
+        cleanup_efs_resources
+    fi
+    
+    if [ "$CLEANUP_NETWORK" = true ]; then
+        cleanup_network_resources
+    fi
+    
+    if [ "$CLEANUP_MONITORING" = true ]; then
+        cleanup_monitoring_resources
+    fi
+    
+    if [ "$CLEANUP_IAM" = true ]; then
+        cleanup_iam_resources
+    fi
+    
+    if [ "$CLEANUP_STORAGE" = true ]; then
+        cleanup_storage_resources
+    fi
+    
+    # Print summary
+    print_summary
+}
+
+# Run main function with all arguments
+main "$@" 

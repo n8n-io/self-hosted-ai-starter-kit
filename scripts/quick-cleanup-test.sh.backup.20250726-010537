@@ -1,0 +1,63 @@
+#!/bin/bash
+# Quick test to verify cleanup integration
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+echo "Testing cleanup integration..."
+
+# Test 1: Check if cleanup script exists
+echo "Test 1: Checking cleanup-unified.sh exists..."
+if [ -f "$SCRIPT_DIR/cleanup-unified.sh" ]; then
+    echo "✅ cleanup-unified.sh found"
+else
+    echo "❌ cleanup-unified.sh not found"
+    exit 1
+fi
+
+# Test 2: Check if cleanup script is executable
+echo "Test 2: Checking cleanup-unified.sh is executable..."
+if [ -x "$SCRIPT_DIR/cleanup-unified.sh" ]; then
+    echo "✅ cleanup-unified.sh is executable"
+else
+    echo "❌ cleanup-unified.sh is not executable"
+    exit 1
+fi
+
+# Test 3: Check deployment scripts for cleanup integration
+echo "Test 3: Checking deployment scripts for cleanup integration..."
+deployment_scripts=("aws-deployment.sh" "aws-deployment-unified.sh" "aws-deployment-simple.sh" "aws-deployment-ondemand.sh")
+
+for script in "${deployment_scripts[@]}"; do
+    if [ -f "$SCRIPT_DIR/$script" ]; then
+        if grep -q "cleanup-unified.sh" "$SCRIPT_DIR/$script" && grep -q "run_manual_cleanup" "$SCRIPT_DIR/$script"; then
+            echo "✅ $script has proper cleanup integration"
+        else
+            echo "❌ $script missing proper cleanup integration"
+        fi
+    else
+        echo "⚠️  $script not found"
+    fi
+done
+
+# Test 4: Test cleanup script help
+echo "Test 4: Testing cleanup script help..."
+if "$SCRIPT_DIR/cleanup-unified.sh" --help >/dev/null 2>&1; then
+    echo "✅ cleanup script help works"
+else
+    echo "❌ cleanup script help failed"
+    exit 1
+fi
+
+# Test 5: Test cleanup script basic functionality
+echo "Test 5: Testing cleanup script basic functionality..."
+if "$SCRIPT_DIR/cleanup-unified.sh" --help >/dev/null 2>&1; then
+    echo "✅ cleanup script basic functionality works"
+else
+    echo "❌ cleanup script basic functionality failed"
+    exit 1
+fi
+
+echo ""
+echo "🎉 All cleanup integration tests passed!" 

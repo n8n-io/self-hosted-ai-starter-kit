@@ -6,7 +6,7 @@ The cleanup scripts have been evaluated, combined, and significantly improved in
 
 ## Problems with Original Scripts
 
-### 1. **cleanup-stack.sh**
+### 1. **cleanup-consolidated.sh**
 - **Limited resource detection**: Only looked for specific tag patterns
 - **No dry-run capability**: Couldn't preview what would be deleted
 - **Poor error handling**: Failed silently on many operations
@@ -26,7 +26,7 @@ The cleanup scripts have been evaluated, combined, and significantly improved in
 - **No safety features**: Dangerous for production use
 - **Limited scope**: Only handled EFS resources
 
-## Unified Solution: `cleanup-unified.sh`
+## Unified Solution: `cleanup-consolidated.sh`
 
 ### Key Improvements
 
@@ -86,37 +86,37 @@ The cleanup scripts have been evaluated, combined, and significantly improved in
 ### Basic Usage
 ```bash
 # Cleanup a specific stack (with confirmation)
-./scripts/cleanup-unified.sh 052
+./scripts/cleanup-consolidated.sh 052
 
 # Force cleanup without confirmation
-./scripts/cleanup-unified.sh --force 052
+./scripts/cleanup-consolidated.sh --force 052
 
 # Dry-run to see what would be deleted
-./scripts/cleanup-unified.sh --dry-run 052
+./scripts/cleanup-consolidated.sh --dry-run 052
 ```
 
 ### Advanced Usage
 ```bash
 # Cleanup only EFS resources
-./scripts/cleanup-unified.sh --mode specific --efs 052
+./scripts/cleanup-consolidated.sh --mode specific --efs 052
 
 # Cleanup multiple resource types
-./scripts/cleanup-unified.sh --mode specific --efs --instances --iam 052
+./scripts/cleanup-consolidated.sh --mode specific --efs --instances --iam 052
 
 # Cleanup in different region
-./scripts/cleanup-unified.sh --region us-west-2 052
+./scripts/cleanup-consolidated.sh --region us-west-2 052
 
 # Verbose output for debugging
-./scripts/cleanup-unified.sh --verbose --dry-run 052
+./scripts/cleanup-consolidated.sh --verbose --dry-run 052
 ```
 
 ### Production Safety
 ```bash
 # Always use dry-run first in production
-./scripts/cleanup-unified.sh --dry-run --verbose 052
+./scripts/cleanup-consolidated.sh --dry-run --verbose 052
 
 # Review the output, then run with force if correct
-./scripts/cleanup-unified.sh --force 052
+./scripts/cleanup-consolidated.sh --force 052
 ```
 
 ## Resource Detection Strategies
@@ -177,7 +177,7 @@ fi
 ## Testing and Validation
 
 ### Comprehensive Test Suite
-The `test-cleanup-unified.sh` script provides:
+The `test-cleanup-consolidated.sh` script provides:
 
 1. **Functionality Tests**: All script features tested
 2. **Safety Tests**: Confirmation prompts and dry-run validation
@@ -210,12 +210,12 @@ The `test-cleanup-unified.sh` script provides:
 ### Replace Old Scripts
 ```bash
 # Old way (multiple scripts)
-./scripts/cleanup-stack.sh 052
+./scripts/cleanup-consolidated.sh 052
 ./scripts/cleanup-efs.sh numbered
 ./scripts/cleanup-remaining-efs.sh
 
 # New way (single unified script)
-./scripts/cleanup-unified.sh 052
+./scripts/cleanup-consolidated.sh 052
 ```
 
 ### Backward Compatibility
@@ -229,22 +229,22 @@ The unified script maintains compatibility with existing workflows:
 ### 1. Always Use Dry-Run First
 ```bash
 # Preview what will be deleted
-./scripts/cleanup-unified.sh --dry-run --verbose 052
+./scripts/cleanup-consolidated.sh --dry-run --verbose 052
 ```
 
 ### 2. Use Appropriate Modes
 ```bash
 # For specific resource types
-./scripts/cleanup-unified.sh --mode specific --efs 052
+./scripts/cleanup-consolidated.sh --mode specific --efs 052
 
 # For complete stack cleanup
-./scripts/cleanup-unified.sh --mode stack 052
+./scripts/cleanup-consolidated.sh --mode stack 052
 ```
 
 ### 3. Monitor Progress
 ```bash
 # Use verbose mode for detailed output
-./scripts/cleanup-unified.sh --verbose 052
+./scripts/cleanup-consolidated.sh --verbose 052
 ```
 
 ### 4. Handle Errors Gracefully

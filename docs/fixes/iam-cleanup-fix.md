@@ -2,7 +2,7 @@
 
 ## Problem Description
 
-The `cleanup-stack.sh` script was failing with multiple IAM-related DeleteConflict errors:
+The `cleanup-consolidated.sh` script was failing with multiple IAM-related DeleteConflict errors:
 
 **Error 1**: Instance Profile Association
 ```
@@ -39,7 +39,7 @@ The original script only handled managed policies and basic instance profile rem
 
 ## Solution Implemented
 
-### 1. Enhanced `cleanup-stack.sh`
+### 1. Enhanced `cleanup-consolidated.sh`
 
 Updated the cleanup script with improved IAM cleanup logic that:
 
@@ -68,7 +68,7 @@ Added multiple test scripts to validate the complete fix:
 
 ## Key Changes Made
 
-### `scripts/cleanup-stack.sh`
+### `scripts/cleanup-consolidated.sh`
 
 ```bash
 # OLD: Inline IAM cleanup with potential race conditions
@@ -109,7 +109,7 @@ The fix is automatically applied when running:
 
 ```bash
 # Using the cleanup script directly
-./scripts/cleanup-stack.sh 017
+./scripts/cleanup-consolidated.sh 017
 
 # Using the Make target
 make destroy STACK_NAME=017
@@ -134,7 +134,7 @@ None. The fix is backward compatible and improves the existing cleanup functiona
 
 ## Related Files
 
-- `scripts/cleanup-stack.sh` - Main cleanup script (enhanced)
+- `scripts/cleanup-consolidated.sh` - Main cleanup script (enhanced)
 - `lib/aws-deployment-common.sh` - Shared library (added comprehensive function)
 - `tests/test-cleanup-iam.sh` - General IAM cleanup validation
 - `tests/test-cleanup-017.sh` - Specific stack test

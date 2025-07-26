@@ -15,6 +15,15 @@ source "$LIB_DIR/error-handling.sh"
 source "$LIB_DIR/aws-deployment-common.sh"
 source "$LIB_DIR/aws-config.sh"
 
+# Load the new centralized configuration management system
+if [ -f "$LIB_DIR/config-management.sh" ]; then
+    source "$LIB_DIR/config-management.sh"
+    CONFIG_MANAGEMENT_AVAILABLE=true
+else
+    CONFIG_MANAGEMENT_AVAILABLE=false
+    warning "Centralized configuration management not available, using legacy mode"
+fi
+
 # Configuration
 STACK_NAME="${1:-33}"
 AWS_REGION="${AWS_REGION:-us-east-1}"

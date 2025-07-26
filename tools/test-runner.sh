@@ -45,12 +45,13 @@ get_test_category_description() {
         "performance") echo "$TEST_CATEGORIES_PERFORMANCE" ;;
         "deployment") echo "$TEST_CATEGORIES_DEPLOYMENT" ;;
         "smoke") echo "$TEST_CATEGORIES_SMOKE" ;;
+        "config") echo "Configuration management tests" ;;
         *) echo "Unknown test category" ;;
     esac
 }
 
 # Array of available test categories
-readonly AVAILABLE_TEST_CATEGORIES=("unit" "integration" "security" "performance" "deployment" "smoke")
+readonly AVAILABLE_TEST_CATEGORIES=("unit" "integration" "security" "performance" "deployment" "smoke" "config")
 
 # =============================================================================
 # SETUP AND CLEANUP
@@ -72,23 +73,25 @@ setup_test_environment() {
 }
 EOF
     
-    # Set up Python virtual environment if needed
-    if [ "${USE_VENV:-true}" = "true" ] && [ ! -d "$PROJECT_ROOT/.test-venv" ]; then
-        log "Creating Python virtual environment for testing..."
-        python3 -m venv "$PROJECT_ROOT/.test-venv"
-        source "$PROJECT_ROOT/.test-venv/bin/activate"
-        pip install --upgrade pip
-        
-        # Install test dependencies
-        pip install pytest pytest-cov pytest-mock pytest-xdist black flake8 bandit safety
-        
-        # Install project dependencies if requirements.txt exists
-        if [ -f "$PROJECT_ROOT/requirements.txt" ]; then
-            pip install -r "$PROJECT_ROOT/requirements.txt"
+    # Shell-based testing - no Python virtual environment needed
+    log "Using shell-based testing framework..."
+    
+    # Check for required shell tools
+    local required_tools=("bash" "grep" "find")
+    local optional_tools=("bandit" "safety" "trivy")
+    
+    for tool in "${required_tools[@]}"; do
+        if ! command -v "$tool" >/dev/null 2>&1; then
+            log_error "Required tool not found: $tool"
+            exit 1
         fi
-    elif [ "${USE_VENV:-true}" = "true" ]; then
-        source "$PROJECT_ROOT/.test-venv/bin/activate"
-    fi
+    done
+    
+    for tool in "${optional_tools[@]}"; do
+        if ! command -v "$tool" >/dev/null 2>&1; then
+            log_warning "Optional security tool not available: $tool"
+        fi
+    done
     
     success "Test environment setup complete"
 }
@@ -96,14 +99,9 @@ EOF
 cleanup_test_environment() {
     log "Cleaning up test environment..."
     
-    # Deactivate virtual environment
-    if [ "${USE_VENV:-true}" = "true" ] && [ -n "${VIRTUAL_ENV:-}" ]; then
-        deactivate || true
-    fi
-    
     # Clean up temporary files
-    find "$PROJECT_ROOT" -name "*.pyc" -delete 2>/dev/null || true
-    find "$PROJECT_ROOT" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+    find "$PROJECT_ROOT" -name "*.tmp" -delete 2>/dev/null || true
+    find "$PROJECT_ROOT" -name "*.temp" -delete 2>/dev/null || true
     
     success "Test environment cleanup complete"
 }
@@ -115,45 +113,87 @@ cleanup_test_environment() {
 run_unit_tests() {
     log "Running unit tests..."
     
-    local test_dir="$PROJECT_ROOT/tests/unit"
     local exit_code=0
     
-    if [ ! -d "$test_dir" ]; then
-        log_warning "Unit test directory not found: $test_dir"
-        return 0
-    fi
-    
-    # Run Python unit tests with pytest
-    if command -v pytest >/dev/null 2>&1; then
-        info "Running Python unit tests with pytest..."
+    # Run security validation tests
+    local security_test="$PROJECT_ROOT/tests/test-security-validation.sh"
+    if [ -f "$security_test" ]; then
+        info "Running security validation unit tests..."
         
-        if pytest "$test_dir" \
-            --verbose \
-            --tb=short \
-            --cov="$PROJECT_ROOT/scripts" \
-            --cov="$PROJECT_ROOT/lib" \
-            --cov-report=html:"$COVERAGE_DIR/unit" \
-            --cov-report=xml:"$COVERAGE_DIR/unit-coverage.xml" \
-            --junitxml="$TEST_REPORTS_DIR/unit-tests.xml" \
-            --json-report --json-report-file="$TEST_REPORTS_DIR/unit-results.json"; then
-            success "Python unit tests passed"
+        if "$security_test"; then
+            success "Security validation tests passed"
         else
-            log_error "Python unit tests failed"
+            log_error "Security validation tests failed"
             exit_code=1
         fi
+    else
+        log_warning "Security validation test not found: $security_test"
     fi
     
-    # Run shell script unit tests (bats if available)
-    if command -v bats >/dev/null 2>&1; then
-        info "Running shell script tests with bats..."
+    # Run configuration management tests
+    local config_test="$PROJECT_ROOT/tests/test-config-management.sh"
+    if [ -f "$config_test" ]; then
+        info "Running configuration management unit tests..."
         
-        find "$test_dir" -name "*.bats" | while read -r bats_file; do
-            if ! bats "$bats_file"; then
-                log_error "Shell test failed: $bats_file"
-                exit_code=1
+        if "$config_test"; then
+            success "Configuration management tests passed"
+        else
+            log_error "Configuration management tests failed"
+            exit_code=1
+        fi
+    else
+        log_warning "Configuration management test not found: $config_test"
+    fi
+    
+    # Run library unit tests (new shell-based framework)
+    info "Running library unit tests..."
+    local lib_test_dir="$PROJECT_ROOT/tests/lib"
+    if [ -d "$lib_test_dir" ]; then
+        local lib_unit_tests=(
+            "$lib_test_dir/test-aws-deployment-common.sh"
+            "$lib_test_dir/test-error-handling.sh"
+            "$lib_test_dir/test-aws-config.sh"
+            "$lib_test_dir/test-spot-instance.sh"
+            "$lib_test_dir/test-docker-compose-installer.sh"
+            "$lib_test_dir/test-instance-libraries.sh"
+        )
+        
+        for test_script in "${lib_unit_tests[@]}"; do
+            if [ -f "$test_script" ]; then
+                local test_name=$(basename "$test_script" .sh)
+                info "Running library unit test: $test_name"
+                
+                if "$test_script"; then
+                    success "Library unit test passed: $test_name"
+                else
+                    log_error "Library unit test failed: $test_name"
+                    exit_code=1
+                fi
+            else
+                log_warning "Library unit test not found: $test_script"
             fi
         done
+    else
+        log_warning "Library unit test directory not found: $lib_test_dir"
     fi
+    
+    # Run other unit test scripts
+    for test_script in "$PROJECT_ROOT/tests"/test-*.sh; do
+        [ -f "$test_script" ] || continue
+        [ "$test_script" == "$security_test" ] && continue
+        
+        local test_name=$(basename "$test_script" .sh)
+        if [[ "$test_name" == *"unit"* ]] || [[ "$test_name" == *"security"* ]]; then
+            info "Running unit test: $test_name"
+            
+            if "$test_script"; then
+                success "Unit test passed: $test_name"
+            else
+                log_error "Unit test failed: $test_name"
+                exit_code=1
+            fi
+        fi
+    done
     
     # Update results
     update_test_results "unit" "$exit_code"
@@ -168,35 +208,49 @@ run_unit_tests() {
 run_integration_tests() {
     log "Running integration tests..."
     
-    local test_dir="$PROJECT_ROOT/tests/integration"
     local exit_code=0
-    
-    if [ ! -d "$test_dir" ]; then
-        log_warning "Integration test directory not found: $test_dir"
-        return 0
-    fi
     
     # Check if Docker is available for integration tests
     if ! command -v docker >/dev/null 2>&1; then
-        log_warning "Docker not available - skipping container integration tests"
+        log_warning "Docker not available - some integration tests may be skipped"
     fi
     
-    # Run integration tests with pytest
-    if command -v pytest >/dev/null 2>&1; then
-        info "Running integration tests with pytest..."
+    # Run deployment workflow integration tests
+    local deployment_test="$PROJECT_ROOT/tests/test-deployment-workflow.sh"
+    if [ -f "$deployment_test" ]; then
+        info "Running deployment workflow integration tests..."
         
-        if pytest "$test_dir" \
-            --verbose \
-            --tb=short \
-            --maxfail=5 \
-            --junitxml="$TEST_REPORTS_DIR/integration-tests.xml" \
-            --json-report --json-report-file="$TEST_REPORTS_DIR/integration-results.json"; then
-            success "Integration tests passed"
+        if "$deployment_test"; then
+            success "Deployment workflow tests passed"
         else
-            log_error "Integration tests failed"
+            log_error "Deployment workflow tests failed"
             exit_code=1
         fi
+    else
+        log_warning "Deployment workflow test not found: $deployment_test"
     fi
+    
+    # Run other existing integration test scripts
+    local integration_scripts=(
+        "$PROJECT_ROOT/tests/test-alb-cloudfront.sh"
+        "$PROJECT_ROOT/tests/test-compose-validation.sh"
+        "$PROJECT_ROOT/tests/test-docker-config.sh"
+        "$PROJECT_ROOT/tests/test-image-config.sh"
+    )
+    
+    for test_script in "${integration_scripts[@]}"; do
+        if [ -f "$test_script" ]; then
+            local test_name=$(basename "$test_script" .sh)
+            info "Running integration test: $test_name"
+            
+            if "$test_script"; then
+                success "Integration test passed: $test_name"
+            else
+                log_error "Integration test failed: $test_name"
+                exit_code=1
+            fi
+        fi
+    done
     
     # Update results
     update_test_results "integration" "$exit_code"
@@ -417,6 +471,73 @@ run_deployment_tests() {
     
     # Update results
     update_test_results "deployment" "$exit_code"
+    
+    return $exit_code
+}
+
+# =============================================================================
+# CONFIGURATION MANAGEMENT TESTS
+# =============================================================================
+
+run_config_tests() {
+    log "Running configuration management tests..."
+    
+    local exit_code=0
+    
+    # Test configuration management system
+    info "Testing centralized configuration management..."
+    
+    if [ -f "$PROJECT_ROOT/tests/test-config-management.sh" ]; then
+        info "Running configuration management test suite..."
+        
+        if timeout 60s bash "$PROJECT_ROOT/tests/test-config-management.sh"; then
+            success "Configuration management tests passed"
+        else
+            error "Configuration management tests failed"
+            exit_code=1
+        fi
+    else
+        log_warning "Configuration management test suite not found"
+    fi
+    
+    # Test configuration validation
+    info "Testing configuration validation..."
+    
+    if [ -f "$PROJECT_ROOT/tools/validate-config.sh" ]; then
+        if timeout 30s "$PROJECT_ROOT/tools/validate-config.sh" >/dev/null 2>&1; then
+            success "Configuration validation works"
+        else
+            error "Configuration validation failed"
+            exit_code=1
+        fi
+    else
+        log_warning "Configuration validation script not found"
+    fi
+    
+    # Test environment file generation
+    info "Testing environment file generation..."
+    
+    if [ -f "$PROJECT_ROOT/lib/config-management.sh" ]; then
+        # Source the config management library
+        source "$PROJECT_ROOT/lib/config-management.sh"
+        
+        # Test environment file generation
+        local test_env_file="/tmp/test-env-$$"
+        if generate_environment_file "development" "$test_env_file" >/dev/null 2>&1; then
+            if [ -f "$test_env_file" ]; then
+                success "Environment file generation works"
+                rm -f "$test_env_file"
+            else
+                error "Environment file generation failed"
+                exit_code=1
+            fi
+        else
+            error "Environment file generation failed"
+            exit_code=1
+        fi
+    else
+        log_warning "Configuration management library not found"
+    fi
     
     return $exit_code
 }

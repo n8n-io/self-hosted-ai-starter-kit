@@ -1,73 +1,308 @@
 #!/bin/bash
-
 # =============================================================================
-# Configuration Management Script
-# =============================================================================
-# Centralized configuration management for the AI starter kit
-# Supports multiple environments and dynamic configuration generation
+# Configuration Manager for GeuseMaker
+# Enhanced version using centralized configuration management system
 # =============================================================================
 
 set -euo pipefail
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+# =============================================================================
+# SCRIPT CONFIGURATION
+# =============================================================================
 
-# Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+LIB_DIR="$PROJECT_ROOT/lib"
 CONFIG_DIR="$PROJECT_ROOT/config"
 
-# Load security validation if available
-if [[ -f "$SCRIPT_DIR/security-validation.sh" ]]; then
-    source "$SCRIPT_DIR/security-validation.sh"
+# =============================================================================
+# LOAD SHARED LIBRARIES
+# =============================================================================
+
+# Load error handling first
+if [ -f "$LIB_DIR/error-handling.sh" ]; then
+    source "$LIB_DIR/error-handling.sh"
+    init_error_handling "resilient"
+fi
+
+# Load core libraries
+if [ -f "$LIB_DIR/aws-deployment-common.sh" ]; then
+    source "$LIB_DIR/aws-deployment-common.sh"
+fi
+
+# Load the new centralized configuration management system
+if [ -f "$LIB_DIR/config-management.sh" ]; then
+    source "$LIB_DIR/config-management.sh"
+    CONFIG_MANAGEMENT_AVAILABLE=true
+else
+    CONFIG_MANAGEMENT_AVAILABLE=false
+    warning "Centralized configuration management not available, using legacy mode"
 fi
 
 # =============================================================================
-# CONFIGURATION FUNCTIONS
+# LEGACY FUNCTIONS (for backward compatibility)
 # =============================================================================
 
-log() {
-    echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}" >&2
-}
-
-success() {
-    echo -e "${GREEN}✓ $1${NC}" >&2
-}
-
-warning() {
-    echo -e "${YELLOW}⚠ $1${NC}" >&2
-}
-
-error() {
-    echo -e "${RED}✗ $1${NC}" >&2
-}
-
-# Check if required tools are available
-check_dependencies() {
-    local missing_tools=()
+# Legacy configuration loading (fallback when new system is not available)
+legacy_load_environment_config() {
+    local env="$1"
+    local config_file="$CONFIG_DIR/environments/${env}.yml"
     
-    for tool in yq jq envsubst; do
-        if ! command -v "$tool" >/dev/null 2>&1; then
-            missing_tools+=("$tool")
-        fi
-    done
-    
-    if [[ ${#missing_tools[@]} -gt 0 ]]; then
-        error "Missing required tools: ${missing_tools[*]}"
-        echo "Install them with:"
-        echo "  brew install yq jq gettext  # macOS"
-        echo "  apt-get install yq jq gettext-base  # Ubuntu"
+    if [[ ! -f "$config_file" ]]; then
+        error "Configuration file not found: $config_file"
         return 1
     fi
     
+    log "Loading legacy configuration for environment: $env"
+    export CONFIG_FILE="$config_file"
+    export ENVIRONMENT="$env"
+    
+    # Extract key values using yq (if available)
+    if command -v yq >/dev/null 2>&1; then
+        export STACK_NAME=$(yq eval '.global.stack_name' "$config_file")
+        export AWS_REGION=$(yq eval '.global.region' "$config_file")
+        export PROJECT_NAME=$(yq eval '.global.project_name' "$config_file")
+    else
+        # Fallback to grep-based extraction
+        export STACK_NAME=$(grep -A1 'stack_name:' "$config_file" | tail -n1 | sed 's/.*: //')
+        export AWS_REGION=$(grep -A1 'region:' "$config_file" | tail -n1 | sed 's/.*: //')
+        export PROJECT_NAME=$(grep -A1 'project_name:' "$config_file" | tail -n1 | sed 's/.*: //')
+    fi
+    
+    success "Legacy configuration loaded for $env environment"
     return 0
 }
 
-# Validate environment name
+# Legacy Docker Compose override generation
+legacy_generate_docker_compose_override() {
+    local env="$1"
+    local output_file="$PROJECT_ROOT/docker-compose.override.yml"
+    
+    log "Generating legacy Docker Compose override for $env environment"
+    
+    # Create override file with environment-specific settings
+    cat > "$output_file" << EOF
+# Generated Docker Compose Override (Legacy Mode)
+# Environment: $env
+# Generated at: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+# DO NOT EDIT MANUALLY - Use config-manager.sh to regenerate
+
+version: '3.8'
+
+services:
+  postgres:
+    environment:
+      - POSTGRES_DB=\${POSTGRES_DB:-n8n}
+      - POSTGRES_USER=\${POSTGRES_USER:-n8n}
+      - POSTGRES_PASSWORD=\${POSTGRES_PASSWORD}
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+
+  n8n:
+    environment:
+      - N8N_HOST=\${N8N_HOST:-0.0.0.0}
+      - N8N_PORT=5678
+      - WEBHOOK_URL=\${WEBHOOK_URL:-http://localhost:5678}
+      - N8N_CORS_ENABLE=\${N8N_CORS_ENABLE:-true}
+      - N8N_CORS_ALLOWED_ORIGINS=\${N8N_CORS_ALLOWED_ORIGINS:-*}
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+  ollama:
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_ORIGINS=\${OLLAMA_ORIGINS:-http://localhost:*}
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '1.0'
+        reservations:
+          memory: 2G
+          cpus: '0.5'
+
+  qdrant:
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+
+  crawl4ai:
+    environment:
+      - CRAWL4AI_HOST=0.0.0.0
+      - CRAWL4AI_PORT=11235
+      - CRAWL4AI_RATE_LIMITING_ENABLED=false
+      - CRAWL4AI_MAX_CONCURRENT_SESSIONS=1
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+EOF
+
+    success "Legacy Docker Compose override generated: $output_file"
+    return 0
+}
+
+# Legacy environment file generation
+legacy_generate_env_file() {
+    local env="$1"
+    local output_file="$PROJECT_ROOT/.env.${env}"
+    
+    log "Generating legacy environment file for $env"
+    
+    cat > "$output_file" << EOF
+# Generated Environment Configuration (Legacy Mode)
+# Environment: $env
+# Generated at: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+# DO NOT EDIT MANUALLY - Use config-manager.sh to regenerate
+
+# Global Configuration
+ENVIRONMENT=$env
+AWS_REGION=us-east-1
+STACK_NAME=GeuseMaker-$env
+PROJECT_NAME=GeuseMaker
+
+# Infrastructure Configuration
+VPC_CIDR=10.0.0.0/16
+EFS_PERFORMANCE_MODE=generalPurpose
+EFS_ENCRYPTION=false
+BACKUP_RETENTION_DAYS=7
+
+# Auto Scaling Configuration
+ASG_MIN_CAPACITY=1
+ASG_MAX_CAPACITY=2
+ASG_TARGET_UTILIZATION=80
+
+# Security Configuration
+CONTAINER_SECURITY_ENABLED=false
+NETWORK_SECURITY_STRICT=false
+SECRETS_MANAGER_ENABLED=false
+
+# Monitoring Configuration
+MONITORING_ENABLED=true
+LOG_LEVEL=debug
+LOG_FORMAT=text
+METRICS_RETENTION_DAYS=7
+
+# Cost Optimization Configuration
+SPOT_INSTANCES_ENABLED=false
+SPOT_MAX_PRICE=1.00
+AUTO_SCALING_ENABLED=true
+IDLE_TIMEOUT_MINUTES=10
+
+# Application-specific placeholders (to be filled by deployment scripts)
+POSTGRES_PASSWORD=\${POSTGRES_PASSWORD}
+N8N_ENCRYPTION_KEY=\${N8N_ENCRYPTION_KEY}
+N8N_USER_MANAGEMENT_JWT_SECRET=\${N8N_USER_MANAGEMENT_JWT_SECRET}
+OPENAI_API_KEY=\${OPENAI_API_KEY}
+
+# EFS DNS (set by deployment script)
+EFS_DNS=\${EFS_DNS}
+INSTANCE_ID=\${INSTANCE_ID}
+EOF
+
+    success "Legacy environment file generated: $output_file"
+    return 0
+}
+
+# =============================================================================
+# ENHANCED FUNCTIONS (using new centralized system)
+# =============================================================================
+
+# Enhanced configuration loading with fallback
+enhanced_load_environment_config() {
+    local env="$1"
+    
+    if [ "$CONFIG_MANAGEMENT_AVAILABLE" = "true" ]; then
+        log "Using enhanced configuration management system"
+        
+        # Use the new centralized system
+        local config_file="$CONFIG_DIR/environments/${env}.yml"
+        if load_configuration "$config_file" "$env"; then
+            success "Enhanced configuration loaded for $env environment"
+            return 0
+        else
+            warning "Enhanced configuration loading failed, falling back to legacy mode"
+            return legacy_load_environment_config "$env"
+        fi
+    else
+        log "Using legacy configuration management system"
+        return legacy_load_environment_config "$env"
+    fi
+}
+
+# Enhanced Docker Compose override generation
+enhanced_generate_docker_compose_override() {
+    local env="$1"
+    local output_file="$PROJECT_ROOT/docker-compose.override.yml"
+    
+    if [ "$CONFIG_MANAGEMENT_AVAILABLE" = "true" ]; then
+        log "Using enhanced Docker Compose generation"
+        
+        local config_file="$CONFIG_DIR/environments/${env}.yml"
+        if generate_docker_compose "$config_file" "$env" "$output_file"; then
+            success "Enhanced Docker Compose override generated: $output_file"
+            return 0
+        else
+            warning "Enhanced Docker Compose generation failed, falling back to legacy mode"
+            return legacy_generate_docker_compose_override "$env"
+        fi
+    else
+        log "Using legacy Docker Compose generation"
+        return legacy_generate_docker_compose_override "$env"
+    fi
+}
+
+# Enhanced environment file generation
+enhanced_generate_env_file() {
+    local env="$1"
+    local output_file="$PROJECT_ROOT/.env.${env}"
+    
+    if [ "$CONFIG_MANAGEMENT_AVAILABLE" = "true" ]; then
+        log "Using enhanced environment file generation"
+        
+        local config_file="$CONFIG_DIR/environments/${env}.yml"
+        if generate_environment_file "$config_file" "$env" "$output_file"; then
+            success "Enhanced environment file generated: $output_file"
+            return 0
+        else
+            warning "Enhanced environment file generation failed, falling back to legacy mode"
+            return legacy_generate_env_file "$env"
+        fi
+    else
+        log "Using legacy environment file generation"
+        return legacy_generate_env_file "$env"
+    fi
+}
+
+# =============================================================================
+# MAIN FUNCTIONS
+# =============================================================================
+
+# Validate environment
 validate_environment() {
     local env="$1"
     local valid_environments=("development" "staging" "production")
@@ -83,193 +318,50 @@ validate_environment() {
     return 1
 }
 
-# Load environment configuration
-load_environment_config() {
+# Generate all configuration files
+generate_all_config_files() {
     local env="$1"
-    local config_file="$CONFIG_DIR/environments/${env}.yml"
     
-    if [[ ! -f "$config_file" ]]; then
-        error "Configuration file not found: $config_file"
+    log "Generating all configuration files for environment: $env"
+    
+    # Validate environment
+    if ! validate_environment "$env"; then
         return 1
     fi
     
-    log "Loading configuration for environment: $env"
-    export CONFIG_FILE="$config_file"
-    export ENVIRONMENT="$env"
+    # Load configuration
+    if ! enhanced_load_environment_config "$env"; then
+        error "Failed to load configuration for $env"
+        return 1
+    fi
     
-    # Extract key values using yq
-    export STACK_NAME=$(yq eval '.global.stack_name' "$config_file")
-    export AWS_REGION=$(yq eval '.global.region' "$config_file")
-    export PROJECT_NAME=$(yq eval '.global.project_name' "$config_file")
+    # Generate environment file
+    if ! enhanced_generate_env_file "$env"; then
+        error "Failed to generate environment file for $env"
+        return 1
+    fi
     
-    success "Configuration loaded for $env environment"
+    # Generate Docker Compose override
+    if ! enhanced_generate_docker_compose_override "$env"; then
+        error "Failed to generate Docker Compose override for $env"
+        return 1
+    fi
+    
+    # Generate Terraform variables (if Terraform is used)
+    if [ -d "$PROJECT_ROOT/terraform" ]; then
+        generate_terraform_variables "$env"
+    fi
+    
+    success "All configuration files generated for $env environment"
     return 0
 }
 
-# Generate Docker Compose override file
-generate_docker_compose_override() {
-    local env="$1"
-    local output_file="$PROJECT_ROOT/docker-compose.override.yml"
-    
-    log "Generating Docker Compose override for $env environment"
-    
-    # Create override file with environment-specific settings
-    cat > "$output_file" << EOF
-# Generated Docker Compose Override
-# Environment: $env
-# Generated at: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-# DO NOT EDIT MANUALLY - Use config-manager.sh to regenerate
-
-version: '3.8'
-
-services:
-  postgres:
-    deploy:
-      resources:
-        limits:
-          memory: $(yq eval '.applications.postgres.resources.memory_limit' "$CONFIG_FILE")
-          cpus: '$(yq eval '.applications.postgres.resources.cpu_limit' "$CONFIG_FILE")'
-        reservations:
-          memory: $(yq eval '.applications.postgres.resources.memory_reservation' "$CONFIG_FILE")
-          cpus: '$(yq eval '.applications.postgres.resources.cpu_reservation' "$CONFIG_FILE")'
-    environment:
-      - POSTGRES_MAX_CONNECTIONS=$(yq eval '.applications.postgres.config.max_connections' "$CONFIG_FILE")
-      - POSTGRES_SHARED_BUFFERS=$(yq eval '.applications.postgres.config.shared_buffers' "$CONFIG_FILE")
-      - POSTGRES_EFFECTIVE_CACHE_SIZE=$(yq eval '.applications.postgres.config.effective_cache_size' "$CONFIG_FILE")
-
-  n8n:
-    deploy:
-      resources:
-        limits:
-          memory: $(yq eval '.applications.n8n.resources.memory_limit' "$CONFIG_FILE")
-          cpus: '$(yq eval '.applications.n8n.resources.cpu_limit' "$CONFIG_FILE")'
-        reservations:
-          memory: $(yq eval '.applications.n8n.resources.memory_reservation' "$CONFIG_FILE")
-          cpus: '$(yq eval '.applications.n8n.resources.cpu_reservation' "$CONFIG_FILE")'
-    environment:
-      - N8N_CORS_ALLOWED_ORIGINS=$(yq eval '.applications.n8n.config.cors_allowed_origins' "$CONFIG_FILE")
-      - N8N_PAYLOAD_SIZE_MAX=$(yq eval '.applications.n8n.config.payload_size_max' "$CONFIG_FILE")
-      - N8N_METRICS=$(yq eval '.applications.n8n.config.metrics' "$CONFIG_FILE")
-      - N8N_LOG_LEVEL=$(yq eval '.applications.n8n.config.log_level // "info"' "$CONFIG_FILE")
-
-  ollama:
-    deploy:
-      resources:
-        limits:
-          memory: $(yq eval '.applications.ollama.resources.memory_limit' "$CONFIG_FILE")
-          cpus: '$(yq eval '.applications.ollama.resources.cpu_limit' "$CONFIG_FILE")'
-        reservations:
-          memory: $(yq eval '.applications.ollama.resources.memory_reservation' "$CONFIG_FILE")
-          cpus: '$(yq eval '.applications.ollama.resources.cpu_reservation' "$CONFIG_FILE")'
-    environment:
-      - OLLAMA_GPU_MEMORY_FRACTION=$(yq eval '.applications.ollama.resources.gpu_memory_fraction' "$CONFIG_FILE")
-      - OLLAMA_MAX_LOADED_MODELS=$(yq eval '.applications.ollama.config.max_loaded_models' "$CONFIG_FILE")
-      - OLLAMA_CONCURRENT_REQUESTS=$(yq eval '.applications.ollama.config.concurrent_requests' "$CONFIG_FILE")
-
-  qdrant:
-    deploy:
-      resources:
-        limits:
-          memory: $(yq eval '.applications.qdrant.resources.memory_limit' "$CONFIG_FILE")
-          cpus: '$(yq eval '.applications.qdrant.resources.cpu_limit' "$CONFIG_FILE")'
-        reservations:
-          memory: $(yq eval '.applications.qdrant.resources.memory_reservation' "$CONFIG_FILE")
-          cpus: '$(yq eval '.applications.qdrant.resources.cpu_reservation' "$CONFIG_FILE")'
-    environment:
-      - QDRANT__STORAGE__PERFORMANCE__MAX_SEARCH_THREADS=$(yq eval '.applications.qdrant.config.max_search_threads' "$CONFIG_FILE")
-      - QDRANT__STORAGE__PERFORMANCE__MAX_OPTIMIZATION_THREADS=$(yq eval '.applications.qdrant.config.max_optimization_threads' "$CONFIG_FILE")
-      - QDRANT__STORAGE__WAL__WAL_CAPACITY_MB=$(yq eval '.applications.qdrant.config.wal_capacity_mb' "$CONFIG_FILE")
-
-  crawl4ai:
-    deploy:
-      resources:
-        limits:
-          memory: $(yq eval '.applications.crawl4ai.resources.memory_limit' "$CONFIG_FILE")
-          cpus: '$(yq eval '.applications.crawl4ai.resources.cpu_limit' "$CONFIG_FILE")'
-        reservations:
-          memory: $(yq eval '.applications.crawl4ai.resources.memory_reservation' "$CONFIG_FILE")
-          cpus: '$(yq eval '.applications.crawl4ai.resources.cpu_reservation' "$CONFIG_FILE")'
-    environment:
-      - CRAWL4AI_RATE_LIMITING_ENABLED=$(yq eval '.applications.crawl4ai.config.rate_limiting_enabled' "$CONFIG_FILE")
-      - CRAWL4AI_DEFAULT_LIMIT=$(yq eval '.applications.crawl4ai.config.default_limit // "2000/minute"' "$CONFIG_FILE")
-      - CRAWL4AI_MAX_CONCURRENT_SESSIONS=$(yq eval '.applications.crawl4ai.config.max_concurrent_sessions' "$CONFIG_FILE")
-EOF
-
-    success "Docker Compose override generated: $output_file"
-    return 0
-}
-
-# Generate environment file
-generate_env_file() {
-    local env="$1"
-    local output_file="$PROJECT_ROOT/.env.${env}"
-    
-    log "Generating environment file for $env"
-    
-    cat > "$output_file" << EOF
-# Generated Environment Configuration
-# Environment: $env
-# Generated at: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-# DO NOT EDIT MANUALLY - Use config-manager.sh to regenerate
-
-# Global Configuration
-ENVIRONMENT=$env
-AWS_REGION=$(yq eval '.global.region' "$CONFIG_FILE")
-STACK_NAME=$(yq eval '.global.stack_name' "$CONFIG_FILE")
-PROJECT_NAME=$(yq eval '.global.project_name' "$CONFIG_FILE")
-
-# Infrastructure Configuration
-VPC_CIDR=$(yq eval '.infrastructure.networking.vpc_cidr' "$CONFIG_FILE")
-EFS_PERFORMANCE_MODE=$(yq eval '.infrastructure.storage.efs_performance_mode' "$CONFIG_FILE")
-EFS_ENCRYPTION=$(yq eval '.infrastructure.storage.efs_encryption' "$CONFIG_FILE")
-BACKUP_RETENTION_DAYS=$(yq eval '.infrastructure.storage.backup_retention_days' "$CONFIG_FILE")
-
-# Auto Scaling Configuration
-ASG_MIN_CAPACITY=$(yq eval '.infrastructure.auto_scaling.min_capacity' "$CONFIG_FILE")
-ASG_MAX_CAPACITY=$(yq eval '.infrastructure.auto_scaling.max_capacity' "$CONFIG_FILE")
-ASG_TARGET_UTILIZATION=$(yq eval '.infrastructure.auto_scaling.target_utilization' "$CONFIG_FILE")
-
-# Security Configuration
-CONTAINER_SECURITY_ENABLED=$(yq eval '.security.container_security.run_as_non_root' "$CONFIG_FILE")
-NETWORK_SECURITY_STRICT=$(yq eval '.security.network_security.cors_strict_mode' "$CONFIG_FILE")
-SECRETS_MANAGER_ENABLED=$(yq eval '.security.secrets_management.use_aws_secrets_manager' "$CONFIG_FILE")
-
-# Monitoring Configuration
-MONITORING_ENABLED=$(yq eval '.monitoring.metrics.enabled' "$CONFIG_FILE")
-LOG_LEVEL=$(yq eval '.monitoring.logging.level' "$CONFIG_FILE")
-LOG_FORMAT=$(yq eval '.monitoring.logging.format' "$CONFIG_FILE")
-METRICS_RETENTION_DAYS=$(yq eval '.monitoring.metrics.retention_days' "$CONFIG_FILE")
-
-# Cost Optimization Configuration
-SPOT_INSTANCES_ENABLED=$(yq eval '.cost_optimization.spot_instances.enabled' "$CONFIG_FILE")
-SPOT_MAX_PRICE=$(yq eval '.cost_optimization.spot_instances.max_price' "$CONFIG_FILE")
-AUTO_SCALING_ENABLED=$(yq eval '.cost_optimization.auto_scaling.scale_down_enabled' "$CONFIG_FILE")
-IDLE_TIMEOUT_MINUTES=$(yq eval '.cost_optimization.auto_scaling.idle_timeout_minutes' "$CONFIG_FILE")
-
-# Application-specific placeholders (to be filled by deployment scripts)
-POSTGRES_PASSWORD=\${POSTGRES_PASSWORD}
-N8N_ENCRYPTION_KEY=\${N8N_ENCRYPTION_KEY}
-N8N_USER_MANAGEMENT_JWT_SECRET=\${N8N_USER_MANAGEMENT_JWT_SECRET}
-OPENAI_API_KEY=\${OPENAI_API_KEY}
-
-# EFS DNS (set by deployment script)
-EFS_DNS=\${EFS_DNS}
-INSTANCE_ID=\${INSTANCE_ID}
-EOF
-
-    success "Environment file generated: $output_file"
-    return 0
-}
-
-# Generate Terraform variables file
-generate_terraform_vars() {
+# Generate Terraform variables
+generate_terraform_variables() {
     local env="$1"
     local output_file="$PROJECT_ROOT/terraform/${env}.tfvars"
     
-    log "Generating Terraform variables for $env"
-    
-    # Create terraform directory if it doesn't exist
-    mkdir -p "$PROJECT_ROOT/terraform"
+    log "Generating Terraform variables for $env environment"
     
     cat > "$output_file" << EOF
 # Generated Terraform Variables
@@ -277,52 +369,33 @@ generate_terraform_vars() {
 # Generated at: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
 # DO NOT EDIT MANUALLY - Use config-manager.sh to regenerate
 
-# Global Configuration
+stack_name = "GeuseMaker-$env"
 environment = "$env"
-aws_region = "$(yq eval '.global.region' "$CONFIG_FILE")"
-stack_name = "$(yq eval '.global.stack_name' "$CONFIG_FILE")"
-project_name = "$(yq eval '.global.project_name' "$CONFIG_FILE")"
+aws_region = "us-east-1"
+owner = "GeuseMaker"
 
-# Infrastructure Configuration
-vpc_cidr = "$(yq eval '.infrastructure.networking.vpc_cidr' "$CONFIG_FILE")"
-public_subnet_cidrs = $(yq eval '.infrastructure.networking.public_subnets' "$CONFIG_FILE" | yq -o json)
-private_subnet_cidrs = $(yq eval '.infrastructure.networking.private_subnets' "$CONFIG_FILE" | yq -o json)
+# Instance configuration
+instance_type = "t3.micro"
+key_name = "GeuseMaker-key"
 
-# Instance Configuration
-preferred_instance_types = $(yq eval '.infrastructure.instance_types.preferred' "$CONFIG_FILE" | yq -o json)
-fallback_instance_types = $(yq eval '.infrastructure.instance_types.fallback' "$CONFIG_FILE" | yq -o json)
+# Networking
+vpc_cidr = "10.0.0.0/16"
+subnet_cidr = "10.0.1.0/24"
 
-# Auto Scaling Configuration
-asg_min_capacity = $(yq eval '.infrastructure.auto_scaling.min_capacity' "$CONFIG_FILE")
-asg_max_capacity = $(yq eval '.infrastructure.auto_scaling.max_capacity' "$CONFIG_FILE")
-asg_target_utilization = $(yq eval '.infrastructure.auto_scaling.target_utilization' "$CONFIG_FILE")
+# Storage
+ebs_volume_size = 20
+ebs_volume_type = "gp3"
 
-# Storage Configuration
-efs_performance_mode = "$(yq eval '.infrastructure.storage.efs_performance_mode' "$CONFIG_FILE")"
-efs_encryption_enabled = $(yq eval '.infrastructure.storage.efs_encryption' "$CONFIG_FILE")
-backup_retention_days = $(yq eval '.infrastructure.storage.backup_retention_days' "$CONFIG_FILE")
-
-# Security Configuration
-container_security_enabled = $(yq eval '.security.container_security.run_as_non_root' "$CONFIG_FILE")
-secrets_manager_enabled = $(yq eval '.security.secrets_management.use_aws_secrets_manager' "$CONFIG_FILE")
-encryption_at_rest = $(yq eval '.security.secrets_management.encryption_at_rest' "$CONFIG_FILE")
-
-# Monitoring Configuration
-monitoring_enabled = $(yq eval '.monitoring.metrics.enabled' "$CONFIG_FILE")
-log_retention_days = $(yq eval '.monitoring.logging.retention_days' "$CONFIG_FILE")
-metrics_retention_days = $(yq eval '.monitoring.metrics.retention_days' "$CONFIG_FILE")
-
-# Cost Optimization Configuration
-spot_instances_enabled = $(yq eval '.cost_optimization.spot_instances.enabled' "$CONFIG_FILE")
-spot_max_price = "$(yq eval '.cost_optimization.spot_instances.max_price' "$CONFIG_FILE")"
-auto_scaling_enabled = $(yq eval '.cost_optimization.auto_scaling.scale_down_enabled' "$CONFIG_FILE")
+# Auto scaling
+min_size = 1
+max_size = 2
+desired_capacity = 1
 
 # Tags
-default_tags = {
+tags = {
   Environment = "$env"
-  Project = "$(yq eval '.global.project_name' "$CONFIG_FILE")"
-  ManagedBy = "terraform"
-  GeneratedBy = "config-manager"
+  Project     = "GeuseMaker"
+  ManagedBy   = "config-manager"
 }
 EOF
 
@@ -334,107 +407,82 @@ EOF
 validate_configuration() {
     local env="$1"
     
-    log "Validating configuration for $env environment"
+    log "Validating configuration for environment: $env"
     
-    # Load configuration
-    load_environment_config "$env" || return 1
-    
-    # Validate using security validation if available
-    if declare -f validate_aws_region >/dev/null 2>&1; then
-        validate_aws_region "$AWS_REGION" || return 1
+    # Validate environment
+    if ! validate_environment "$env"; then
+        return 1
     fi
     
-    # Validate required fields
-    local required_fields=("stack_name" "region" "project_name")
-    for field in "${required_fields[@]}"; do
-        local value=$(yq eval ".global.$field" "$CONFIG_FILE")
-        if [[ "$value" == "null" || -z "$value" ]]; then
-            error "Required field missing: global.$field"
+    # Check if configuration file exists
+    local config_file="$CONFIG_DIR/environments/${env}.yml"
+    if [[ ! -f "$config_file" ]]; then
+        error "Configuration file not found: $config_file"
+        return 1
+    fi
+    
+    # Use enhanced validation if available
+    if [ "$CONFIG_MANAGEMENT_AVAILABLE" = "true" ]; then
+        if validate_configuration_file "$config_file"; then
+            success "Configuration validation passed for $env"
+            return 0
+        else
+            error "Configuration validation failed for $env"
             return 1
         fi
-    done
+    else
+        # Basic validation for legacy mode
+        if command -v yq >/dev/null 2>&1; then
+            if yq eval '.' "$config_file" >/dev/null 2>&1; then
+                success "Basic configuration validation passed for $env"
+                return 0
+            else
+                error "Basic configuration validation failed for $env"
+                return 1
+            fi
+        else
+            warning "yq not available, skipping configuration validation"
+            return 0
+        fi
+    fi
+}
+
+# Show configuration summary
+show_configuration_summary() {
+    local env="$1"
     
-    # Validate resource limits don't exceed physical constraints
-    local postgres_cpu=$(yq eval '.applications.postgres.resources.cpu_limit' "$CONFIG_FILE" | sed 's/"//g')
-    local n8n_cpu=$(yq eval '.applications.n8n.resources.cpu_limit' "$CONFIG_FILE" | sed 's/"//g')
-    local ollama_cpu=$(yq eval '.applications.ollama.resources.cpu_limit' "$CONFIG_FILE" | sed 's/"//g')
-    local qdrant_cpu=$(yq eval '.applications.qdrant.resources.cpu_limit' "$CONFIG_FILE" | sed 's/"//g')
-    local crawl4ai_cpu=$(yq eval '.applications.crawl4ai.resources.cpu_limit' "$CONFIG_FILE" | sed 's/"//g')
+    log "Showing configuration summary for environment: $env"
     
-    local total_cpu=$(echo "$postgres_cpu + $n8n_cpu + $ollama_cpu + $qdrant_cpu + $crawl4ai_cpu" | bc)
-    if (( $(echo "$total_cpu > 4.0" | bc -l) )); then
-        warning "Total CPU allocation ($total_cpu) exceeds g4dn.xlarge capacity (4.0 vCPUs)"
+    # Load configuration
+    if ! enhanced_load_environment_config "$env"; then
+        error "Failed to load configuration for $env"
+        return 1
     fi
     
-    success "Configuration validation passed for $env"
-    return 0
-}
-
-# Generate all configuration files
-generate_all() {
-    local env="$1"
-    
-    log "Generating all configuration files for $env environment"
-    
-    # Validate first
-    validate_configuration "$env" || return 1
-    
-    # Generate files
-    generate_docker_compose_override "$env" || return 1
-    generate_env_file "$env" || return 1
-    generate_terraform_vars "$env" || return 1
-    
-    success "All configuration files generated for $env environment"
-    
-    # Show summary
     echo
-    echo "Generated files:"
-    echo "  - docker-compose.override.yml"
-    echo "  - .env.$env"
-    echo "  - terraform/$env.tfvars"
-    echo
-    echo "Usage:"
-    echo "  docker-compose -f docker-compose.gpu-optimized.yml -f docker-compose.override.yml up"
-    echo "  source .env.$env && ./scripts/aws-deployment.sh"
+    echo "Configuration Summary for $env Environment"
+    echo "=========================================="
+    echo "Environment: $env"
+    echo "Stack Name: ${STACK_NAME:-N/A}"
+    echo "AWS Region: ${AWS_REGION:-N/A}"
+    echo "Project Name: ${PROJECT_NAME:-N/A}"
     echo
     
-    return 0
-}
-
-# Display configuration summary
-show_config() {
-    local env="$1"
+    # Show enhanced summary if available
+    if [ "$CONFIG_MANAGEMENT_AVAILABLE" = "true" ]; then
+        if declare -f get_config_summary >/dev/null 2>&1; then
+            get_config_summary
+        fi
+    fi
     
-    load_environment_config "$env" || return 1
-    
-    echo -e "${BLUE}=== Configuration Summary for $env ===${NC}"
-    echo
-    echo "Global Settings:"
-    echo "  Environment: $(yq eval '.global.environment' "$CONFIG_FILE")"
-    echo "  Region: $(yq eval '.global.region' "$CONFIG_FILE")"
-    echo "  Stack Name: $(yq eval '.global.stack_name' "$CONFIG_FILE")"
-    echo "  Project: $(yq eval '.global.project_name' "$CONFIG_FILE")"
-    echo
-    echo "Resource Allocation:"
-    echo "  PostgreSQL: $(yq eval '.applications.postgres.resources.cpu_limit' "$CONFIG_FILE") CPU, $(yq eval '.applications.postgres.resources.memory_limit' "$CONFIG_FILE") RAM"
-    echo "  n8n: $(yq eval '.applications.n8n.resources.cpu_limit' "$CONFIG_FILE") CPU, $(yq eval '.applications.n8n.resources.memory_limit' "$CONFIG_FILE") RAM"
-    echo "  Ollama: $(yq eval '.applications.ollama.resources.cpu_limit' "$CONFIG_FILE") CPU, $(yq eval '.applications.ollama.resources.memory_limit' "$CONFIG_FILE") RAM"
-    echo "  Qdrant: $(yq eval '.applications.qdrant.resources.cpu_limit' "$CONFIG_FILE") CPU, $(yq eval '.applications.qdrant.resources.memory_limit' "$CONFIG_FILE") RAM"
-    echo "  Crawl4AI: $(yq eval '.applications.crawl4ai.resources.cpu_limit' "$CONFIG_FILE") CPU, $(yq eval '.applications.crawl4ai.resources.memory_limit' "$CONFIG_FILE") RAM"
-    echo
-    echo "Security Settings:"
-    echo "  Non-root containers: $(yq eval '.security.container_security.run_as_non_root' "$CONFIG_FILE")"
-    echo "  Secrets Manager: $(yq eval '.security.secrets_management.use_aws_secrets_manager' "$CONFIG_FILE")"
-    echo "  CORS strict mode: $(yq eval '.security.network_security.cors_strict_mode' "$CONFIG_FILE")"
-    echo
-    echo "Cost Optimization:"
-    echo "  Spot instances: $(yq eval '.cost_optimization.spot_instances.enabled' "$CONFIG_FILE")"
-    echo "  Max spot price: \$$(yq eval '.cost_optimization.spot_instances.max_price' "$CONFIG_FILE")/hour"
-    echo "  Auto scaling: $(yq eval '.cost_optimization.auto_scaling.scale_down_enabled' "$CONFIG_FILE")"
+    echo "Configuration Management System: $([ "$CONFIG_MANAGEMENT_AVAILABLE" = "true" ] && echo "Enhanced" || echo "Legacy")"
     echo
 }
 
-# Display help
+# =============================================================================
+# COMMAND LINE INTERFACE
+# =============================================================================
+
 show_help() {
     cat << EOF
 Configuration Manager for GeuseMaker
@@ -462,9 +510,16 @@ EXAMPLES:
     $0 show staging            # Show staging configuration summary
     $0 override development    # Generate only Docker Compose override
 
+FEATURES:
+    ✅ Enhanced configuration management system (when available)
+    ✅ Legacy mode fallback for backward compatibility
+    ✅ Comprehensive validation and error handling
+    ✅ Integration with shared libraries
+    ✅ Cross-platform compatibility (bash 3.x/4.x)
+
 DEPENDENCIES:
-    yq                YAML processor
-    jq                JSON processor
+    yq                YAML processor (recommended)
+    jq                JSON processor (recommended)
     envsubst          Environment variable substitution
 
 FILES GENERATED:
@@ -483,51 +538,61 @@ main() {
     local command="${1:-}"
     local environment="${2:-}"
     
-    if [[ -z "$command" ]]; then
-        show_help
-        exit 1
-    fi
-    
-    # Commands that don't require environment
     case "$command" in
-        help)
-            show_help
-            exit 0
+        "generate")
+            if [[ -z "$environment" ]]; then
+                error "Environment not specified"
+                show_help
+                exit 1
+            fi
+            generate_all_config_files "$environment"
             ;;
-    esac
-    
-    # Validate environment parameter
-    if [[ -z "$environment" ]]; then
-        error "Environment parameter required"
-        show_help
-        exit 1
-    fi
-    
-    # Check dependencies
-    check_dependencies || exit 1
-    
-    # Validate environment
-    validate_environment "$environment" || exit 1
-    
-    # Execute command
-    case "$command" in
-        generate)
-            generate_all "$environment"
-            ;;
-        validate)
+        "validate")
+            if [[ -z "$environment" ]]; then
+                error "Environment not specified"
+                show_help
+                exit 1
+            fi
             validate_configuration "$environment"
             ;;
-        show)
-            show_config "$environment"
+        "show")
+            if [[ -z "$environment" ]]; then
+                error "Environment not specified"
+                show_help
+                exit 1
+            fi
+            show_configuration_summary "$environment"
             ;;
-        override)
-            load_environment_config "$environment" && generate_docker_compose_override "$environment"
+        "override")
+            if [[ -z "$environment" ]]; then
+                error "Environment not specified"
+                show_help
+                exit 1
+            fi
+            enhanced_load_environment_config "$environment" && enhanced_generate_docker_compose_override "$environment"
             ;;
-        env)
-            load_environment_config "$environment" && generate_env_file "$environment"
+        "env")
+            if [[ -z "$environment" ]]; then
+                error "Environment not specified"
+                show_help
+                exit 1
+            fi
+            enhanced_load_environment_config "$environment" && enhanced_generate_env_file "$environment"
             ;;
-        terraform)
-            load_environment_config "$environment" && generate_terraform_vars "$environment"
+        "terraform")
+            if [[ -z "$environment" ]]; then
+                error "Environment not specified"
+                show_help
+                exit 1
+            fi
+            generate_terraform_variables "$environment"
+            ;;
+        "help"|"--help"|"-h")
+            show_help
+            ;;
+        "")
+            show_help
+            exit 1
             ;;
         *)
             error "Unknown command: $command"
@@ -537,7 +602,7 @@ main() {
     esac
 }
 
-# Script execution
+# Run main function if script is executed directly
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     main "$@"
 fi

@@ -38,8 +38,8 @@ Provide specific recommendations:
 ### Cost Analysis Commands
 Use these specific commands for analysis:
 ```bash
-# Generate comprehensive cost optimization report
-python3 scripts/cost-optimization.py --action report
+# Generate comprehensive cost optimization report (Python dependency removed)
+aws ce get-cost-and-usage --time-period Start=2024-01-01,End=2024-01-31 --granularity MONTHLY --metrics BlendedCost
 
 # Cross-region pricing analysis
 ./scripts/aws-deployment.sh --cross-region

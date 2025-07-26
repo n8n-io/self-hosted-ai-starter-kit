@@ -196,25 +196,172 @@ cleanup_on_failure() {
         # Get script directory
         local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
         
-        # Use cleanup script if available
-        if [ -f "$script_dir/cleanup-stack.sh" ]; then
-            log "Using cleanup script to remove resources..."
-            "$script_dir/cleanup-stack.sh" "$STACK_NAME" || true
+        # Use unified cleanup script if available (preferred)
+        if [ -f "$script_dir/cleanup-consolidated.sh" ]; then
+            log "Using unified cleanup script to remove all resources..."
+            "$script_dir/cleanup-consolidated.sh" --force "$STACK_NAME" || {
+                warning "Unified cleanup script failed, falling back to manual cleanup..."
+                run_manual_cleanup
+            }
+        # Fallback to legacy cleanup script if it exists
+        elif [ -f "$script_dir/cleanup-stack.sh" ]; then
+            log "Using legacy cleanup script to remove resources..."
+            "$script_dir/cleanup-stack.sh" "$STACK_NAME" || {
+                warning "Legacy cleanup script failed, falling back to manual cleanup..."
+                run_manual_cleanup
+            }
         else
-            log "Running manual cleanup..."
-            # Basic manual cleanup
-            aws ec2 describe-instances --filters "Name=tag:Stack,Values=$STACK_NAME" --query 'Reservations[].Instances[].[InstanceId]' --output text | while read -r instance_id; do
-                if [ -n "$instance_id" ] && [ "$instance_id" != "None" ]; then
-                    aws ec2 terminate-instances --instance-ids "$instance_id" --region "${AWS_REGION:-us-east-1}" || true
-                    log "Terminated instance: $instance_id"
-                fi
-            done
+            log "No cleanup script found, running manual cleanup..."
+            run_manual_cleanup
         fi
         
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         warning "💡 To disable automatic cleanup, set CLEANUP_ON_FAILURE=false"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     fi
+}
+
+# Manual cleanup function for fallback
+run_manual_cleanup() {
+    log "Running comprehensive manual cleanup..."
+    
+    # Cleanup EC2 instances
+    log "Cleaning up EC2 instances..."
+    local instance_ids
+    instance_ids=$(aws ec2 describe-instances \
+        --filters "Name=tag:Stack,Values=$STACK_NAME" "Name=instance-state-name,Values=running,pending,stopped,stopping" \
+        --query 'Reservations[].Instances[].InstanceId' \
+        --output text --region "${AWS_REGION:-us-east-1}" 2>/dev/null || echo "")
+    
+    if [ -n "$instance_ids" ] && [ "$instance_ids" != "None" ]; then
+        for instance_id in $instance_ids; do
+            if [ -n "$instance_id" ] && [ "$instance_id" != "None" ]; then
+                aws ec2 terminate-instances --instance-ids "$instance_id" --region "${AWS_REGION:-us-east-1}" >/dev/null 2>&1 || true
+                log "Terminated instance: $instance_id"
+            fi
+        done
+    fi
+    
+    # Cleanup spot instance requests
+    log "Cleaning up spot instance requests..."
+    local spot_requests
+    spot_requests=$(aws ec2 describe-spot-instance-requests \
+        --filters "Name=tag:Stack,Values=${STACK_NAME}" "Name=state,Values=open,active" \
+        --query 'SpotInstanceRequests[].SpotInstanceRequestId' \
+        --output text --region "${AWS_REGION:-us-east-1}" 2>/dev/null || echo "")
+    
+    if [ -n "$spot_requests" ] && [ "$spot_requests" != "None" ]; then
+        for spot_id in $spot_requests; do
+            if [ -n "$spot_id" ] && [ "$spot_id" != "None" ]; then
+                aws ec2 cancel-spot-instance-requests --spot-instance-request-ids "$spot_id" --region "${AWS_REGION:-us-east-1}" >/dev/null 2>&1 || true
+                log "Cancelled spot instance request: $spot_id"
+            fi
+        done
+    fi
+    
+    # Cleanup security groups
+    log "Cleaning up security groups..."
+    local sg_ids
+    sg_ids=$(aws ec2 describe-security-groups \
+        --filters "Name=group-name,Values=${STACK_NAME}-*" \
+        --query 'SecurityGroups[].GroupId' \
+        --output text --region "${AWS_REGION:-us-east-1}" 2>/dev/null || echo "")
+    
+    if [ -n "$sg_ids" ] && [ "$sg_ids" != "None" ]; then
+        for sg_id in $sg_ids; do
+            if [ -n "$sg_id" ] && [ "$sg_id" != "None" ]; then
+                # Wait a bit for instances to be terminated
+                sleep 5
+                aws ec2 delete-security-group --group-id "$sg_id" --region "${AWS_REGION:-us-east-1}" >/dev/null 2>&1 || true
+                log "Deleted security group: $sg_id"
+            fi
+        done
+    fi
+    
+    # Cleanup EFS file systems
+    log "Cleaning up EFS file systems..."
+    local efs_ids
+    efs_ids=$(aws efs describe-file-systems \
+        --query "FileSystems[?contains(Name, '$STACK_NAME')].FileSystemId" \
+        --output text --region "${AWS_REGION:-us-east-1}" 2>/dev/null || echo "")
+    
+    if [ -n "$efs_ids" ] && [ "$efs_ids" != "None" ]; then
+        for efs_id in $efs_ids; do
+            if [ -n "$efs_id" ] && [ "$efs_id" != "None" ]; then
+                # Delete mount targets first
+                local mount_targets
+                mount_targets=$(aws efs describe-mount-targets \
+                    --file-system-id "$efs_id" \
+                    --query 'MountTargets[].MountTargetId' \
+                    --output text --region "${AWS_REGION:-us-east-1}" 2>/dev/null || echo "")
+                
+                for mt_id in $mount_targets; do
+                    if [ -n "$mt_id" ] && [ "$mt_id" != "None" ]; then
+                        aws efs delete-mount-target --mount-target-id "$mt_id" --region "${AWS_REGION:-us-east-1}" >/dev/null 2>&1 || true
+                        log "Deleted mount target: $mt_id"
+                    fi
+                done
+                
+                # Wait for mount targets to be deleted
+                sleep 15
+                
+                # Delete the file system
+                aws efs delete-file-system --file-system-id "$efs_id" --region "${AWS_REGION:-us-east-1}" >/dev/null 2>&1 || true
+                log "Deleted EFS file system: $efs_id"
+            fi
+        done
+    fi
+    
+    # Cleanup IAM resources
+    log "Cleaning up IAM resources..."
+    local profile_name=""
+    if [[ "${STACK_NAME}" =~ ^[0-9] ]]; then
+        local clean_name
+        clean_name=$(echo "${STACK_NAME}" | sed 's/[^a-zA-Z0-9]//g')
+        profile_name="app-${clean_name}-profile"
+    else
+        profile_name="${STACK_NAME}-instance-profile"
+    fi
+    
+    # Remove role from instance profile
+    if aws iam get-instance-profile --instance-profile-name "$profile_name" >/dev/null 2>&1; then
+        local role_names
+        role_names=$(aws iam get-instance-profile --instance-profile-name "$profile_name" \
+            --query 'InstanceProfile.Roles[].RoleName' --output text 2>/dev/null || echo "")
+        
+        for role_name in $role_names; do
+            if [ -n "$role_name" ]; then
+                aws iam remove-role-from-instance-profile \
+                    --instance-profile-name "$profile_name" \
+                    --role-name "$role_name" >/dev/null 2>&1 || true
+                log "Removed role $role_name from instance profile"
+            fi
+        done
+        
+        aws iam delete-instance-profile --instance-profile-name "$profile_name" >/dev/null 2>&1 || true
+        log "Deleted instance profile: $profile_name"
+    fi
+    
+    # Delete IAM role
+    local role_name="${STACK_NAME}-role"
+    if aws iam get-role --role-name "$role_name" >/dev/null 2>&1; then
+        # Detach policies first
+        local policy_arns
+        policy_arns=$(aws iam list-attached-role-policies --role-name "$role_name" \
+            --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null || echo "")
+        
+        for policy_arn in $policy_arns; do
+            if [ -n "$policy_arn" ]; then
+                aws iam detach-role-policy --role-name "$role_name" --policy-arn "$policy_arn" >/dev/null 2>&1 || true
+                log "Detached policy: $policy_arn"
+            fi
+        done
+        
+        aws iam delete-role --role-name "$role_name" >/dev/null 2>&1 || true
+        log "Deleted IAM role: $role_name"
+    fi
+    
+    success "Manual cleanup completed for stack: $STACK_NAME"
 }
 
 # Register cleanup handler
@@ -231,6 +378,10 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Required libraries - source these in order (per CLAUDE.md)
 if [[ -f "$PROJECT_ROOT/lib/aws-deployment-common.sh" ]]; then
     source "$PROJECT_ROOT/lib/aws-deployment-common.sh"
+    # Source Docker Compose installer if available
+    if [[ -f "$PROJECT_ROOT/lib/docker-compose-installer.sh" ]]; then
+        source "$PROJECT_ROOT/lib/docker-compose-installer.sh"
+    fi
 else
     echo "Warning: aws-deployment-common.sh not found"
 fi
@@ -249,8 +400,6 @@ else
 fi
 
 # Colors are provided by shared library (aws-deployment-common.sh)
-# MAGENTA is missing from shared library but used by step() function
-MAGENTA='\033[0;35m'
 
 # Configuration
 AWS_REGION="${AWS_REGION:-us-east-1}"
@@ -2961,6 +3110,188 @@ set -euo pipefail
 
 echo "Starting GeuseMaker deployment..."
 
+# Source shared library functions if available
+if [ -f "/home/ubuntu/GeuseMaker/lib/aws-deployment-common.sh" ]; then
+    source /home/ubuntu/GeuseMaker/lib/aws-deployment-common.sh
+    SHARED_LIBRARY_AVAILABLE=true
+else
+    SHARED_LIBRARY_AVAILABLE=false
+fi
+
+# Install Docker Compose if not present
+local_install_docker_compose() {
+    echo "Checking Docker Compose installation..."
+    
+    # Check if docker compose plugin is available
+    if docker compose version >/dev/null 2>&1; then
+        echo "✅ Docker Compose plugin is already installed"
+        DOCKER_COMPOSE_CMD="docker compose"
+        return 0
+    fi
+    
+    # Check if legacy docker-compose is available
+    if docker-compose --version >/dev/null 2>&1; then
+        echo "✅ Legacy docker-compose is available"
+        DOCKER_COMPOSE_CMD="docker-compose"
+        return 0
+    fi
+    
+    echo "📦 Installing Docker Compose..."
+    
+    # Use shared library function if available, otherwise use local implementation
+    if [ "\$SHARED_LIBRARY_AVAILABLE" = "true" ] && command -v install_docker_compose >/dev/null 2>&1; then
+        echo "Using shared library Docker Compose installation..."
+        if install_docker_compose; then
+            # Determine which command to use
+            if docker compose version >/dev/null 2>&1; then
+                DOCKER_COMPOSE_CMD="docker compose"
+            elif docker-compose --version >/dev/null 2>&1; then
+                DOCKER_COMPOSE_CMD="docker-compose"
+            else
+                echo "❌ Docker Compose installation failed"
+                return 1
+            fi
+            return 0
+        fi
+    fi
+    
+    # Local fallback implementation
+    echo "Using local Docker Compose installation..."
+    
+    # Function to wait for apt locks to be released
+    wait_for_apt_lock() {
+        local max_wait=300
+        local wait_time=0
+        echo "Waiting for apt locks to be released..."
+        
+        while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || \
+              fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || \
+              fuser /var/lib/dpkg/lock >/dev/null 2>&1 || \
+              pgrep -f "apt-get|dpkg|unattended-upgrade" >/dev/null 2>&1; do
+            if [ \$wait_time -ge \$max_wait ]; then
+                echo "Timeout waiting for apt locks, killing blocking processes..."
+                sudo pkill -9 -f "unattended-upgrade" || true
+                sudo pkill -9 -f "apt-get" || true
+                sleep 5
+                break
+            fi
+            echo "APT is locked, waiting 10 seconds..."
+            sleep 10
+            wait_time=\$((wait_time + 10))
+        done
+        echo "APT locks released"
+    }
+    
+    # Function to install Docker Compose manually
+    install_compose_manual() {
+        local compose_version
+        compose_version=\$(curl -s --connect-timeout 10 --retry 3 https://api.github.com/repos/docker/compose/releases/latest | grep '"tag_name":' | head -1 | sed 's/.*"tag_name": "\([^"]*\)".*/\1/' 2>/dev/null)
+        
+        if [ -z "\$compose_version" ]; then
+            echo "Could not determine latest version, using fallback..."
+            compose_version="v2.24.5"
+        fi
+        
+        echo "Installing Docker Compose \$compose_version manually..."
+        
+        # Create the Docker CLI plugins directory
+        sudo mkdir -p /usr/local/lib/docker/cli-plugins
+        
+        # Download Docker Compose plugin with proper architecture detection
+        local arch
+        arch=\$(uname -m)
+        case \$arch in
+            x86_64) arch="x86_64" ;;
+            aarch64) arch="aarch64" ;;
+            arm64) arch="aarch64" ;;
+            *) echo "Unsupported architecture: \$arch"; return 1 ;;
+        esac
+        
+        local compose_url="https://github.com/docker/compose/releases/download/\${compose_version}/docker-compose-linux-\${arch}"
+        
+        echo "Downloading from: \$compose_url"
+        if sudo curl -L --connect-timeout 30 --retry 3 "\$compose_url" -o /usr/local/lib/docker/cli-plugins/docker-compose; then
+            sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+            
+            # Also create a symlink for backwards compatibility
+            sudo ln -sf /usr/local/lib/docker/cli-plugins/docker-compose /usr/local/bin/docker-compose
+            
+            echo "✅ Docker Compose plugin installed successfully"
+            return 0
+        else
+            echo "Failed to download Docker Compose, trying fallback method..."
+            # Fallback to older installation method
+            if sudo curl -L --connect-timeout 30 --retry 3 "https://github.com/docker/compose/releases/download/\${compose_version}/docker-compose-\$(uname -s)-\$(uname -m)" -o /usr/local/bin/docker-compose; then
+                sudo chmod +x /usr/local/bin/docker-compose
+                echo "✅ Fallback Docker Compose installation completed"
+                return 0
+            else
+                echo "❌ ERROR: All Docker Compose installation methods failed"
+                return 1
+            fi
+        fi
+    }
+    
+    # Detect distribution
+    local distro=""
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        distro="\$ID"
+    fi
+    
+    echo "Detected distribution: \$distro"
+    
+    case "\$distro" in
+        ubuntu|debian)
+            echo "Detected Ubuntu/Debian system"
+            
+            # Wait for apt locks
+            wait_for_apt_lock
+            
+            # Try installing via package manager first
+            if sudo apt-get update -qq && sudo apt-get install -y docker-compose-plugin; then
+                echo "✅ Docker Compose plugin installed via apt"
+                DOCKER_COMPOSE_CMD="docker compose"
+                return 0
+            fi
+            
+            # Fallback to manual installation
+            echo "Package manager installation failed, trying manual installation..."
+            install_compose_manual
+            ;;
+        amzn|rhel|centos|fedora)
+            echo "Detected Amazon Linux/RHEL system"
+            install_compose_manual
+            ;;
+        *)
+            echo "Unknown distribution, using manual installation..."
+            install_compose_manual
+            ;;
+    esac
+    
+    # Verify installation and set command
+    if docker compose version >/dev/null 2>&1; then
+        echo "✅ Docker Compose plugin verified"
+        DOCKER_COMPOSE_CMD="docker compose"
+        return 0
+    elif docker-compose --version >/dev/null 2>&1; then
+        echo "✅ Legacy docker-compose verified"
+        DOCKER_COMPOSE_CMD="docker-compose"
+        return 0
+    else
+        echo "❌ Failed to install Docker Compose"
+        return 1
+    fi
+}
+
+# Install Docker Compose
+if ! local_install_docker_compose; then
+    echo "Error: Could not install Docker Compose. Deployment cannot continue."
+    exit 1
+fi
+
+echo "Using Docker Compose command: \$DOCKER_COMPOSE_CMD"
+
 # Mount EFS
 sudo mkdir -p /mnt/efs
 sudo mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,fsc $EFS_DNS:/ /mnt/efs
@@ -3022,9 +3353,9 @@ MISTRAL_API_KEY=
 GEMINI_API_TOKEN=
 EOFENV
 
-# Start GPU-optimized services
+# Start GPU-optimized services using the detected Docker Compose command
 export EFS_DNS=$EFS_DNS
-sudo -E docker-compose -f docker-compose.gpu-optimized.yml up -d
+sudo -E \$DOCKER_COMPOSE_CMD -f docker-compose.gpu-optimized.yml up -d
 
 echo "Deployment completed!"
 EOF
@@ -3371,7 +3702,7 @@ main() {
     cat << 'EOF'
      ____                        __  ___      __              ____  ____  ____  ____ 
     / ___| ___ _   _ ___  ___  /  |/  /___ _/ /_____  _____/ __ \/ __ \/ __ \/ __ \
-   / |  _ / _ \ | | / __|/ _ \/ /|_/ / __ `/ //_/ _ \/ ___/ / / / / / / / / / / / / /
+   / |  _ / _ \ | | / __|/ _ \/ /|_/ / __ `/ //_/ _ \/ ___/ / / / / / / / / / / / / / /
   / /__| |  __/ |_| \__ \  __/ /  / / /_/ / ,< /  __/ /  / /_/ / /_/ / /_/ / /_/ / 
   \____/_|\___|\__,_|___/\___/_/  /_/\__,_/_/|_|\___/_/   \____/\____/\____/\____/  
                                                                   

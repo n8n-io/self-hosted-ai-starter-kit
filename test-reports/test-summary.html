@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>GeuseMaker Test Report</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .header { background: #f5f5f5; padding: 20px; border-radius: 5px; }
+        .category { margin: 20px 0; padding: 15px; border-left: 4px solid #ccc; }
+        .passed { border-left-color: #4CAF50; background: #f1f8e9; }
+        .failed { border-left-color: #f44336; background: #ffebee; }
+        .warning { border-left-color: #ff9800; background: #fff3e0; }
+        .results { margin: 20px 0; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background: #f5f5f5; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>GeuseMaker Test Report</h1>
+        <p>Generated: $(date)</p>
+        <p>Environment: ${TEST_ENVIRONMENT:-development}</p>
+    </div>
+    
+    <div class="results">
+        <h2>Test Results Summary</h2>
+        <table>
+            <tr><th>Category</th><th>Status</th><th>Description</th></tr>
+            <tr class="passed">
+                <td>unit</td>
+                <td>✅ Passed</td>
+                <td>Unit tests for individual functions</td>
+            </tr>
+            <tr class="passed">
+                <td>integration</td>
+                <td>✅ Passed</td>
+                <td>Integration tests for component interaction</td>
+            </tr>
+            <tr class="passed">
+                <td>security</td>
+                <td>✅ Passed</td>
+                <td>Security vulnerability scans</td>
+            </tr>
+            <tr class="warning">
+                <td>performance</td>
+                <td>⚠️ Not Run</td>
+                <td>Performance and load tests</td>
+            </tr>
+            <tr class="passed">
+                <td>deployment</td>
+                <td>✅ Passed</td>
+                <td>Deployment validation tests</td>
+            </tr>
+            <tr class="passed">
+                <td>smoke</td>
+                <td>✅ Passed</td>
+                <td>Basic smoke tests for quick validation</td>
+            </tr>
+        </table>
+    </div>
+    
+    <div class="category">
+        <h3>Report Files</h3>
+        <ul>
+            <li><a href="test-results.json">Test Results (JSON)</a></li>
+            <li><a href="coverage/">Coverage Reports</a></li>
+            <li><a href="unit-tests.xml">Unit Test Results (XML)</a></li>
+            <li><a href="integration-tests.xml">Integration Test Results (XML)</a></li>
+        </ul>
+    </div>
+</body>
+</html>

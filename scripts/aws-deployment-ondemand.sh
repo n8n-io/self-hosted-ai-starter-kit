@@ -31,27 +31,122 @@ cleanup_on_failure() {
         
         # Get script directory
         local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-        local project_root="$(cd "$script_dir/.." && pwd)"
         
-        # Use cleanup script if available
-        if [ -f "$project_root/cleanup-stack.sh" ]; then
-            log "Using cleanup script to remove resources..."
-            "$project_root/cleanup-stack.sh" "$STACK_NAME" || true
+        # Use unified cleanup script if available (preferred)
+        if [ -f "$script_dir/cleanup-consolidated.sh" ]; then
+            log "Using unified cleanup script to remove all resources..."
+            "$script_dir/cleanup-consolidated.sh" --force "$STACK_NAME" || {
+                warning "Unified cleanup script failed, falling back to manual cleanup..."
+                run_manual_cleanup
+            }
+        # Fallback to legacy cleanup script if it exists
+        elif [ -f "$script_dir/cleanup-stack.sh" ]; then
+            log "Using legacy cleanup script to remove resources..."
+            "$script_dir/cleanup-stack.sh" "$STACK_NAME" || {
+                warning "Legacy cleanup script failed, falling back to manual cleanup..."
+                run_manual_cleanup
+            }
         else
-            log "Running manual cleanup..."
-            # Basic manual cleanup
-            aws ec2 describe-instances --filters "Name=tag:Stack,Values=$STACK_NAME" --query 'Reservations[].Instances[].[InstanceId]' --output text | while read -r instance_id; do
-                if [ -n "$instance_id" ] && [ "$instance_id" != "None" ]; then
-                    aws ec2 terminate-instances --instance-ids "$instance_id" --region "${AWS_REGION:-us-east-1}" || true
-                    log "Terminated instance: $instance_id"
-                fi
-            done
+            log "No cleanup script found, running manual cleanup..."
+            run_manual_cleanup
         fi
         
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         warning "💡 To disable automatic cleanup, set CLEANUP_ON_FAILURE=false"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     fi
+}
+
+# Manual cleanup function for fallback
+run_manual_cleanup() {
+    log "Running comprehensive manual cleanup..."
+    
+    # Cleanup EC2 instances
+    log "Cleaning up EC2 instances..."
+    local instance_ids
+    instance_ids=$(aws ec2 describe-instances \
+        --filters "Name=tag:Stack,Values=$STACK_NAME" "Name=instance-state-name,Values=running,pending,stopped,stopping" \
+        --query 'Reservations[].Instances[].InstanceId' \
+        --output text --region "${AWS_REGION:-us-east-1}" 2>/dev/null || echo "")
+    
+    if [ -n "$instance_ids" ] && [ "$instance_ids" != "None" ]; then
+        for instance_id in $instance_ids; do
+            if [ -n "$instance_id" ] && [ "$instance_id" != "None" ]; then
+                aws ec2 terminate-instances --instance-ids "$instance_id" --region "${AWS_REGION:-us-east-1}" >/dev/null 2>&1 || true
+                log "Terminated instance: $instance_id"
+            fi
+        done
+    fi
+    
+    # Cleanup security groups
+    log "Cleaning up security groups..."
+    local sg_ids
+    sg_ids=$(aws ec2 describe-security-groups \
+        --filters "Name=group-name,Values=${STACK_NAME}-*" \
+        --query 'SecurityGroups[].GroupId' \
+        --output text --region "${AWS_REGION:-us-east-1}" 2>/dev/null || echo "")
+    
+    if [ -n "$sg_ids" ] && [ "$sg_ids" != "None" ]; then
+        for sg_id in $sg_ids; do
+            if [ -n "$sg_id" ] && [ "$sg_id" != "None" ]; then
+                # Wait a bit for instances to be terminated
+                sleep 5
+                aws ec2 delete-security-group --group-id "$sg_id" --region "${AWS_REGION:-us-east-1}" >/dev/null 2>&1 || true
+                log "Deleted security group: $sg_id"
+            fi
+        done
+    fi
+    
+    # Cleanup IAM resources
+    log "Cleaning up IAM resources..."
+    local profile_name=""
+    if [[ "${STACK_NAME}" =~ ^[0-9] ]]; then
+        local clean_name
+        clean_name=$(echo "${STACK_NAME}" | sed 's/[^a-zA-Z0-9]//g')
+        profile_name="app-${clean_name}-profile"
+    else
+        profile_name="${STACK_NAME}-instance-profile"
+    fi
+    
+    # Remove role from instance profile
+    if aws iam get-instance-profile --instance-profile-name "$profile_name" >/dev/null 2>&1; then
+        local role_names
+        role_names=$(aws iam get-instance-profile --instance-profile-name "$profile_name" \
+            --query 'InstanceProfile.Roles[].RoleName' --output text 2>/dev/null || echo "")
+        
+        for role_name in $role_names; do
+            if [ -n "$role_name" ]; then
+                aws iam remove-role-from-instance-profile \
+                    --instance-profile-name "$profile_name" \
+                    --role-name "$role_name" >/dev/null 2>&1 || true
+                log "Removed role $role_name from instance profile"
+            fi
+        done
+        
+        aws iam delete-instance-profile --instance-profile-name "$profile_name" >/dev/null 2>&1 || true
+        log "Deleted instance profile: $profile_name"
+    fi
+    
+    # Delete IAM role
+    local role_name="${STACK_NAME}-role"
+    if aws iam get-role --role-name "$role_name" >/dev/null 2>&1; then
+        # Detach policies first
+        local policy_arns
+        policy_arns=$(aws iam list-attached-role-policies --role-name "$role_name" \
+            --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null || echo "")
+        
+        for policy_arn in $policy_arns; do
+            if [ -n "$policy_arn" ]; then
+                aws iam detach-role-policy --role-name "$role_name" --policy-arn "$policy_arn" >/dev/null 2>&1 || true
+                log "Detached policy: $policy_arn"
+            fi
+        done
+        
+        aws iam delete-role --role-name "$role_name" >/dev/null 2>&1 || true
+        log "Deleted IAM role: $role_name"
+    fi
+    
+    success "Manual cleanup completed for stack: $STACK_NAME"
 }
 
 # Register cleanup handler
@@ -1150,47 +1245,60 @@ setup_monitoring() {
     
     log "Setting up monitoring and cost optimization..."
     
-    # Copy monitoring scripts
-    scp -o StrictHostKeyChecking=no -i "${KEY_NAME}.pem" \
-        "scripts/cost-optimization.py" \
-        "ubuntu@$PUBLIC_IP:/home/ubuntu/cost-optimization.py" 2>/dev/null || {
-        warning "cost-optimization.py not found, skipping monitoring setup"
-        return 0
-    }
-    
-    # Install monitoring script
+    # Note: Python cost optimization removed - using AWS CloudWatch instead
     ssh -o StrictHostKeyChecking=no -i "${KEY_NAME}.pem" "ubuntu@$PUBLIC_IP" << 'EOF'
-# Install Python dependencies
-sudo apt-get install -y python3-pip
-pip3 install boto3 schedule requests nvidia-ml-py3 psutil
+# Setup CloudWatch monitoring (Python dependency removed)
+echo "Setting up CloudWatch monitoring..."
 
-# Create systemd service for cost optimization
-sudo cat > /etc/systemd/system/cost-optimization.service << 'EOFSERVICE'
-[Unit]
-Description=GeuseMaker Cost Optimization (On-Demand)
-After=network.target
+# Install CloudWatch agent
+sudo apt-get update
+sudo apt-get install -y amazon-cloudwatch-agent
 
-[Service]
-Type=simple
-User=ubuntu
-WorkingDirectory=/home/ubuntu
-ExecStart=/usr/bin/python3 /home/ubuntu/cost-optimization.py --action schedule
-Restart=always
-RestartSec=30
+# Create basic CloudWatch configuration
+sudo cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << 'EOFCONFIG'
+{
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "/var/log/docker/*.log",
+            "log_group_name": "/aws/ec2/geusemaker",
+            "log_stream_name": "{instance_id}",
+            "timezone": "UTC"
+          }
+        ]
+      }
+    }
+  },
+  "metrics": {
+    "metrics_collected": {
+      "cpu": {
+        "measurement": ["cpu_usage_idle", "cpu_usage_iowait", "cpu_usage_user", "cpu_usage_system"],
+        "metrics_collection_interval": 60
+      },
+      "disk": {
+        "measurement": ["used_percent"],
+        "metrics_collection_interval": 60,
+        "resources": ["*"]
+      },
+      "mem": {
+        "measurement": ["mem_used_percent"],
+        "metrics_collection_interval": 60
+      }
+    }
+  }
+}
+EOFCONFIG
 
-[Install]
-WantedBy=multi-user.target
-EOFSERVICE
+# Start CloudWatch agent
+sudo systemctl enable amazon-cloudwatch-agent
+sudo systemctl start amazon-cloudwatch-agent
 
-# Start cost optimization service
-sudo systemctl daemon-reload
-sudo systemctl enable cost-optimization.service
-sudo systemctl start cost-optimization.service
-
-echo "Monitoring setup completed!"
+echo "CloudWatch monitoring setup completed!"
 EOF
 
-    success "Monitoring and cost optimization setup completed!"
+    success "CloudWatch monitoring setup completed!"
 }
 
 # =============================================================================

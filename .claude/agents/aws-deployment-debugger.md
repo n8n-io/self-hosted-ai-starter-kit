@@ -83,7 +83,7 @@ make validate
 1. **Disk cleanup**: Execute `./scripts/fix-deployment-issues.sh STACK_NAME REGION`
 2. **Memory optimization**: Adjust Docker Compose resource limits in gpu-optimized.yml
 3. **GPU monitoring**: Use `nvidia-smi` and Docker GPU runtime validation
-4. **Cost optimization**: Run `python3 scripts/cost-optimization.py --action report`
+4. **Cost optimization**: Use AWS Cost Explorer and CloudWatch for cost monitoring
 
 ## Output Format Requirements
 For each issue identified, provide:
