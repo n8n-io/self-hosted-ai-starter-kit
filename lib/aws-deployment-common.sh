@@ -1105,15 +1105,24 @@ validate_service_endpoints() {
 
     # Default services if none provided
     if [ ${#services[@]} -eq 0 ]; then
-        services=("n8n:5678" "ollama:11434" "qdrant:6333")
+        services=("n8n:5678" "ollama:11434" "qdrant:6333" "crawl4ai:11235")
     fi
 
     log "Validating service endpoints..."
+    
+    # Define health check endpoints for each service
+    declare -A health_endpoints=(
+        ["n8n"]="/healthz"
+        ["ollama"]="/api/tags"
+        ["qdrant"]="/health"
+        ["crawl4ai"]="/health"
+    )
     
     local all_healthy=true
     for service_port in "${services[@]}"; do
         local service_name="${service_port%:*}"
         local port="${service_port#*:}"
+        local health_path="${health_endpoints[$service_name]:-/}"
         
         info "Checking $service_name on port $port..."
         
@@ -1121,19 +1130,24 @@ validate_service_endpoints() {
         local service_healthy=false
         
         while [ $attempt -le $max_attempts ]; do
-            if curl -s --connect-timeout 5 "http://$instance_ip:$port" > /dev/null; then
+            # Use the specific health endpoint for each service
+            if curl -s --connect-timeout 10 --max-time 15 "http://$instance_ip:$port$health_path" > /dev/null 2>&1; then
                 success "$service_name is healthy"
                 service_healthy=true
                 break
             fi
             
             warning "$service_name health check attempt $attempt/$max_attempts failed"
-            sleep $sleep_interval
+            
+            # Increase wait time for subsequent attempts
+            local current_sleep=$((sleep_interval + (attempt - 1) * 5))
+            info "Waiting ${current_sleep}s before next attempt..."
+            sleep $current_sleep
             ((attempt++))
         done
         
         if [ "$service_healthy" = false ]; then
-            error "$service_name failed health checks"
+            error "$service_name failed health checks after $max_attempts attempts"
             all_healthy=false
         fi
     done
@@ -1142,7 +1156,7 @@ validate_service_endpoints() {
         success "All services are healthy"
         return 0
     else
-        warning "Some services failed health checks"
+        warning "Some services failed health checks. Check the logs and service status."
         return 1
     fi
 }
@@ -1354,8 +1368,8 @@ create_instance_alarms() {
         --threshold 80 \
         --comparison-operator "GreaterThanThreshold" \
         --evaluation-periods 2 \
-        --dimensions Name=InstanceId,Value="$instance_id" \
-        --region "$AWS_REGION" || true
+        --dimensions "Name=InstanceId,Value=${instance_id}" \
+        --region "$AWS_REGION" 2>/dev/null || true
 
     # High memory alarm (if CloudWatch agent is installed)
     aws cloudwatch put-metric-alarm \
@@ -1368,8 +1382,8 @@ create_instance_alarms() {
         --threshold 90 \
         --comparison-operator "GreaterThanThreshold" \
         --evaluation-periods 2 \
-        --dimensions Name=InstanceId,Value="$instance_id" \
-        --region "$AWS_REGION" || true
+        --dimensions "Name=InstanceId,Value=${instance_id}" \
+        --region "$AWS_REGION" 2>/dev/null || true
 
     # Instance status check alarm
     aws cloudwatch put-metric-alarm \
@@ -1382,8 +1396,8 @@ create_instance_alarms() {
         --threshold 1 \
         --comparison-operator "GreaterThanOrEqualToThreshold" \
         --evaluation-periods 1 \
-        --dimensions Name=InstanceId,Value="$instance_id" \
-        --region "$AWS_REGION" || true
+        --dimensions "Name=InstanceId,Value=${instance_id}" \
+        --region "$AWS_REGION" 2>/dev/null || true
 }
 
 create_alb_alarms() {
@@ -1405,8 +1419,8 @@ create_alb_alarms() {
         --threshold 5 \
         --comparison-operator "GreaterThanThreshold" \
         --evaluation-periods 2 \
-        --dimensions Name=LoadBalancer,Value="$alb_name" \
-        --region "$AWS_REGION" || true
+        --dimensions "Name=LoadBalancer,Value=${alb_name}" \
+        --region "$AWS_REGION" 2>/dev/null || true
 
     # High error rate alarm
     aws cloudwatch put-metric-alarm \
@@ -1419,8 +1433,8 @@ create_alb_alarms() {
         --threshold 10 \
         --comparison-operator "GreaterThanThreshold" \
         --evaluation-periods 2 \
-        --dimensions Name=LoadBalancer,Value="$alb_name" \
-        --region "$AWS_REGION" || true
+        --dimensions "Name=LoadBalancer,Value=${alb_name}" \
+        --region "$AWS_REGION" 2>/dev/null || true
 }
 
 # =============================================================================

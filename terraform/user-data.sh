@@ -338,30 +338,79 @@ log "Setting up monitoring and health checks..."
 # Create health check script
 cat > /home/ubuntu/GeuseMaker/health-check.sh << 'EOF'
 #!/bin/bash
-# Health check script for GeuseMaker services
+# Enhanced health check script for GeuseMaker services
 
-SERVICES=("n8n:5678" "ollama:11434" "qdrant:6333")
-ALL_HEALTHY=true
+set -e
 
-echo "$(date): Starting health check..."
+log() {
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1"
+}
 
-for service in "${SERVICES[@]}"; do
-    name="${service%:*}"
-    port="${service#*:}"
-    
-    if curl -s --connect-timeout 5 "http://localhost:$port" >/dev/null; then
-        echo "✅ $name (port $port) is healthy"
-    else
-        echo "❌ $name (port $port) is unhealthy"
-        ALL_HEALTHY=false
+# Health check endpoints and expected responses
+declare -A HEALTH_ENDPOINTS=(
+    ["n8n"]="http://localhost:5678/healthz"
+    ["ollama"]="http://localhost:11434/api/tags"
+    ["qdrant"]="http://localhost:6333/health"
+    ["crawl4ai"]="http://localhost:11235/health"
+)
+
+# Service startup times (in seconds)
+declare -A STARTUP_TIMES=(
+    ["postgres"]=30
+    ["qdrant"]=45
+    ["ollama"]=60
+    ["n8n"]=90
+    ["crawl4ai"]=30
+)
+
+log "Starting comprehensive health checks..."
+
+# Check if Docker is running
+if ! systemctl is-active --quiet docker; then
+    log "ERROR: Docker is not running"
+    exit 1
+fi
+
+# Check if services are running
+log "Checking Docker service status..."
+docker-compose -f "$COMPOSE_FILE" ps
+
+# Wait for services to be ready
+for service in postgres qdrant ollama n8n crawl4ai; do
+    if [ -n "${STARTUP_TIMES[$service]}" ]; then
+        log "Waiting for $service to be ready (${STARTUP_TIMES[$service]}s)..."
+        sleep "${STARTUP_TIMES[$service]}"
     fi
 done
 
-if [ "$ALL_HEALTHY" = "true" ]; then
-    echo "🎉 All services are healthy"
+# Perform health checks
+all_healthy=true
+for service in "${!HEALTH_ENDPOINTS[@]}"; do
+    endpoint="${HEALTH_ENDPOINTS[$service]}"
+    log "Checking $service at $endpoint..."
+    
+    # Try multiple times with increasing delays
+    for attempt in {1..5}; do
+        if curl -f -s --max-time 10 "$endpoint" > /dev/null 2>&1; then
+            log "✅ $service is healthy"
+            break
+        else
+            log "⚠️  $service health check attempt $attempt/5 failed"
+            if [ $attempt -lt 5 ]; then
+                sleep $((attempt * 10))
+            else
+                log "❌ $service failed all health checks"
+                all_healthy=false
+            fi
+        fi
+    done
+done
+
+if [ "$all_healthy" = true ]; then
+    log "🎉 All services are healthy!"
     exit 0
 else
-    echo "⚠️ Some services are unhealthy"
+    log "❌ Some services are unhealthy. Check logs with: docker-compose -f $COMPOSE_FILE logs"
     exit 1
 fi
 EOF
@@ -404,13 +453,27 @@ fi
 # Start services with Docker Compose
 if [ -f "$COMPOSE_FILE" ]; then
     log "Starting services using $COMPOSE_FILE..."
+    
+    # Pull latest images first
+    log "Pulling latest Docker images..."
+    docker-compose -f "$COMPOSE_FILE" pull
+    
+    # Start services in background
+    log "Starting services..."
     docker-compose -f "$COMPOSE_FILE" up -d
     
-    log "Waiting for services to start..."
-    sleep 30
+    # Wait for services to initialize
+    log "Waiting for services to initialize..."
+    sleep 60
     
-    log "Services started. Running health check..."
+    # Check service status
+    log "Checking service status..."
+    docker-compose -f "$COMPOSE_FILE" ps
+    
+    # Run health checks
+    log "Running health checks..."
     ./health-check.sh
+    
 else
     log "Error: Compose file $COMPOSE_FILE not found"
     exit 1
@@ -421,6 +484,131 @@ EOF
 
 chmod +x /home/ubuntu/GeuseMaker/start-services.sh
 chown ubuntu:ubuntu /home/ubuntu/GeuseMaker/start-services.sh
+
+# Create improved health check script
+cat > /home/ubuntu/GeuseMaker/health-check.sh << 'EOF'
+#!/bin/bash
+# Enhanced health check script for GeuseMaker services
+
+set -e
+
+log() {
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1"
+}
+
+# Health check endpoints and expected responses
+declare -A HEALTH_ENDPOINTS=(
+    ["n8n"]="http://localhost:5678/healthz"
+    ["ollama"]="http://localhost:11434/api/tags"
+    ["qdrant"]="http://localhost:6333/health"
+    ["crawl4ai"]="http://localhost:11235/health"
+)
+
+# Service startup times (in seconds)
+declare -A STARTUP_TIMES=(
+    ["postgres"]=30
+    ["qdrant"]=45
+    ["ollama"]=60
+    ["n8n"]=90
+    ["crawl4ai"]=30
+)
+
+log "Starting comprehensive health checks..."
+
+# Check if Docker is running
+if ! systemctl is-active --quiet docker; then
+    log "ERROR: Docker is not running"
+    exit 1
+fi
+
+# Check if services are running
+log "Checking Docker service status..."
+docker-compose -f "$COMPOSE_FILE" ps
+
+# Wait for services to be ready
+for service in postgres qdrant ollama n8n crawl4ai; do
+    if [ -n "${STARTUP_TIMES[$service]}" ]; then
+        log "Waiting for $service to be ready (${STARTUP_TIMES[$service]}s)..."
+        sleep "${STARTUP_TIMES[$service]}"
+    fi
+done
+
+# Perform health checks
+all_healthy=true
+for service in "${!HEALTH_ENDPOINTS[@]}"; do
+    endpoint="${HEALTH_ENDPOINTS[$service]}"
+    log "Checking $service at $endpoint..."
+    
+    # Try multiple times with increasing delays
+    for attempt in {1..5}; do
+        if curl -f -s --max-time 10 "$endpoint" > /dev/null 2>&1; then
+            log "✅ $service is healthy"
+            break
+        else
+            log "⚠️  $service health check attempt $attempt/5 failed"
+            if [ $attempt -lt 5 ]; then
+                sleep $((attempt * 10))
+            else
+                log "❌ $service failed all health checks"
+                all_healthy=false
+            fi
+        fi
+    done
+done
+
+if [ "$all_healthy" = true ]; then
+    log "🎉 All services are healthy!"
+    exit 0
+else
+    log "❌ Some services are unhealthy. Check logs with: docker-compose -f $COMPOSE_FILE logs"
+    exit 1
+fi
+EOF
+
+chmod +x /home/ubuntu/GeuseMaker/health-check.sh
+chown ubuntu:ubuntu /home/ubuntu/GeuseMaker/health-check.sh
+
+# Automatically start services after user-data completion
+log "Scheduling automatic service startup..."
+cat > /home/ubuntu/GeuseMaker/auto-start.sh << 'EOF'
+#!/bin/bash
+# Automatic service startup script
+
+set -e
+
+log() {
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1"
+}
+
+# Wait for user-data to complete
+while [ ! -f /tmp/user-data-complete ]; do
+    log "Waiting for user-data script to complete..."
+    sleep 10
+done
+
+log "User-data completed, starting services..."
+
+# Change to GeuseMaker directory
+cd /home/ubuntu/GeuseMaker
+
+# Load environment
+if [ -f config/environment.env ]; then
+    set -a
+    source config/environment.env
+    set +a
+fi
+
+# Start services
+./start-services.sh
+
+log "Automatic service startup completed"
+EOF
+
+chmod +x /home/ubuntu/GeuseMaker/auto-start.sh
+chown ubuntu:ubuntu /home/ubuntu/GeuseMaker/auto-start.sh
+
+# Run auto-start in background
+nohup /home/ubuntu/GeuseMaker/auto-start.sh > /var/log/auto-start.log 2>&1 &
 
 # Signal completion
 touch /tmp/user-data-complete
