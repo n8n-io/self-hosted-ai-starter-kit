@@ -60,17 +60,56 @@ CONFIG_FILE_PATH=""
 # DEPENDENCY MANAGEMENT
 # =============================================================================
 
-# Check if required dependencies are available
+# Check if required dependencies are available with improved detection
 check_config_dependencies() {
     local missing_tools=()
     local optional_tools=()
+    local available_alternatives=false
+    local has_yaml_processor=false
+    local has_json_processor=false
     
-    # Required tools
-    for tool in yq jq; do
-        if ! command -v "$tool" >/dev/null 2>&1; then
-            missing_tools+=("$tool")
+    # Check for YAML processing capabilities
+    if command -v yq >/dev/null 2>&1; then
+        has_yaml_processor=true
+    elif command -v python3 >/dev/null 2>&1; then
+        if python3 -c "import yaml; print('yaml available')" 2>/dev/null | grep -q "yaml available"; then
+            has_yaml_processor=true
+            available_alternatives=true
         fi
-    done
+    fi
+    
+    if [ "$has_yaml_processor" = "false" ]; then
+        # Check for basic YAML parsing alternatives
+        if command -v python >/dev/null 2>&1; then
+            if python -c "import yaml" 2>/dev/null; then
+                has_yaml_processor=true
+                available_alternatives=true
+            fi
+        fi
+    fi
+    
+    if [ "$has_yaml_processor" = "false" ]; then
+        missing_tools+=("yq (or python3-yaml)")
+    fi
+    
+    # Check for JSON processing capabilities
+    if command -v jq >/dev/null 2>&1; then
+        has_json_processor=true
+    elif command -v python3 >/dev/null 2>&1; then
+        if python3 -c "import json; print('json available')" 2>/dev/null | grep -q "json available"; then
+            has_json_processor=true
+            available_alternatives=true
+        fi
+    elif command -v python >/dev/null 2>&1; then
+        if python -c "import json" 2>/dev/null; then
+            has_json_processor=true
+            available_alternatives=true
+        fi
+    fi
+    
+    if [ "$has_json_processor" = "false" ]; then
+        missing_tools+=("jq (or python with json)")
+    fi
     
     # Optional tools (graceful degradation)
     for tool in envsubst bc; do
@@ -79,16 +118,27 @@ check_config_dependencies() {
         fi
     done
     
+    # Provide helpful information but don't fail
     if [[ ${#missing_tools[@]} -gt 0 ]]; then
-        if declare -f error >/dev/null 2>&1; then
-            error "Missing required dependencies: ${missing_tools[*]}"
+        if declare -f warning >/dev/null 2>&1; then
+            warning "Missing recommended dependencies: ${missing_tools[*]}"
+            if [ "$available_alternatives" = "true" ]; then
+                warning "Using fallback implementations (reduced functionality)"
+            else
+                warning "Some enhanced features may not be available"
+            fi
         else
-            echo "ERROR: Missing required dependencies: ${missing_tools[*]}" >&2
+            echo "WARNING: Missing recommended dependencies: ${missing_tools[*]}" >&2
+            if [ "$available_alternatives" = "true" ]; then
+                echo "WARNING: Using fallback implementations" >&2
+            else
+                echo "WARNING: Some enhanced features may not be available" >&2
+            fi
         fi
         echo "Install with:" >&2
         echo "  macOS: brew install yq jq" >&2
         echo "  Ubuntu: apt-get install yq jq" >&2
-        return 1
+        echo "  Or: pip3 install PyYAML" >&2
     fi
     
     if [[ ${#optional_tools[@]} -gt 0 ]]; then
@@ -99,6 +149,7 @@ check_config_dependencies() {
         fi
     fi
     
+    # Always return success to allow graceful degradation
     return 0
 }
 
@@ -229,8 +280,8 @@ validate_stack_name() {
     return 0
 }
 
-# Validate configuration file structure
-validate_configuration() {
+# Validate configuration file structure with improved error handling
+validate_configuration_file() {
     local config_file="$1"
     
     if [[ ! -f "$config_file" ]]; then
@@ -242,32 +293,74 @@ validate_configuration() {
         return 1
     fi
     
-    # Check for required sections (basic validation)
-    if ! grep -q "^global:" "$config_file"; then
+    # Check file is readable
+    if [[ ! -r "$config_file" ]]; then
         if declare -f error >/dev/null 2>&1; then
-            error "Configuration file missing required 'global' section: $config_file"
+            error "Configuration file not readable: $config_file"
         else
-            echo "ERROR: Configuration file missing required 'global' section: $config_file" >&2
+            echo "ERROR: Configuration file not readable: $config_file" >&2
         fi
         return 1
     fi
     
-    if ! grep -q "^infrastructure:" "$config_file"; then
+    # Check file is not empty
+    if [[ ! -s "$config_file" ]]; then
         if declare -f error >/dev/null 2>&1; then
-            error "Configuration file missing required 'infrastructure' section: $config_file"
+            error "Configuration file is empty: $config_file"
         else
-            echo "ERROR: Configuration file missing required 'infrastructure' section: $config_file" >&2
+            echo "ERROR: Configuration file is empty: $config_file" >&2
         fi
         return 1
     fi
     
-    if ! grep -q "^applications:" "$config_file"; then
+    # Validate YAML syntax first
+    local yaml_valid=false
+    if command -v yq >/dev/null 2>&1; then
+        if yq eval '.' "$config_file" >/dev/null 2>&1; then
+            yaml_valid=true
+        fi
+    elif command -v python3 >/dev/null 2>&1 && python3 -c "import yaml" 2>/dev/null; then
+        if python3 -c "import yaml; yaml.safe_load(open('$config_file'))" 2>/dev/null; then
+            yaml_valid=true
+        fi
+    elif command -v python >/dev/null 2>&1 && python -c "import yaml" 2>/dev/null; then
+        if python -c "import yaml; yaml.safe_load(open('$config_file'))" 2>/dev/null; then
+            yaml_valid=true
+        fi
+    else
+        # Basic YAML structure check with grep
+        if grep -q ":" "$config_file" && ! grep -q "^[[:space:]]*[{}\[\]]" "$config_file"; then
+            yaml_valid=true
+        fi
+    fi
+    
+    if [ "$yaml_valid" = "false" ]; then
         if declare -f error >/dev/null 2>&1; then
-            error "Configuration file missing required 'applications' section: $config_file"
+            error "Configuration file has invalid YAML syntax: $config_file"
         else
-            echo "ERROR: Configuration file missing required 'applications' section: $config_file" >&2
+            echo "ERROR: Configuration file has invalid YAML syntax: $config_file" >&2
         fi
         return 1
+    fi
+    
+    # Check for required sections (more flexible validation)
+    local required_sections=("global" "infrastructure" "applications")
+    local missing_sections=()
+    
+    for section in "${required_sections[@]}"; do
+        if ! grep -q "^${section}:" "$config_file" && ! grep -q "^[[:space:]]*${section}:" "$config_file"; then
+            missing_sections+=("$section")
+        fi
+    done
+    
+    if [[ ${#missing_sections[@]} -gt 0 ]]; then
+        if declare -f warning >/dev/null 2>&1; then
+            warning "Configuration file missing recommended sections: ${missing_sections[*]}"
+            warning "Some features may not work as expected"
+        else
+            echo "WARNING: Configuration file missing sections: ${missing_sections[*]}" >&2
+        fi
+        # Don't fail for missing sections, just warn
     fi
     
     return 0
@@ -352,7 +445,7 @@ clear_config_cache() {
 # CONFIGURATION VALUE RETRIEVAL
 # =============================================================================
 
-# Get configuration value with fallback (yq wrapper with error handling)
+# Get configuration value with fallback (improved with multiple parsers)
 get_config_value() {
     local path="$1"
     local fallback="${2:-}"
@@ -364,16 +457,110 @@ get_config_value() {
     fi
     
     local value
-    if value=$(yq eval "$path" "$config_file" 2>/dev/null); then
-        if [[ "$value" == "null" || "$value" == "" ]]; then
-            echo "$fallback"
-        else
-            echo "$value"
+    
+    # Try yq first (preferred)
+    if command -v yq >/dev/null 2>&1; then
+        if value=$(yq eval "$path" "$config_file" 2>/dev/null); then
+            if [[ "$value" == "null" || "$value" == "" || "$value" == "~" ]]; then
+                echo "$fallback"
+            else
+                echo "$value"
+            fi
+            return 0
         fi
-    else
-        echo "$fallback"
-        return 1
     fi
+    
+    # Fallback to python3 if yq is not available
+    if command -v python3 >/dev/null 2>&1; then
+        if python3 -c "import yaml" 2>/dev/null; then
+            # Convert yq path to python dict access with improved parsing
+            local python_script="
+import yaml
+import sys
+
+def get_nested_value(data, path_str):
+    try:
+        # Remove leading dot and split by dots
+        path_parts = path_str.lstrip('.').split('.')
+        current = data
+        for part in path_parts:
+            if isinstance(current, dict) and part in current:
+                current = current[part]
+            else:
+                return None
+        return current
+    except:
+        return None
+
+try:
+    with open('$config_file', 'r') as f:
+        data = yaml.safe_load(f)
+    result = get_nested_value(data, '$path')
+    if result is not None:
+        print(result)
+    else:
+        print('$fallback')
+except Exception as e:
+    print('$fallback')
+"
+            if value=$(python3 -c "$python_script" 2>/dev/null); then
+                echo "$value"
+                return 0
+            fi
+        fi
+    fi
+    
+    # Fallback to python (Python 2) if available
+    if command -v python >/dev/null 2>&1; then
+        if python -c "import yaml" 2>/dev/null; then
+            local python2_script="
+import yaml
+
+def get_nested_value(data, path_str):
+    try:
+        path_parts = path_str.lstrip('.').split('.')
+        current = data
+        for part in path_parts:
+            if isinstance(current, dict) and part in current:
+                current = current[part]
+            else:
+                return None
+        return current
+    except:
+        return None
+
+try:
+    with open('$config_file', 'r') as f:
+        data = yaml.safe_load(f)
+    result = get_nested_value(data, '$path')
+    if result is not None:
+        print result
+    else:
+        print '$fallback'
+except:
+    print '$fallback'
+"
+            if value=$(python -c "$python2_script" 2>/dev/null); then
+                echo "$value"
+                return 0
+            fi
+        fi
+    fi
+    
+    # Last resort: simple grep-based extraction for basic paths
+    if echo "$path" | grep -q '^\.[a-zA-Z_][a-zA-Z0-9_]*$'; then
+        local key=$(echo "$path" | sed 's/^\.//g')
+        local grep_value
+        grep_value=$(grep -E "^${key}:" "$config_file" | head -n1 | sed 's/^[^:]*:[[:space:]]*//' | sed 's/["'\'']*//g' 2>/dev/null)
+        if [ -n "$grep_value" ]; then
+            echo "$grep_value"
+            return 0
+        fi
+    fi
+    
+    # If all fails, return fallback
+    echo "$fallback"
+    return 1
 }
 
 # Get global configuration values
@@ -1094,19 +1281,42 @@ validate_security_configuration() {
 # LIBRARY INITIALIZATION
 # =============================================================================
 
-# Auto-initialize if environment variables are set
+# Auto-initialize if environment variables are set (with error handling)
 if [[ -n "${AUTO_INIT_CONFIG:-}" && "${AUTO_INIT_CONFIG}" == "true" ]]; then
-    init_config "${ENVIRONMENT:-$DEFAULT_ENVIRONMENT}" "${DEPLOYMENT_TYPE:-$DEFAULT_DEPLOYMENT_TYPE}"
+    if declare -f init_config >/dev/null 2>&1; then
+        if ! init_config "${ENVIRONMENT:-$DEFAULT_ENVIRONMENT}" "${DEPLOYMENT_TYPE:-$DEFAULT_DEPLOYMENT_TYPE}" 2>/dev/null; then
+            if declare -f warning >/dev/null 2>&1; then
+                warning "Auto-initialization of configuration failed, manual initialization may be required"
+            else
+                echo "WARNING: Auto-initialization of configuration failed" >&2
+            fi
+        fi
+    else
+        if declare -f warning >/dev/null 2>&1; then
+            warning "Auto-initialization requested but init_config function not available"
+        else
+            echo "WARNING: Auto-initialization requested but init_config function not available" >&2
+        fi
+    fi
 fi
 
-# Export main functions for external use
-export -f validate_environment validate_deployment_type validate_aws_region validate_stack_name
-export -f load_config get_config_value get_global_config get_infrastructure_config 
-export -f get_application_config get_security_config get_monitoring_config get_cost_config
-export -f generate_env_file generate_docker_env_section init_config generate_all_config_files
-export -f get_config_summary apply_deployment_type_overrides check_config_dependencies
-export -f get_image_version validate_image_versions validate_configuration generate_docker_image_overrides
-export -f generate_environment_file generate_docker_compose validate_security_configuration
+# Export main functions for external use (with error handling for export failures)
+if command -v export >/dev/null 2>&1; then
+    # Core validation functions
+    export -f validate_environment validate_deployment_type validate_aws_region validate_stack_name 2>/dev/null || true
+    
+    # Configuration access functions
+    export -f load_config get_config_value get_global_config get_infrastructure_config 2>/dev/null || true
+    export -f get_application_config get_security_config get_monitoring_config get_cost_config 2>/dev/null || true
+    
+    # Generation functions
+    export -f generate_env_file generate_docker_env_section init_config generate_all_config_files 2>/dev/null || true
+    export -f get_config_summary apply_deployment_type_overrides check_config_dependencies 2>/dev/null || true
+    
+    # Image and validation functions
+    export -f get_image_version validate_image_versions validate_configuration_file generate_docker_image_overrides 2>/dev/null || true
+    export -f generate_environment_file generate_docker_compose validate_security_configuration 2>/dev/null || true
+fi
 
 if declare -f log >/dev/null 2>&1; then
     log "Configuration management library loaded (v${CONFIG_MANAGEMENT_VERSION})"

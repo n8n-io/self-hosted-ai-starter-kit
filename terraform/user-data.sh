@@ -47,24 +47,172 @@ log "Stack: $STACK_NAME, Environment: $ENVIRONMENT"
 # SYSTEM UPDATES
 # =============================================================================
 
-log "Updating system packages..."
-export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get upgrade -y
+# Function to validate all dependencies before proceeding
+validate_system_dependencies() {
+    log "Validating system dependencies and requirements..."
+    
+    # Check available disk space
+    local available_space=$(df / | awk 'NR==2 {print $4}')
+    local required_space=15728640  # 15GB in KB (increased from 10GB)
+    
+    if [ "$available_space" -lt "$required_space" ]; then
+        log "Error: Insufficient disk space. Available: $(($available_space/1024/1024))GB, Required: $(($required_space/1024/1024))GB"
+        return 1
+    fi
+    
+    # Check memory requirements
+    local available_memory=$(free -k | awk 'NR==2{print $2}')
+    local required_memory=3145728  # 3GB in KB
+    
+    if [ "$available_memory" -lt "$required_memory" ]; then
+        log "Error: Insufficient memory. Available: $(($available_memory/1024/1024))GB, Required: $(($required_memory/1024/1024))GB"
+        return 1
+    fi
+    
+    # Check CPU requirements
+    local cpu_cores=$(nproc)
+    if [ "$cpu_cores" -lt 2 ]; then
+        log "Warning: Less than 2 CPU cores available. Performance may be impacted."
+    fi
+    
+    # Check network connectivity
+    if ! ping -c 3 8.8.8.8 >/dev/null 2>&1; then
+        log "Error: No internet connectivity available"
+        return 1
+    fi
+    
+    # Check for required kernel modules
+    local required_modules=("overlay" "br_netfilter")
+    for module in "${required_modules[@]}"; do
+        if ! modprobe "$module" 2>/dev/null; then
+            log "Warning: Unable to load kernel module: $module"
+        fi
+    done
+    
+    log "System dependency validation completed successfully"
+    return 0
+}
 
-# Install essential packages
-apt-get install -y \
-    curl \
-    wget \
-    unzip \
-    git \
-    htop \
-    jq \
-    awscli \
-    build-essential \
-    ca-certificates \
-    gnupg \
-    lsb-release
+log "Updating system packages..."
+
+# Validate system before proceeding
+if ! validate_system_dependencies; then
+    log "Error: System dependency validation failed. Cannot continue."
+    exit 1
+fi
+export DEBIAN_FRONTEND=noninteractive
+
+# Check for and handle existing package manager locks
+wait_for_apt_lock() {
+    local max_wait=600  # 10 minutes max
+    local wait_time=0
+    log "Waiting for package manager locks to be released..."
+    
+    while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || \
+          fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || \
+          fuser /var/lib/dpkg/lock >/dev/null 2>&1 || \
+          pgrep -f "apt-get|dpkg|unattended-upgrade" >/dev/null 2>&1; do
+        if [ $wait_time -ge $max_wait ]; then
+            log "Timeout waiting for package locks, attempting to resolve..."
+            # Kill unattended upgrades that might be blocking
+            pkill -f unattended-upgrade || true
+            sleep 10
+            break
+        fi
+        log "Package manager is locked, waiting 15 seconds..."
+        sleep 15
+        wait_time=$((wait_time + 15))
+    done
+    log "Package manager locks released"
+}
+
+wait_for_apt_lock
+
+# Perform system updates with error handling
+if ! apt-get update; then
+    log "Initial apt update failed, retrying after clearing cache..."
+    apt-get clean
+    apt-get update || log "Warning: System update failed, continuing with installation"
+fi
+
+if ! apt-get upgrade -y; then
+    log "Warning: System upgrade had issues, continuing with installation"
+fi
+
+# Install essential packages with comprehensive error handling
+log "Installing essential packages..."
+ESSENTIAL_PACKAGES="curl wget unzip git htop jq awscli build-essential ca-certificates gnupg lsb-release"
+CRITICAL_PACKAGES="curl wget git"
+OPTIONAL_PACKAGES="htop jq awscli build-essential"
+SYSTEM_PACKAGES="ca-certificates gnupg lsb-release unzip"
+
+# Install in groups with different priorities
+install_package_group() {
+    local group_name="$1"
+    local packages="$2"
+    local required="${3:-false}"
+    
+    log "Installing $group_name packages: $packages"
+    
+    if apt-get install -y $packages; then
+        log "Successfully installed $group_name packages"
+        return 0
+    else
+        log "Group installation failed for $group_name, trying individual packages..."
+        local failed_packages=()
+        
+        for package in $packages; do
+            if apt-get install -y "$package"; then
+                log "Successfully installed $package"
+            else
+                log "Failed to install $package"
+                failed_packages+=("$package")
+                
+                if [ "$required" = "true" ]; then
+                    log "Error: Critical package $package failed to install"
+                    return 1
+                fi
+            fi
+        done
+        
+        if [ ${#failed_packages[@]} -gt 0 ]; then
+            log "Warning: Failed to install packages: ${failed_packages[*]}"
+        fi
+        return 0
+    fi
+}
+
+# Install system packages first
+install_package_group "system" "$SYSTEM_PACKAGES" false
+
+# Install critical packages (must succeed)
+install_package_group "critical" "$CRITICAL_PACKAGES" true
+
+# Install optional packages (can fail)
+install_package_group "optional" "$OPTIONAL_PACKAGES" false
+
+# Verify critical packages are available
+log "Verifying critical packages..."
+for critical_package in $CRITICAL_PACKAGES; do
+    if ! command -v "$critical_package" >/dev/null 2>&1; then
+        log "Error: Critical package $critical_package is not available after installation"
+        # Try to install via snap or alternative methods
+        if command -v snap >/dev/null 2>&1; then
+            log "Attempting to install $critical_package via snap..."
+            snap install "$critical_package" || log "Snap installation also failed for $critical_package"
+        fi
+        
+        # Final check
+        if ! command -v "$critical_package" >/dev/null 2>&1; then
+            log "Error: Unable to install critical package $critical_package"
+            exit 1
+        fi
+    else
+        log "✓ $critical_package is available"
+    fi
+done
+
+log "Essential packages installation completed"
 
 # =============================================================================
 # DOCKER INSTALLATION
@@ -72,17 +220,36 @@ apt-get install -y \
 
 log "Installing Docker..."
 
-# Add Docker's official GPG key
-mkdir -p /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-chmod a+r /etc/apt/keyrings/docker.gpg
+# Check if Docker is already installed
+if command -v docker >/dev/null 2>&1; then
+    log "Docker is already installed, checking version..."
+    docker --version | tee -a /var/log/user-data.log
+else
+    # Add Docker's official GPG key
+    log "Adding Docker repository..."
+    mkdir -p /etc/apt/keyrings
+    
+    if ! curl -fsSL --retry 3 --connect-timeout 30 https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg; then
+        log "Error: Failed to add Docker GPG key"
+        exit 1
+    fi
+    chmod a+r /etc/apt/keyrings/docker.gpg
 
-# Add Docker repository
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+    # Add Docker repository
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-# Install Docker Engine
-apt-get update
-apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    # Update package list and install Docker Engine
+    wait_for_apt_lock
+    if ! apt-get update; then
+        log "Error: Failed to update package list after adding Docker repository"
+        exit 1
+    fi
+    
+    if ! apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; then
+        log "Error: Failed to install Docker packages"
+        exit 1
+    fi
+fi
 
 # Add ubuntu user to docker group
 usermod -aG docker ubuntu
@@ -239,9 +406,116 @@ log "Setting up application directory..."
 mkdir -p /home/ubuntu/GeuseMaker
 chown ubuntu:ubuntu /home/ubuntu/GeuseMaker
 
-# Create Docker logging configuration
+# Create Docker logging and storage configuration
 mkdir -p /etc/docker
-cat > /etc/docker/daemon.json << EOF
+
+# Check available storage drivers and disk space
+log "Checking Docker storage requirements and available drivers..."
+AVAILABLE_SPACE=$(df / | awk 'NR==2 {print $4}')
+REQUIRED_SPACE=10485760  # 10GB in KB
+
+if [ "$AVAILABLE_SPACE" -lt "$REQUIRED_SPACE" ]; then
+    log "Warning: Available disk space is less than 10GB. Consider expanding storage."
+fi
+
+# Detect available storage drivers
+STORAGE_DRIVER="overlay2"
+STORAGE_OPTS='[]'
+
+# Check if overlay2 is supported
+if [ -d "/sys/module/overlay" ] || modprobe overlay 2>/dev/null; then
+    log "overlay2 storage driver is available"
+    STORAGE_DRIVER="overlay2"
+    STORAGE_OPTS='["overlay2.override_kernel_check=true"]'
+else
+    log "overlay2 not available, checking for devicemapper..."
+    if [ -f "/sys/fs/cgroup/devices/devices.list" ]; then
+        STORAGE_DRIVER="devicemapper"
+        STORAGE_OPTS='["dm.thinpooldev=/dev/mapper/docker-thinpool", "dm.use_deferred_removal=true", "dm.use_deferred_deletion=true"]'
+    else
+        log "Using default storage driver"
+        STORAGE_DRIVER=""
+        STORAGE_OPTS='[]'
+    fi
+fi
+
+# Create Docker daemon configuration with detected storage driver
+log "Configuring Docker with storage driver: ${STORAGE_DRIVER:-auto}"
+if [ -n "$STORAGE_DRIVER" ]; then
+    cat > /etc/docker/daemon.json << EOF
+{
+    "log-driver": "json-file",
+    "log-opts": {
+        "max-size": "100m",
+        "max-file": "3"
+    },
+    "storage-driver": "$STORAGE_DRIVER",
+    "storage-opts": $STORAGE_OPTS,
+    "data-root": "/var/lib/docker",
+    "exec-opts": ["native.cgroupdriver=systemd"],
+    "live-restore": true,
+    "userland-proxy": false,
+    "experimental": false,
+    "default-runtime": "runc",
+    "runtimes": {
+        "runc": {
+            "path": "runc"
+        }
+    }
+}
+EOF
+else
+    # Fallback configuration without explicit storage driver
+    cat > /etc/docker/daemon.json << EOF
+{
+    "log-driver": "json-file",
+    "log-opts": {
+        "max-size": "100m",
+        "max-file": "3"
+    },
+    "data-root": "/var/lib/docker",
+    "exec-opts": ["native.cgroupdriver=systemd"],
+    "live-restore": true,
+    "userland-proxy": false,
+    "experimental": false,
+    "default-runtime": "runc",
+    "runtimes": {
+        "runc": {
+            "path": "runc"
+        }
+    }
+}
+EOF
+fi
+
+# Ensure Docker data directory exists with proper permissions
+mkdir -p /var/lib/docker
+chown root:root /var/lib/docker
+chmod 700 /var/lib/docker
+
+# Validate Docker configuration before restart
+log "Validating Docker daemon configuration..."
+if ! python3 -c "import json; json.load(open('/etc/docker/daemon.json'))" 2>/dev/null; then
+    log "Warning: Docker daemon.json has invalid JSON, creating minimal configuration"
+    cat > /etc/docker/daemon.json << EOF
+{
+    "log-driver": "json-file",
+    "log-opts": {
+        "max-size": "100m",
+        "max-file": "3"
+    },
+    "data-root": "/var/lib/docker",
+    "exec-opts": ["native.cgroupdriver=systemd"]
+}
+EOF
+fi
+
+# Restart Docker with the new configuration
+log "Restarting Docker with optimized configuration..."
+if ! systemctl restart docker; then
+    log "Warning: Docker restart failed, attempting recovery..."
+    # Try with minimal configuration
+    cat > /etc/docker/daemon.json << EOF
 {
     "log-driver": "json-file",
     "log-opts": {
@@ -250,8 +524,47 @@ cat > /etc/docker/daemon.json << EOF
     }
 }
 EOF
+    systemctl restart docker || log "Error: Docker failed to start even with minimal configuration"
+fi
 
-systemctl restart docker
+# Wait for Docker to be ready with improved error handling
+log "Waiting for Docker to be ready..."
+DOCKER_READY=false
+for i in {1..60}; do
+    if docker info >/dev/null 2>&1; then
+        log "Docker is ready (attempt $i)"
+        DOCKER_READY=true
+        break
+    fi
+    if [ $i -eq 30 ]; then
+        log "Docker startup taking longer than expected, checking status..."
+        systemctl status docker --no-pager || true
+    fi
+    if [ $i -eq 60 ]; then
+        log "Warning: Docker took longer than expected to start, continuing anyway"
+        break
+    fi
+    sleep 2
+done
+
+# Verify Docker configuration and log detailed information
+log "Verifying Docker configuration..."
+if [ "$DOCKER_READY" = "true" ]; then
+    # Get detailed Docker info
+    docker info 2>/dev/null | grep -E "(Storage Driver|Logging Driver|Cgroup Driver|Server Version)" || {
+        log "Basic Docker info not available, checking if Docker daemon is running"
+        systemctl is-active docker || log "Docker daemon is not active"
+    }
+    
+    # Test basic Docker functionality
+    if docker run --rm hello-world >/dev/null 2>&1; then
+        log "Docker functionality test passed"
+    else
+        log "Warning: Docker functionality test failed"
+    fi
+else
+    log "Warning: Docker readiness check failed, attempting to continue"
+fi
 
 # Create environment-specific configuration
 mkdir -p /home/ubuntu/GeuseMaker/config

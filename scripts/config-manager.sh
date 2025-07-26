@@ -30,10 +30,31 @@ if [ -f "$LIB_DIR/aws-deployment-common.sh" ]; then
     source "$LIB_DIR/aws-deployment-common.sh"
 fi
 
-# Load the new centralized configuration management system
+# Load the new centralized configuration management system with comprehensive error handling
+CONFIG_MANAGEMENT_AVAILABLE=false
 if [ -f "$LIB_DIR/config-management.sh" ]; then
-    source "$LIB_DIR/config-management.sh"
-    CONFIG_MANAGEMENT_AVAILABLE=true
+    # Test if the config management library can be loaded without errors
+    if bash -n "$LIB_DIR/config-management.sh" 2>/dev/null; then
+        # Syntax is valid, try to source it
+        if source "$LIB_DIR/config-management.sh" 2>/dev/null; then
+            # Check if key functions are available after sourcing
+            if declare -f load_config >/dev/null 2>&1 && \
+               declare -f get_config_value >/dev/null 2>&1 && \
+               declare -f generate_env_file >/dev/null 2>&1; then
+                CONFIG_MANAGEMENT_AVAILABLE=true
+                log "Centralized configuration management system loaded successfully"
+            else
+                CONFIG_MANAGEMENT_AVAILABLE=false
+                warning "Configuration management functions not available after loading, using legacy mode"
+            fi
+        else
+            CONFIG_MANAGEMENT_AVAILABLE=false
+            warning "Failed to source centralized configuration management, using legacy mode"
+        fi
+    else
+        CONFIG_MANAGEMENT_AVAILABLE=false
+        warning "Configuration management script has syntax errors, using legacy mode"
+    fi
 else
     CONFIG_MANAGEMENT_AVAILABLE=false
     warning "Centralized configuration management not available, using legacy mode"
@@ -232,20 +253,36 @@ EOF
 # ENHANCED FUNCTIONS (using new centralized system)
 # =============================================================================
 
-# Enhanced configuration loading with fallback
+# Enhanced configuration loading with comprehensive fallback and error handling
 enhanced_load_environment_config() {
     local env="$1"
     
     if [ "$CONFIG_MANAGEMENT_AVAILABLE" = "true" ]; then
         log "Using enhanced configuration management system"
         
-        # Use the new centralized system
-        local config_file="$CONFIG_DIR/environments/${env}.yml"
-        if load_configuration "$config_file" "$env"; then
-            success "Enhanced configuration loaded for $env environment"
-            return 0
+        # Check if the load_config function exists (correct function name)
+        if declare -f load_config >/dev/null 2>&1; then
+            # Use the new centralized system
+            local config_file="$CONFIG_DIR/environments/${env}.yml"
+            if [ -f "$config_file" ]; then
+                # Try to load configuration with proper error handling
+                local load_result
+                if load_result=$(load_config "$env" "simple" 2>&1); then
+                    success "Enhanced configuration loaded for $env environment"
+                    return 0
+                else
+                    warning "Enhanced configuration loading failed: $load_result"
+                    warning "Falling back to legacy mode"
+                    return legacy_load_environment_config "$env"
+                fi
+            else
+                warning "Configuration file not found: $config_file"
+                warning "Falling back to legacy mode"
+                return legacy_load_environment_config "$env"
+            fi
         else
-            warning "Enhanced configuration loading failed, falling back to legacy mode"
+            warning "Enhanced configuration functions not available (load_config not found)"
+            warning "Available functions: $(declare -F | grep -E '(load_|config)' | awk '{print $3}' | tr '\n' ' ')"
             return legacy_load_environment_config "$env"
         fi
     else
@@ -254,7 +291,7 @@ enhanced_load_environment_config() {
     fi
 }
 
-# Enhanced Docker Compose override generation
+# Enhanced Docker Compose override generation with improved error handling
 enhanced_generate_docker_compose_override() {
     local env="$1"
     local output_file="$PROJECT_ROOT/docker-compose.override.yml"
@@ -262,12 +299,29 @@ enhanced_generate_docker_compose_override() {
     if [ "$CONFIG_MANAGEMENT_AVAILABLE" = "true" ]; then
         log "Using enhanced Docker Compose generation"
         
-        local config_file="$CONFIG_DIR/environments/${env}.yml"
-        if generate_docker_compose "$config_file" "$env" "$output_file"; then
-            success "Enhanced Docker Compose override generated: $output_file"
-            return 0
+        # Check if the generate_docker_compose function exists
+        if declare -f generate_docker_compose >/dev/null 2>&1; then
+            local config_file="$CONFIG_DIR/environments/${env}.yml"
+            if [ -f "$config_file" ]; then
+                # Try enhanced generation with proper error capture
+                local gen_result
+                if gen_result=$(generate_docker_compose "$config_file" "$env" "$output_file" 2>&1); then
+                    if [ -f "$output_file" ] && [ -s "$output_file" ]; then
+                        success "Enhanced Docker Compose override generated: $output_file"
+                        return 0
+                    else
+                        warning "Enhanced generation succeeded but output file is empty or missing"
+                    fi
+                else
+                    warning "Enhanced Docker Compose generation failed: $gen_result"
+                fi
+            else
+                warning "Configuration file not found for enhanced generation: $config_file"
+            fi
+            warning "Falling back to legacy mode"
+            return legacy_generate_docker_compose_override "$env"
         else
-            warning "Enhanced Docker Compose generation failed, falling back to legacy mode"
+            warning "Enhanced Docker Compose functions not available (generate_docker_compose not found)"
             return legacy_generate_docker_compose_override "$env"
         fi
     else
@@ -276,7 +330,7 @@ enhanced_generate_docker_compose_override() {
     fi
 }
 
-# Enhanced environment file generation
+# Enhanced environment file generation with robust error handling
 enhanced_generate_env_file() {
     local env="$1"
     local output_file="$PROJECT_ROOT/.env.${env}"
@@ -284,12 +338,44 @@ enhanced_generate_env_file() {
     if [ "$CONFIG_MANAGEMENT_AVAILABLE" = "true" ]; then
         log "Using enhanced environment file generation"
         
-        local config_file="$CONFIG_DIR/environments/${env}.yml"
-        if generate_environment_file "$config_file" "$env" "$output_file"; then
-            success "Enhanced environment file generated: $output_file"
-            return 0
+        # Check if the generate_environment_file function exists
+        if declare -f generate_environment_file >/dev/null 2>&1; then
+            local config_file="$CONFIG_DIR/environments/${env}.yml"
+            if [ -f "$config_file" ]; then
+                # Try enhanced generation with error capture
+                local env_result
+                if env_result=$(generate_environment_file "$config_file" "$env" "$output_file" 2>&1); then
+                    if [ -f "$output_file" ] && [ -s "$output_file" ]; then
+                        success "Enhanced environment file generated: $output_file"
+                        return 0
+                    else
+                        warning "Enhanced generation succeeded but output file is empty or missing"
+                    fi
+                else
+                    warning "Enhanced environment file generation failed: $env_result"
+                fi
+            else
+                warning "Configuration file not found for enhanced generation: $config_file"
+            fi
+            warning "Falling back to legacy mode"
+            return legacy_generate_env_file "$env"
+        elif declare -f generate_env_file >/dev/null 2>&1; then
+            # Try the alternative function name
+            log "Using generate_env_file function instead"
+            local config_file="$CONFIG_DIR/environments/${env}.yml"
+            if [ -f "$config_file" ]; then
+                # Ensure configuration is loaded first
+                if load_config "$env" "simple" 2>/dev/null; then
+                    if generate_env_file "$output_file" 2>/dev/null; then
+                        success "Enhanced environment file generated: $output_file"
+                        return 0
+                    fi
+                fi
+            fi
+            warning "Alternative enhanced generation failed, falling back to legacy mode"
+            return legacy_generate_env_file "$env"
         else
-            warning "Enhanced environment file generation failed, falling back to legacy mode"
+            warning "Enhanced environment file functions not available"
             return legacy_generate_env_file "$env"
         fi
     else

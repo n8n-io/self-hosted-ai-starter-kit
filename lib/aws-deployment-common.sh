@@ -346,6 +346,151 @@ check_common_prerequisites() {
 }
 
 # =============================================================================
+# ERROR HANDLING AND RECOVERY UTILITIES
+# =============================================================================
+
+# Enhanced error handling wrapper for AWS commands
+aws_safe_execute() {
+    local command="$1"
+    local description="${2:-AWS operation}"
+    local max_retries="${3:-3}"
+    local retry_delay="${4:-5}"
+    
+    local attempt=1
+    local result
+    local exit_code
+    
+    while [ $attempt -le $max_retries ]; do
+        log "$description (attempt $attempt/$max_retries)"
+        
+        # Execute the AWS command and capture both output and exit code
+        if result=$(eval "$command" 2>&1); then
+            success "$description completed successfully"
+            echo "$result"
+            return 0
+        else
+            exit_code=$?
+            warning "$description failed on attempt $attempt: $result"
+            
+            # Check for specific AWS errors that shouldn't be retried
+            if echo "$result" | grep -qE "(AccessDenied|InvalidUserID.NotFound|InvalidKeyPair.NotFound|InvalidAMIID.NotFound)"; then
+                error "$description failed with non-retryable error: $result"
+                return $exit_code
+            fi
+            
+            # Check for rate limiting
+            if echo "$result" | grep -qE "(Throttling|RequestLimitExceeded|TooManyRequests)"; then
+                warning "Rate limiting detected, increasing retry delay"
+                retry_delay=$((retry_delay * 2))
+            fi
+            
+            if [ $attempt -lt $max_retries ]; then
+                log "Retrying in ${retry_delay} seconds..."
+                sleep $retry_delay
+            fi
+        fi
+        
+        attempt=$((attempt + 1))
+    done
+    
+    error "$description failed after $max_retries attempts: $result"
+    return 1
+}
+
+# Check if an AWS resource exists
+aws_resource_exists() {
+    local resource_type="$1"
+    local resource_identifier="$2"
+    local region="${3:-$AWS_REGION}"
+    
+    case "$resource_type" in
+        "instance")
+            aws ec2 describe-instances --instance-ids "$resource_identifier" --region "$region" >/dev/null 2>&1
+            ;;
+        "security-group")
+            aws ec2 describe-security-groups --group-ids "$resource_identifier" --region "$region" >/dev/null 2>&1
+            ;;
+        "vpc")
+            aws ec2 describe-vpcs --vpc-ids "$resource_identifier" --region "$region" >/dev/null 2>&1
+            ;;
+        "key-pair")
+            aws ec2 describe-key-pairs --key-names "$resource_identifier" --region "$region" >/dev/null 2>&1
+            ;;
+        "load-balancer")
+            aws elbv2 describe-load-balancers --names "$resource_identifier" --region "$region" >/dev/null 2>&1
+            ;;
+        "cloudfront-distribution")
+            aws cloudfront get-distribution --id "$resource_identifier" >/dev/null 2>&1
+            ;;
+        *)
+            warning "Unknown resource type: $resource_type"
+            return 1
+            ;;
+    esac
+}
+
+# Cleanup function for failed deployments
+cleanup_failed_deployment() {
+    local stack_name="$1"
+    local region="${2:-$AWS_REGION}"
+    
+    warning "Attempting to clean up failed deployment: $stack_name"
+    
+    # List of resources to clean up (in reverse order of dependencies)
+    local cleanup_commands=(
+        "aws cloudfront list-distributions --query 'DistributionList.Items[?Comment.contains(@, \\\"$stack_name\\\")].Id' --output text"
+        "aws elbv2 describe-load-balancers --names \\\"$stack_name-alb\\\" --query 'LoadBalancers[0].LoadBalancerArn' --output text --region \\\"$region\\\""
+        "aws ec2 describe-instances --filters \\\"Name=tag:Name,Values=$stack_name-instance\\\" --query 'Reservations[*].Instances[*].InstanceId' --output text --region \\\"$region\\\""
+        "aws ec2 describe-security-groups --filters \\\"Name=group-name,Values=$stack_name-sg\\\" --query 'SecurityGroups[0].GroupId' --output text --region \\\"$region\\\""
+    )
+    
+    # Attempt cleanup (non-blocking)
+    for cmd in "${cleanup_commands[@]}"; do
+        if resource_id=$(eval "$cmd" 2>/dev/null) && [ -n "$resource_id" ] && [ "$resource_id" != "None" ]; then
+            warning "Found resource to clean up: $resource_id"
+            # Actual cleanup would depend on resource type
+            # This is just identification for now
+        fi
+    done
+    
+    info "Manual cleanup may be required for stack: $stack_name"
+}
+
+# Validate environment before deployment
+validate_deployment_environment() {
+    local stack_name="$1"
+    local region="${2:-$AWS_REGION}"
+    
+    log "Validating deployment environment for stack: $stack_name"
+    
+    # Check if resources already exist
+    if aws_resource_exists "instance" "$stack_name-instance" "$region"; then
+        warning "Instance with name $stack_name-instance already exists"
+        return 1
+    fi
+    
+    # Check AWS service availability
+    if ! aws ec2 describe-regions --region "$region" >/dev/null 2>&1; then
+        error "Region $region is not accessible or does not exist"
+        return 1
+    fi
+    
+    # Check quotas (simplified)
+    local running_instances
+    running_instances=$(aws ec2 describe-instances \
+        --filters "Name=instance-state-name,Values=running" \
+        --query 'length(Reservations[*].Instances[*])' \
+        --output text --region "$region" 2>/dev/null || echo "0")
+    
+    if [ "$running_instances" -gt 50 ]; then
+        warning "High number of running instances ($running_instances). Check EC2 limits."
+    fi
+    
+    success "Deployment environment validation passed"
+    return 0
+}
+
+# =============================================================================
 # SHARED AWS INFRASTRUCTURE FUNCTIONS
 # =============================================================================
 
@@ -698,6 +843,35 @@ wait_for_ssh_ready() {
     if [ -z "$instance_ip" ] || [ -z "$key_file" ]; then
         error "wait_for_ssh_ready requires instance_ip and key_file parameters"
         return 1
+    fi
+    
+    # Validate key file exists and has correct permissions
+    if [ ! -f "$key_file" ]; then
+        error "SSH key file not found: $key_file"
+        return 1
+    fi
+    
+    if [ ! -r "$key_file" ]; then
+        error "SSH key file not readable: $key_file"
+        return 1
+    fi
+    
+    # Check key file permissions (should be 400 or 600)
+    local key_perms=$(stat -c %a "$key_file" 2>/dev/null || stat -f %A "$key_file" 2>/dev/null)
+    if [ "$key_perms" != "400" ] && [ "$key_perms" != "600" ]; then
+        warning "SSH key file has permissive permissions ($key_perms), consider: chmod 400 $key_file"
+    fi
+    
+    # Basic IP validation
+    if [[ ! "$instance_ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+        error "Invalid IP address format: $instance_ip"
+        return 1
+    fi
+    
+    # Prevent excessive timeouts
+    if [ "$max_attempts" -gt 180 ]; then  # Cap at 90 minutes max
+        warning "Capping max_attempts at 180 (from $max_attempts) to prevent excessive waiting"
+        max_attempts=180
     fi
 
     # Detect GPU instances and extend timeout
