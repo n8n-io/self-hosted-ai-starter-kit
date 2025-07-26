@@ -36,10 +36,10 @@ readonly VALID_DEPLOYMENT_TYPES="simple spot ondemand"
 readonly VALID_REGIONS="us-east-1 us-west-2 eu-west-1 ap-southeast-1"
 
 # Configuration cache
-declare -g CONFIG_CACHE_LOADED=false
-declare -g CURRENT_ENVIRONMENT=""
-declare -g CURRENT_DEPLOYMENT_TYPE=""
-declare -g CONFIG_FILE_PATH=""
+CONFIG_CACHE_LOADED=false
+CURRENT_ENVIRONMENT=""
+CURRENT_DEPLOYMENT_TYPE=""
+CONFIG_FILE_PATH=""
 
 # =============================================================================
 # DEPENDENCY MANAGEMENT

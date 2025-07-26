@@ -116,7 +116,7 @@ Usage: $0 [OPTIONS] [STACK_NAME]
 Consolidated AWS Resource Cleanup Script
 
 OPTIONS:
-    -m, --mode MODE           Cleanup mode: stack, efs, all, specific, codebase (default: stack)
+    -m, --mode MODE           Cleanup mode: stack, efs, failed-deployments, all, specific, codebase (default: stack)
     -r, --region REGION       AWS region (default: us-east-1)
     -d, --dry-run            Show what would be deleted without actually deleting
     -f, --force              Force deletion without confirmation prompts
@@ -133,9 +133,18 @@ RESOURCE TYPE FLAGS (for specific mode):
     --storage                Cleanup EBS volumes, snapshots, and other storage
     --codebase               Cleanup local codebase files (backups, temp files, etc.)
 
+CLEANUP MODES:
+    stack                    Cleanup resources for specific stack (requires STACK_NAME)
+    efs                      Cleanup EFS file systems matching pattern (uses STACK_NAME as pattern)
+    failed-deployments       Cleanup specific failed deployment EFS file systems (051-efs through 059-efs)
+    all                      Cleanup all resources for all stacks
+    specific                 Cleanup specific resource types (use with resource flags)
+    codebase                 Cleanup local codebase files
+
 EXAMPLES:
     $0 052                    # Cleanup stack named "052"
-    $0 --mode efs --pattern "test-*"  # Cleanup EFS matching pattern
+    $0 --mode efs "test-*"    # Cleanup EFS matching pattern "test-*"
+    $0 --mode failed-deployments  # Cleanup failed deployment EFS file systems
     $0 --mode specific --efs --instances  # Cleanup specific resource types
     $0 --force 052            # Force cleanup without confirmation
     $0 --mode codebase        # Cleanup local codebase files
@@ -374,26 +383,156 @@ cleanup_ec2_instances() {
 cleanup_efs_resources() {
     step "Cleaning up EFS resources..."
     
-    if [ -z "$STACK_NAME" ]; then
-        info "No stack name provided, skipping EFS cleanup"
+    # Handle different cleanup modes
+    case "$CLEANUP_MODE" in
+        "efs")
+            # Pattern-based EFS cleanup
+            if [ -n "$STACK_NAME" ]; then
+                cleanup_efs_by_pattern "$STACK_NAME"
+            else
+                info "No pattern provided for EFS cleanup"
+                return 0
+            fi
+            ;;
+        "failed-deployments")
+            # Cleanup specific failed deployment EFS file systems
+            cleanup_failed_deployment_efs
+            ;;
+        *)
+            # Stack-based EFS cleanup
+            if [ -z "$STACK_NAME" ]; then
+                info "No stack name provided, skipping EFS cleanup"
+                return 0
+            fi
+            
+            # Find EFS file systems by stack name
+            local efs_ids
+            efs_ids=$(aws efs describe-file-systems \
+                --region "$AWS_REGION" \
+                --query "FileSystems[?contains(Tags[?Key=='StackName'].Value, '$STACK_NAME')].FileSystemId" \
+                --output text 2>/dev/null || echo "")
+            
+            if [ -n "$efs_ids" ]; then
+                log "Found EFS file systems to cleanup: $efs_ids"
+                
+                for efs_id in $efs_ids; do
+                    cleanup_single_efs "$efs_id"
+                done
+            else
+                info "No EFS file systems found for cleanup"
+            fi
+            ;;
+    esac
+}
+
+# Cleanup EFS file systems by pattern
+cleanup_efs_by_pattern() {
+    local pattern="$1"
+    step "Cleaning up EFS file systems matching pattern: $pattern"
+    
+    # Find EFS file systems by name pattern
+    local efs_list
+    efs_list=$(aws efs describe-file-systems \
+        --region "$AWS_REGION" \
+        --query "FileSystems[?contains(Name, '$pattern')].{ID:FileSystemId,Name:Name,State:LifeCycleState}" \
+        --output table 2>/dev/null || echo "")
+    
+    if [ -n "$efs_list" ]; then
+        log "Found EFS file systems matching pattern '$pattern':"
+        echo "$efs_list"
+        
+        # Get EFS IDs for deletion
+        local efs_ids
+        efs_ids=$(aws efs describe-file-systems \
+            --region "$AWS_REGION" \
+            --query "FileSystems[?contains(Name, '$pattern')].FileSystemId" \
+            --output text 2>/dev/null || echo "")
+        
+        if [ -n "$efs_ids" ]; then
+            for efs_id in $efs_ids; do
+                cleanup_single_efs "$efs_id"
+            done
+        fi
+    else
+        info "No EFS file systems found matching pattern: $pattern"
+    fi
+}
+
+# Cleanup specific failed deployment EFS file systems
+cleanup_failed_deployment_efs() {
+    step "Cleaning up failed deployment EFS file systems..."
+    
+    # Specific EFS file systems from failed deployments (051-efs through 059-efs)
+    local failed_efs_systems=(
+        "fs-0e713d7f70c5c28e5"  # 051-efs
+        "fs-016b6b42fe4e1251d"  # 052-efs
+        "fs-081412d661c7359b6"  # 053-efs
+        "fs-08b9502f5bcb7db98"  # 054-efs
+        "fs-043c227f27b0a57c5"  # 055-efs
+        "fs-0e50ce2a955e271a1"  # 056-efs
+        "fs-09b78c8e0b3439f73"  # 057-efs
+        "fs-05e2980141f1c4cf5"  # 058-efs
+        "fs-0cb64b1f87cbda05f"  # 059-efs
+    )
+    
+    log "Checking for failed deployment EFS file systems..."
+    
+    local existing_count=0
+    for fs_id in "${failed_efs_systems[@]}"; do
+        if check_efs_exists "$fs_id"; then
+            log "Found existing EFS file system: $fs_id"
+            ((existing_count++))
+        fi
+    done
+    
+    if [ "$existing_count" -eq 0 ]; then
+        info "No failed deployment EFS file systems found to delete"
         return 0
     fi
     
-    # Find EFS file systems by stack name
-    local efs_ids
-    efs_ids=$(aws efs describe-file-systems \
-        --region "$AWS_REGION" \
-        --query "FileSystems[?contains(Tags[?Key=='StackName'].Value, '$STACK_NAME')].FileSystemId" \
-        --output text 2>/dev/null || echo "")
+    log "Found $existing_count failed deployment EFS file system(s) to delete"
     
-    if [ -n "$efs_ids" ]; then
-        log "Found EFS file systems to cleanup: $efs_ids"
-        
-        for efs_id in $efs_ids; do
-            cleanup_single_efs "$efs_id"
-        done
+    # Show current EFS file systems
+    if [ "$VERBOSE" = true ]; then
+        log "Current EFS file systems:"
+        aws efs describe-file-systems \
+            --region "$AWS_REGION" \
+            --query 'FileSystems[].{ID:FileSystemId,Name:Name,State:LifeCycleState}' \
+            --output table
+    fi
+    
+    # Delete each EFS file system
+    for fs_id in "${failed_efs_systems[@]}"; do
+        if check_efs_exists "$fs_id"; then
+            cleanup_single_efs "$fs_id"
+        else
+            info "Skipping $fs_id - already deleted or does not exist"
+            increment_counter "skipped"
+        fi
+    done
+    
+    # Show remaining EFS file systems
+    if [ "$VERBOSE" = true ]; then
+        log "Remaining EFS file systems:"
+        aws efs describe-file-systems \
+            --region "$AWS_REGION" \
+            --query 'FileSystems[].{ID:FileSystemId,Name:Name,State:LifeCycleState}' \
+            --output table
+    fi
+}
+
+# Check if EFS file system exists
+check_efs_exists() {
+    local fs_id="$1"
+    
+    if aws efs describe-file-systems \
+        --file-system-ids "$fs_id" \
+        --region "$AWS_REGION" \
+        --query 'FileSystems[0].FileSystemId' \
+        --output text 2>/dev/null | grep -q "$fs_id"; then
+        return 0
     else
-        info "No EFS file systems found for cleanup"
+        return 1
     fi
 }
 
@@ -877,6 +1016,12 @@ main() {
         exit 1
     fi
     
+    if [ "$CLEANUP_MODE" = "efs" ] && [ -z "$STACK_NAME" ]; then
+        error "Pattern is required for efs mode (use STACK_NAME as pattern)"
+        show_usage
+        exit 1
+    fi
+    
     # Show configuration
     if [ "$QUIET" != true ]; then
         info "Configuration:"
@@ -892,33 +1037,90 @@ main() {
     confirm_cleanup
     
     # Execute cleanup based on mode and resource types
-    if [ "$CLEANUP_INSTANCES" = true ]; then
-        cleanup_ec2_instances
-    fi
-    
-    if [ "$CLEANUP_EFS" = true ]; then
-        cleanup_efs_resources
-    fi
-    
-    if [ "$CLEANUP_NETWORK" = true ]; then
-        cleanup_network_resources
-    fi
-    
-    if [ "$CLEANUP_MONITORING" = true ]; then
-        cleanup_monitoring_resources
-    fi
-    
-    if [ "$CLEANUP_IAM" = true ]; then
-        cleanup_iam_resources
-    fi
-    
-    if [ "$CLEANUP_STORAGE" = true ]; then
-        cleanup_storage_resources
-    fi
-    
-    if [ "$CLEANUP_CODEBASE" = true ]; then
-        cleanup_codebase_files
-    fi
+    case "$CLEANUP_MODE" in
+        "failed-deployments")
+            # Special mode for failed deployment EFS cleanup
+            cleanup_efs_resources
+            ;;
+        "efs")
+            # EFS pattern-based cleanup
+            cleanup_efs_resources
+            ;;
+        "codebase")
+            # Codebase cleanup only
+            cleanup_codebase_files
+            ;;
+        "all")
+            # Cleanup all resources
+            cleanup_ec2_instances
+            cleanup_efs_resources
+            cleanup_network_resources
+            cleanup_monitoring_resources
+            cleanup_iam_resources
+            cleanup_storage_resources
+            cleanup_codebase_files
+            ;;
+        "specific")
+            # Cleanup specific resource types based on flags
+            if [ "$CLEANUP_INSTANCES" = true ]; then
+                cleanup_ec2_instances
+            fi
+            
+            if [ "$CLEANUP_EFS" = true ]; then
+                cleanup_efs_resources
+            fi
+            
+            if [ "$CLEANUP_NETWORK" = true ]; then
+                cleanup_network_resources
+            fi
+            
+            if [ "$CLEANUP_MONITORING" = true ]; then
+                cleanup_monitoring_resources
+            fi
+            
+            if [ "$CLEANUP_IAM" = true ]; then
+                cleanup_iam_resources
+            fi
+            
+            if [ "$CLEANUP_STORAGE" = true ]; then
+                cleanup_storage_resources
+            fi
+            
+            if [ "$CLEANUP_CODEBASE" = true ]; then
+                cleanup_codebase_files
+            fi
+            ;;
+        *)
+            # Default stack-based cleanup
+            if [ "$CLEANUP_INSTANCES" = true ]; then
+                cleanup_ec2_instances
+            fi
+            
+            if [ "$CLEANUP_EFS" = true ]; then
+                cleanup_efs_resources
+            fi
+            
+            if [ "$CLEANUP_NETWORK" = true ]; then
+                cleanup_network_resources
+            fi
+            
+            if [ "$CLEANUP_MONITORING" = true ]; then
+                cleanup_monitoring_resources
+            fi
+            
+            if [ "$CLEANUP_IAM" = true ]; then
+                cleanup_iam_resources
+            fi
+            
+            if [ "$CLEANUP_STORAGE" = true ]; then
+                cleanup_storage_resources
+            fi
+            
+            if [ "$CLEANUP_CODEBASE" = true ]; then
+                cleanup_codebase_files
+            fi
+            ;;
+    esac
     
     # Print summary
     print_summary
