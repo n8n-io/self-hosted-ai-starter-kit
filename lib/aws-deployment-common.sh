@@ -1303,19 +1303,22 @@ validate_service_endpoints() {
 
     log "Validating service endpoints..."
     
-    # Define health check endpoints for each service
-    declare -A health_endpoints=(
-        ["n8n"]="/healthz"
-        ["ollama"]="/api/tags"
-        ["qdrant"]="/health"
-        ["crawl4ai"]="/health"
-    )
+    # Define health check endpoints for each service (bash 3.x compatible)
+    get_health_endpoint() {
+        case "$1" in
+            "n8n") echo "/healthz" ;;
+            "ollama") echo "/api/tags" ;;
+            "qdrant") echo "/health" ;;
+            "crawl4ai") echo "/health" ;;
+            *) echo "/" ;;
+        esac
+    }
     
     local all_healthy=true
     for service_port in "${services[@]}"; do
         local service_name="${service_port%:*}"
         local port="${service_port#*:}"
-        local health_path="${health_endpoints[$service_name]:-/}"
+        local health_path="$(get_health_endpoint "$service_name")"
         
         info "Checking $service_name on port $port..."
         

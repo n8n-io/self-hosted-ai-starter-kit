@@ -619,6 +619,16 @@ generate_docker_env_file() {
     
     var_log INFO "Generating Docker Compose environment file: $output_file"
     
+    # Create directory if it doesn't exist
+    mkdir -p "$(dirname "$output_file")"
+    
+    # Backup existing file
+    if [ -f "$output_file" ]; then
+        local backup_file="${output_file}.backup.$(date +%s)"
+        cp "$output_file" "$backup_file"
+        var_log INFO "Backed up existing environment file to: $backup_file"
+    fi
+    
     cat > "$output_file" << EOF
 $([ "$include_comments" = "true" ] && cat << 'COMMENTS'
 # =============================================================================
@@ -633,6 +643,20 @@ $([ "$include_comments" = "true" ] && cat << 'COMMENTS'
 
 COMMENTS
 )
+# Infrastructure Configuration
+STACK_NAME=${STACK_NAME:-GeuseMaker}
+ENVIRONMENT=${ENVIRONMENT:-development}
+AWS_REGION=${AWS_REGION:-us-east-1}
+AWS_DEFAULT_REGION=${AWS_REGION:-us-east-1}
+COMPOSE_FILE=${COMPOSE_FILE:-docker-compose.gpu-optimized.yml}
+
+# Instance Information
+INSTANCE_ID=${INSTANCE_ID:-}
+INSTANCE_TYPE=${INSTANCE_TYPE:-}
+AVAILABILITY_ZONE=${AVAILABILITY_ZONE:-}
+PUBLIC_IP=${PUBLIC_IP:-}
+PRIVATE_IP=${PRIVATE_IP:-}
+
 # Database Configuration
 POSTGRES_DB=$POSTGRES_DB
 POSTGRES_USER=$POSTGRES_USER
@@ -647,7 +671,7 @@ N8N_BASIC_AUTH_PASSWORD=$N8N_BASIC_AUTH_PASSWORD
 N8N_CORS_ENABLE=$N8N_CORS_ENABLE
 N8N_CORS_ALLOWED_ORIGINS=$N8N_CORS_ALLOWED_ORIGINS
 
-# API Keys
+# API Keys and External Services
 OPENAI_API_KEY=$OPENAI_API_KEY
 
 # Service URLs and Configuration
@@ -655,19 +679,19 @@ WEBHOOK_URL=$WEBHOOK_URL
 ENABLE_METRICS=$ENABLE_METRICS
 LOG_LEVEL=$LOG_LEVEL
 
-# Infrastructure
-AWS_REGION=${AWS_REGION:-us-east-1}
-STACK_NAME=${STACK_NAME:-GeuseMaker}
-ENVIRONMENT=${ENVIRONMENT:-development}
+# EFS Configuration (if available)
 EFS_DNS=${EFS_DNS:-}
-INSTANCE_ID=${INSTANCE_ID:-}
-INSTANCE_TYPE=${INSTANCE_TYPE:-}
 
-# Default region for AWS services
-AWS_DEFAULT_REGION=${AWS_REGION:-us-east-1}
+# Generation metadata
+VAR_GENERATION_TIME=$(date)
+VAR_GENERATION_METHOD=unified
+VAR_GENERATION_VERSION=$VARIABLE_MANAGEMENT_VERSION
 EOF
     
+    # Set secure permissions
     chmod 600 "$output_file"
+    chown ubuntu:ubuntu "$output_file" 2>/dev/null || true
+    
     var_log SUCCESS "Docker environment file generated: $output_file"
 }
 
@@ -682,11 +706,14 @@ init_all_variables() {
     
     var_log INFO "Initializing all variables (force_refresh=$force_refresh)"
     
-    # Step 1: Initialize with secure defaults
+    # Step 1: Initialize infrastructure variables (EC2 metadata)
+    init_infrastructure_variables
+    
+    # Step 2: Initialize with secure defaults
     init_critical_variables
     init_optional_variables
     
-    # Step 2: Try to load from cache if not forcing refresh
+    # Step 3: Try to load from cache if not forcing refresh
     if [ "$force_refresh" != "true" ] && [ -f "$cache_file" ]; then
         var_log INFO "Attempting to load variables from cache"
         if load_variables_from_file "$cache_file"; then
@@ -697,7 +724,7 @@ init_all_variables() {
         fi
     fi
     
-    # Step 3: Try to load from Parameter Store (if cache failed or force refresh)
+    # Step 4: Try to load from Parameter Store (if cache failed or force refresh)
     if [ "$force_refresh" = "true" ] || [ ! -f "$cache_file" ]; then
         var_log INFO "Loading variables from Parameter Store"
         if load_variables_from_parameter_store; then
@@ -711,7 +738,7 @@ init_all_variables() {
         fi
     fi
     
-    # Step 4: Validate all variables
+    # Step 5: Validate all variables
     if ! validate_critical_variables; then
         var_log ERROR "Critical variable validation failed"
         return 1
@@ -719,11 +746,52 @@ init_all_variables() {
     
     validate_optional_variables
     
-    # Step 5: Generate Docker environment file
+    # Step 6: Generate Docker environment file
     generate_docker_env_file
     
     var_log SUCCESS "Variable initialization completed successfully"
     return 0
+}
+
+# Initialize infrastructure variables from EC2 metadata
+init_infrastructure_variables() {
+    var_log INFO "Initializing infrastructure variables from EC2 metadata"
+    
+    # Function to get EC2 metadata with timeout
+    get_ec2_metadata() {
+        local path="$1"
+        local default="${2:-}"
+        local timeout="${3:-5}"
+        
+        if command -v curl >/dev/null 2>&1; then
+            curl -s --max-time "$timeout" --connect-timeout "$timeout" "http://169.254.169.254/latest/meta-data/$path" 2>/dev/null || echo "$default"
+        else
+            echo "$default"
+        fi
+    }
+    
+    # Get instance metadata
+    export INSTANCE_ID="${INSTANCE_ID:-$(get_ec2_metadata "instance-id" "")}"
+    export INSTANCE_TYPE="${INSTANCE_TYPE:-$(get_ec2_metadata "instance-type" "")}"
+    export AVAILABILITY_ZONE="${AVAILABILITY_ZONE:-$(get_ec2_metadata "placement/availability-zone" "")}"
+    export PUBLIC_IP="${PUBLIC_IP:-$(get_ec2_metadata "public-ipv4" "")}"
+    export PRIVATE_IP="${PRIVATE_IP:-$(get_ec2_metadata "local-ipv4" "")}"
+    
+    # Set AWS region from metadata if not set
+    if [ -z "${AWS_REGION:-}" ] && [ -n "$AVAILABILITY_ZONE" ]; then
+        export AWS_REGION="${AVAILABILITY_ZONE%?}"  # Remove last character (AZ letter)
+    fi
+    
+    # Ensure AWS_REGION has a default
+    export AWS_REGION="${AWS_REGION:-us-east-1}"
+    export AWS_DEFAULT_REGION="$AWS_REGION"
+    
+    # Set deployment environment variables
+    export STACK_NAME="${STACK_NAME:-GeuseMaker}"
+    export ENVIRONMENT="${ENVIRONMENT:-development}"
+    export COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.gpu-optimized.yml}"
+    
+    var_log SUCCESS "Infrastructure variables initialized"
 }
 
 # Quick initialization for scripts that need basic variables

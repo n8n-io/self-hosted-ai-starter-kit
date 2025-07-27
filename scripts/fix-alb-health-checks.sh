@@ -18,49 +18,54 @@ fi
 # ALB HEALTH CHECK CONFIGURATION
 # =============================================================================
 
-# Optimized health check settings for containerized applications
-declare -A ALB_HEALTH_CHECK_CONFIG=(
-    # Timeout settings - longer for containerized apps
-    ["HEALTH_CHECK_TIMEOUT_SECONDS"]="15"          # Increased from 5s to 15s
-    ["HEALTH_CHECK_INTERVAL_SECONDS"]="60"         # Increased from 30s to 60s
-    
-    # Threshold settings - more forgiving for startup
-    ["HEALTHY_THRESHOLD_COUNT"]="2"                # Keep at 2 for quick recovery
-    ["UNHEALTHY_THRESHOLD_COUNT"]="5"              # Increased from 3 to 5
-    
-    # Grace period settings
-    ["DEREGISTRATION_DELAY_TIMEOUT_SECONDS"]="60"  # Time to drain connections
-    ["LOAD_BALANCING_CROSS_ZONE_ENABLED"]="true"   # Better distribution
-    
-    # Advanced settings
-    ["HEALTH_CHECK_GRACE_PERIOD_SECONDS"]="300"    # 5 minutes for initial health checks
-    ["PRESERVE_CLIENT_IP_ENABLED"]="true"          # Preserve client IP for logging
-)
+# Optimized health check settings for containerized applications (bash 3.x compatible)
+get_alb_health_check_config() {
+    case "$1" in
+        "HEALTH_CHECK_TIMEOUT_SECONDS") echo "15" ;;        # Increased from 5s to 15s
+        "HEALTH_CHECK_INTERVAL_SECONDS") echo "60" ;;       # Increased from 30s to 60s
+        "HEALTHY_THRESHOLD_COUNT") echo "2" ;;              # Keep at 2 for quick recovery
+        "UNHEALTHY_THRESHOLD_COUNT") echo "5" ;;            # Increased from 3 to 5
+        "DEREGISTRATION_DELAY_TIMEOUT_SECONDS") echo "60" ;; # Time to drain connections
+        "LOAD_BALANCING_CROSS_ZONE_ENABLED") echo "true" ;; # Better distribution
+        "HEALTH_CHECK_GRACE_PERIOD_SECONDS") echo "300" ;;  # 5 minutes for initial health checks
+        "PRESERVE_CLIENT_IP_ENABLED") echo "true" ;;        # Preserve client IP for logging
+        *) echo "" ;;
+    esac
+}
 
-# Service-specific health check endpoints and settings
-declare -A SERVICE_HEALTH_ENDPOINTS=(
-    ["n8n"]="/healthz"
-    ["ollama"]="/api/tags"
-    ["qdrant"]="/health"
-    ["crawl4ai"]="/health"
-    ["default"]="/health"
-)
+# Service-specific health check endpoints and settings (bash 3.x compatible)
+get_service_health_endpoint() {
+    case "$1" in
+        "n8n") echo "/healthz" ;;
+        "ollama") echo "/api/tags" ;;
+        "qdrant") echo "/health" ;;
+        "crawl4ai") echo "/health" ;;
+        "default") echo "/health" ;;
+        *) echo "/health" ;;
+    esac
+}
 
-declare -A SERVICE_HEALTH_PORTS=(
-    ["n8n"]="5678"
-    ["ollama"]="11434"
-    ["qdrant"]="6333"
-    ["crawl4ai"]="11235"
-    ["default"]="80"
-)
+get_service_health_port() {
+    case "$1" in
+        "n8n") echo "5678" ;;
+        "ollama") echo "11434" ;;
+        "qdrant") echo "6333" ;;
+        "crawl4ai") echo "11235" ;;
+        "default") echo "80" ;;
+        *) echo "80" ;;
+    esac
+}
 
-declare -A SERVICE_STARTUP_TIMES=(
-    ["n8n"]="180"      # 3 minutes for n8n to start
-    ["ollama"]="300"   # 5 minutes for ollama and model loading
-    ["qdrant"]="120"   # 2 minutes for qdrant
-    ["crawl4ai"]="180" # 3 minutes for crawl4ai
-    ["default"]="120"  # 2 minutes default
-)
+get_service_startup_time() {
+    case "$1" in
+        "n8n") echo "180" ;;      # 3 minutes for n8n to start
+        "ollama") echo "300" ;;   # 5 minutes for ollama and model loading
+        "qdrant") echo "120" ;;   # 2 minutes for qdrant
+        "crawl4ai") echo "180" ;; # 3 minutes for crawl4ai
+        "default") echo "120" ;;  # 2 minutes default
+        *) echo "120" ;;
+    esac
+}
 
 # =============================================================================
 # HEALTH CHECK VALIDATION AND IMPROVEMENT FUNCTIONS
@@ -71,11 +76,12 @@ get_health_check_settings() {
     local service_name="${1:-default}"
     local environment="${2:-development}"
     
-    local timeout_seconds="${ALB_HEALTH_CHECK_CONFIG[HEALTH_CHECK_TIMEOUT_SECONDS]}"
-    local interval_seconds="${ALB_HEALTH_CHECK_CONFIG[HEALTH_CHECK_INTERVAL_SECONDS]}"
-    local healthy_threshold="${ALB_HEALTH_CHECK_CONFIG[HEALTHY_THRESHOLD_COUNT]}"
-    local unhealthy_threshold="${ALB_HEALTH_CHECK_CONFIG[UNHEALTHY_THRESHOLD_COUNT]}"
-    local grace_period="${SERVICE_STARTUP_TIMES[$service_name]:-${SERVICE_STARTUP_TIMES[default]}}"
+    local timeout_seconds="$(get_alb_health_check_config "HEALTH_CHECK_TIMEOUT_SECONDS")"
+    local interval_seconds="$(get_alb_health_check_config "HEALTH_CHECK_INTERVAL_SECONDS")"
+    local healthy_threshold="$(get_alb_health_check_config "HEALTHY_THRESHOLD_COUNT")"
+    local unhealthy_threshold="$(get_alb_health_check_config "UNHEALTHY_THRESHOLD_COUNT")"
+    local grace_period="$(get_service_startup_time "$service_name")"
+    [ -z "$grace_period" ] && grace_period="$(get_service_startup_time "default")"
     
     # Adjust settings based on environment
     case "$environment" in
@@ -112,8 +118,10 @@ create_improved_target_group() {
     local service_name="${5:-default}"
     local environment="${6:-development}"
     
-    local health_check_path="${SERVICE_HEALTH_ENDPOINTS[$service_name]:-${SERVICE_HEALTH_ENDPOINTS[default]}}"
-    local health_check_port="${SERVICE_HEALTH_PORTS[$service_name]:-$port}"
+    local health_check_path="$(get_service_health_endpoint "$service_name")"
+    [ -z "$health_check_path" ] && health_check_path="$(get_service_health_endpoint "default")"
+    local health_check_port="$(get_service_health_port "$service_name")"
+    [ -z "$health_check_port" ] && health_check_port="$port"
     
     # Get optimized health check settings
     local settings
@@ -187,9 +195,9 @@ create_improved_target_group() {
     aws elbv2 modify-target-group-attributes \
         --target-group-arn "$tg_arn" \
         --attributes \
-            Key=deregistration_delay.timeout_seconds,Value="${ALB_HEALTH_CHECK_CONFIG[DEREGISTRATION_DELAY_TIMEOUT_SECONDS]}" \
-            Key=load_balancing.cross_zone.enabled,Value="${ALB_HEALTH_CHECK_CONFIG[LOAD_BALANCING_CROSS_ZONE_ENABLED]}" \
-            Key=preserve_client_ip.enabled,Value="${ALB_HEALTH_CHECK_CONFIG[PRESERVE_CLIENT_IP_ENABLED]}" \
+            Key=deregistration_delay.timeout_seconds,Value="$(get_alb_health_check_config "DEREGISTRATION_DELAY_TIMEOUT_SECONDS")" \
+            Key=load_balancing.cross_zone.enabled,Value="$(get_alb_health_check_config "LOAD_BALANCING_CROSS_ZONE_ENABLED")" \
+            Key=preserve_client_ip.enabled,Value="$(get_alb_health_check_config "PRESERVE_CLIENT_IP_ENABLED")" \
         --region "$AWS_REGION" >/dev/null
     
     success "Created target group with improved health check settings: $tg_name"
@@ -240,8 +248,10 @@ fix_existing_target_groups() {
             settings=$(get_health_check_settings "$service_name" "$environment")
             read -r timeout_seconds interval_seconds healthy_threshold unhealthy_threshold grace_period <<< "$settings"
             
-            local health_check_path="${SERVICE_HEALTH_ENDPOINTS[$service_name]:-${SERVICE_HEALTH_ENDPOINTS[default]}}"
-            local health_check_port="${SERVICE_HEALTH_PORTS[$service_name]:-80}"
+            local health_check_path="$(get_service_health_endpoint "$service_name")"
+            [ -z "$health_check_path" ] && health_check_path="$(get_service_health_endpoint "default")"
+            local health_check_port="$(get_service_health_port "$service_name")"
+            [ -z "$health_check_port" ] && health_check_port="80"
             
             # Update the target group
             if aws elbv2 modify-target-group \
@@ -325,7 +335,8 @@ validate_health_check_config() {
     fi
     
     # Check if path matches expected service
-    local expected_path="${SERVICE_HEALTH_ENDPOINTS[$expected_service]:-${SERVICE_HEALTH_ENDPOINTS[default]}}"
+    local expected_path="$(get_service_health_endpoint "$expected_service")"
+    [ -z "$expected_path" ] && expected_path="$(get_service_health_endpoint "default")"
     if [ "$path" != "$expected_path" ]; then
         warning "Health check path may not be optimal for $expected_service: $path (recommended: $expected_path)"
         issues=$((issues + 1))
@@ -514,8 +525,12 @@ main() {
             echo "  Healthy threshold: $healthy"
             echo "  Unhealthy threshold: $unhealthy"
             echo "  Grace period: ${grace}s"
-            echo "  Health check path: ${SERVICE_HEALTH_ENDPOINTS[$service]:-${SERVICE_HEALTH_ENDPOINTS[default]}}"
-            echo "  Health check port: ${SERVICE_HEALTH_PORTS[$service]:-80}"
+            local health_path="$(get_service_health_endpoint "$service")"
+            [ -z "$health_path" ] && health_path="$(get_service_health_endpoint "default")"
+            local health_port="$(get_service_health_port "$service")"
+            [ -z "$health_port" ] && health_port="80"
+            echo "  Health check path: $health_path"
+            echo "  Health check port: $health_port"
             ;;
         "help"|"--help"|"-h")
             show_help

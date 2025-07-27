@@ -946,204 +946,649 @@ else
 fi
 
 # =============================================================================
-# ENVIRONMENT VARIABLE INITIALIZATION
+# ENHANCED ENVIRONMENT VARIABLE INITIALIZATION
 # =============================================================================
 
 # Source the unified variable management library
 PROJECT_ROOT="/home/ubuntu/GeuseMaker"
 mkdir -p "$PROJECT_ROOT/lib"
 
-# Download variable management library if not present
-if [ ! -f "$PROJECT_ROOT/lib/variable-management.sh" ]; then
-    log "Setting up variable management system..."
-    
-    # Create a temporary variable management system for bootstrap
-    cat > "$PROJECT_ROOT/lib/variable-management.sh" << 'VARLIB_EOF'
+log "Setting up enhanced variable management system..."
+
+# Create the comprehensive variable management system for EC2 instances
+cat > "$PROJECT_ROOT/lib/variable-management.sh" << 'VARLIB_EOF'
 #!/bin/bash
-# Bootstrap Variable Management for EC2 Instance
+# =============================================================================
+# Enhanced Variable Management for EC2 Instance Bootstrap
+# Comprehensive environment variable initialization with multiple fallback methods
+# =============================================================================
+
+# Prevent multiple sourcing
+if [[ "${VARIABLE_MANAGEMENT_BOOTSTRAP_LOADED:-}" == "true" ]]; then
+    return 0
+fi
+readonly VARIABLE_MANAGEMENT_BOOTSTRAP_LOADED=true
+
+# =============================================================================
+# CONFIGURATION AND CONSTANTS
+# =============================================================================
+
+readonly VAR_MGR_VERSION="2.0.0"
+readonly VAR_LOG_FILE="/var/log/variable-management.log"
+readonly VAR_CACHE_DIR="/tmp/geuse-variables"
+readonly VAR_FALLBACK_FILE="$VAR_CACHE_DIR/fallback-variables.env"
+readonly VAR_PARAMETER_CACHE="$VAR_CACHE_DIR/parameter-cache.json"
+
+# Parameter Store configuration
+readonly PARAM_STORE_PREFIX="/aibuildkit"
+readonly PARAM_STORE_REGIONS="us-east-1 us-west-2 eu-west-1"
+readonly PARAM_STORE_TIMEOUT=10
+readonly PARAM_STORE_MAX_RETRIES=3
+
+# Critical variables that must be set
+readonly CRITICAL_VARS="POSTGRES_PASSWORD N8N_ENCRYPTION_KEY N8N_USER_MANAGEMENT_JWT_SECRET"
+
+# Optional variables with sensible defaults
+readonly OPTIONAL_VARS="OPENAI_API_KEY WEBHOOK_URL N8N_CORS_ENABLE N8N_CORS_ALLOWED_ORIGINS"
+
+# Create cache directory
+mkdir -p "$VAR_CACHE_DIR"
+
+# =============================================================================
+# ENHANCED LOGGING SYSTEM
+# =============================================================================
 
 var_log() {
     local level="$1"
     shift
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $level: $*" | tee -a /var/log/user-data.log
+    local message="$*"
+    local timestamp=$(date +'%Y-%m-%d %H:%M:%S')
+    local log_entry="[$timestamp] [$level] $message"
+    
+    # Log to both main log and variable management log
+    echo "$log_entry" | tee -a "$VAR_LOG_FILE" >&2
+    
+    # Also use existing logging if available
+    case "$level" in
+        ERROR)
+            if declare -f error >/dev/null 2>&1; then
+                error "$message"
+            fi
+            ;;
+        WARN|WARNING)
+            if declare -f warning >/dev/null 2>&1; then
+                warning "$message"
+            fi
+            ;;
+        SUCCESS)
+            if declare -f success >/dev/null 2>&1; then
+                success "$message"
+            fi
+            ;;
+        *)
+            if declare -f log >/dev/null 2>&1; then
+                log "$message"
+            fi
+            ;;
+    esac
+}
+
+# =============================================================================
+# ENHANCED SECURE VALUE GENERATION
+# =============================================================================
+
+generate_secure_random() {
+    local length="${1:-32}"
+    local charset="${2:-base64}"
+    
+    case "$charset" in
+        hex)
+            if command -v openssl >/dev/null 2>&1; then
+                openssl rand -hex "$length" 2>/dev/null
+            elif command -v dd >/dev/null 2>&1 && command -v xxd >/dev/null 2>&1; then
+                dd if=/dev/urandom bs=1 count="$length" 2>/dev/null | xxd -p | tr -d '\n'
+            elif [ -r /dev/urandom ]; then
+                head -c "$length" /dev/urandom | od -An -tx1 | tr -d ' \n'
+            else
+                # Fallback using multiple entropy sources
+                echo "$(date +%s%N)$(echo $$)$(cat /proc/loadavg 2>/dev/null || echo 0)" | sha256sum 2>/dev/null | cut -c1-"$((length*2))" || echo "fallback$(date +%s)$(echo $$)"
+            fi
+            ;;
+        base64)
+            if command -v openssl >/dev/null 2>&1; then
+                openssl rand -base64 "$length" 2>/dev/null | tr -d '\n='
+            elif [ -r /dev/urandom ] && command -v base64 >/dev/null 2>&1; then
+                head -c "$length" /dev/urandom | base64 | tr -d '\n='
+            else
+                # Enhanced fallback with more entropy
+                echo "$(date +%s%N)$(echo $$)$(ps aux | md5sum 2>/dev/null | cut -c1-16)" | base64 2>/dev/null | tr -d '\n=' | head -c "$length"
+            fi
+            ;;
+        *)
+            var_log ERROR "Unknown charset for random generation: $charset"
+            return 1
+            ;;
+    esac
 }
 
 generate_secure_password() {
-    if command -v openssl >/dev/null 2>&1; then
-        openssl rand -base64 32 2>/dev/null | tr -d '\n'
+    local password
+    password=$(generate_secure_random 24 base64)
+    if [ -n "$password" ] && [ ${#password} -ge 16 ]; then
+        echo "$password"
     else
-        echo "secure_$(date +%s)_$(echo $$ | tail -c 6)"
+        # Emergency fallback with timestamp and entropy
+        echo "secure_$(date +%s)_$(echo $$ | tail -c 6)_$(head -c 8 /dev/urandom 2>/dev/null | base64 | tr -d '\n=' || echo "fallback")"
     fi
 }
 
 generate_encryption_key() {
-    if command -v openssl >/dev/null 2>&1; then
-        openssl rand -hex 32 2>/dev/null
+    local key
+    key=$(generate_secure_random 32 hex)
+    if [ -n "$key" ] && [ ${#key} -ge 64 ]; then
+        echo "$key"
     else
-        echo "$(date +%s | sha256sum | cut -c1-64)"
+        # Emergency fallback ensuring 64 character hex string
+        echo "$(date +%s | sha256sum | cut -c1-32)$(echo $$ | sha256sum | cut -c1-32)"
     fi
 }
+
+generate_jwt_secret() {
+    generate_secure_password
+}
+
+# =============================================================================
+# ENHANCED AWS INTEGRATION
+# =============================================================================
 
 check_aws_availability() {
-    command -v aws >/dev/null 2>&1 && aws sts get-caller-identity >/dev/null 2>&1
+    var_log INFO "Checking AWS CLI availability and credentials"
+    
+    if ! command -v aws >/dev/null 2>&1; then
+        var_log WARN "AWS CLI not available"
+        return 1
+    fi
+    
+    # Check for AWS credentials with timeout
+    if timeout 10 aws sts get-caller-identity >/dev/null 2>&1; then
+        var_log SUCCESS "AWS credentials are valid"
+        return 0
+    else
+        var_log WARN "AWS credentials not configured, expired, or unreachable"
+        return 1
+    fi
 }
 
-get_parameter_store_value() {
-    local param_name="$1"
-    local default_value="$2"
-    local region="${AWS_REGION:-us-east-1}"
+get_instance_metadata() {
+    local metadata_path="$1"
+    local default_value="${2:-}"
+    local timeout="${3:-5}"
     
-    if check_aws_availability; then
-        local value
-        value=$(aws ssm get-parameter --name "$param_name" --with-decryption --region "$region" --query 'Parameter.Value' --output text 2>/dev/null)
-        if [ $? -eq 0 ] && [ -n "$value" ] && [ "$value" != "None" ]; then
-            echo "$value"
-            return 0
-        fi
+    if command -v curl >/dev/null 2>&1; then
+        curl -s --max-time "$timeout" --connect-timeout "$timeout" "http://169.254.169.254/latest/meta-data/$metadata_path" 2>/dev/null || echo "$default_value"
+    else
+        echo "$default_value"
     fi
+}
+
+get_parameter_store_value_enhanced() {
+    local param_name="$1"
+    local default_value="${2:-}"
+    local param_type="${3:-SecureString}"
+    local current_region="${AWS_REGION:-us-east-1}"
+    
+    var_log INFO "Attempting to retrieve parameter: $param_name"
+    
+    if ! check_aws_availability; then
+        var_log WARN "AWS not available for parameter: $param_name"
+        echo "$default_value"
+        return 1
+    fi
+    
+    # Try current region first, then fallback regions
+    local regions_to_try="$current_region"
+    for region in $PARAM_STORE_REGIONS; do
+        if [ "$region" != "$current_region" ]; then
+            regions_to_try="$regions_to_try $region"
+        fi
+    done
+    
+    for region in $regions_to_try; do
+        var_log INFO "Trying parameter $param_name from region $region"
+        
+        local attempts=0
+        while [ $attempts -lt $PARAM_STORE_MAX_RETRIES ]; do
+            local value
+            if [ "$param_type" = "SecureString" ]; then
+                value=$(timeout "$PARAM_STORE_TIMEOUT" aws ssm get-parameter --name "$param_name" --with-decryption --region "$region" --query 'Parameter.Value' --output text 2>/dev/null)
+            else
+                value=$(timeout "$PARAM_STORE_TIMEOUT" aws ssm get-parameter --name "$param_name" --region "$region" --query 'Parameter.Value' --output text 2>/dev/null)
+            fi
+            
+            if [ $? -eq 0 ] && [ -n "$value" ] && [ "$value" != "None" ] && [ "$value" != "null" ]; then
+                var_log SUCCESS "Retrieved parameter $param_name from region $region (attempt $((attempts + 1)))"
+                echo "$value"
+                return 0
+            else
+                attempts=$((attempts + 1))
+                var_log WARN "Failed to get parameter $param_name from region $region (attempt $attempts/$PARAM_STORE_MAX_RETRIES)"
+                if [ $attempts -lt $PARAM_STORE_MAX_RETRIES ]; then
+                    sleep $((attempts * 2))  # Exponential backoff
+                fi
+            fi
+        done
+    done
+    
+    var_log WARN "Could not retrieve parameter $param_name from any region after all retries"
     echo "$default_value"
     return 1
 }
 
-init_all_variables() {
-    var_log INFO "Initializing environment variables with Parameter Store integration"
+# Batch parameter retrieval with enhanced error handling
+get_parameters_batch_enhanced() {
+    local region="${AWS_REGION:-us-east-1}"
     
-    # Critical variables with secure defaults
-    export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(get_parameter_store_value '/aibuildkit/POSTGRES_PASSWORD' "$(generate_secure_password)")}"
-    export N8N_ENCRYPTION_KEY="${N8N_ENCRYPTION_KEY:-$(get_parameter_store_value '/aibuildkit/n8n/ENCRYPTION_KEY' "$(generate_encryption_key)")}"
-    export N8N_USER_MANAGEMENT_JWT_SECRET="${N8N_USER_MANAGEMENT_JWT_SECRET:-$(get_parameter_store_value '/aibuildkit/n8n/USER_MANAGEMENT_JWT_SECRET' "$(generate_secure_password)")}"
+    if ! check_aws_availability; then
+        return 1
+    fi
     
-    # Optional variables
-    export OPENAI_API_KEY="${OPENAI_API_KEY:-$(get_parameter_store_value '/aibuildkit/OPENAI_API_KEY' '')}"
-    export WEBHOOK_URL="${WEBHOOK_URL:-$(get_parameter_store_value '/aibuildkit/WEBHOOK_URL' 'http://localhost:5678')}"
-    export N8N_CORS_ENABLE="${N8N_CORS_ENABLE:-$(get_parameter_store_value '/aibuildkit/n8n/CORS_ENABLE' 'true')}"
-    export N8N_CORS_ALLOWED_ORIGINS="${N8N_CORS_ALLOWED_ORIGINS:-$(get_parameter_store_value '/aibuildkit/n8n/CORS_ALLOWED_ORIGINS' '*')}"
+    var_log INFO "Attempting batch parameter retrieval from region $region"
     
-    # Additional service variables
+    # Define all parameters we want to retrieve
+    local param_names=(
+        "/aibuildkit/POSTGRES_PASSWORD"
+        "/aibuildkit/n8n/ENCRYPTION_KEY"
+        "/aibuildkit/n8n/USER_MANAGEMENT_JWT_SECRET"
+        "/aibuildkit/OPENAI_API_KEY"
+        "/aibuildkit/WEBHOOK_URL"
+        "/aibuildkit/n8n/CORS_ENABLE"
+        "/aibuildkit/n8n/CORS_ALLOWED_ORIGINS"
+    )
+    
+    # Convert to AWS CLI format
+    local param_names_json=""
+    for name in "${param_names[@]}"; do
+        if [ -z "$param_names_json" ]; then
+            param_names_json="\"$name\""
+        else
+            param_names_json="$param_names_json,\"$name\""
+        fi
+    done
+    
+    local attempts=0
+    while [ $attempts -lt $PARAM_STORE_MAX_RETRIES ]; do
+        local result
+        result=$(timeout "$PARAM_STORE_TIMEOUT" aws ssm get-parameters --names "[$param_names_json]" --with-decryption --region "$region" --output json 2>/dev/null)
+        
+        if [ $? -eq 0 ] && [ -n "$result" ]; then
+            var_log SUCCESS "Batch parameter retrieval successful from region $region"
+            echo "$result" > "$VAR_PARAMETER_CACHE"
+            echo "$result"
+            return 0
+        else
+            attempts=$((attempts + 1))
+            var_log WARN "Batch parameter retrieval failed from region $region (attempt $attempts/$PARAM_STORE_MAX_RETRIES)"
+            if [ $attempts -lt $PARAM_STORE_MAX_RETRIES ]; then
+                sleep $((attempts * 2))
+            fi
+        fi
+    done
+    
+    var_log WARN "Batch parameter retrieval failed after all retries"
+    return 1
+}
+
+# Extract parameter from batch result with multiple parsing methods
+extract_parameter_from_batch_enhanced() {
+    local batch_result="$1"
+    local param_name="$2"
+    local default_value="${3:-}"
+    
+    if [ -z "$batch_result" ]; then
+        echo "$default_value"
+        return 1
+    fi
+    
+    local value=""
+    
+    # Method 1: Try jq (most reliable)
+    if command -v jq >/dev/null 2>&1; then
+        value=$(echo "$batch_result" | jq -r ".Parameters[] | select(.Name==\"$param_name\") | .Value" 2>/dev/null)
+        if [ -n "$value" ] && [ "$value" != "null" ]; then
+            echo "$value"
+            return 0
+        fi
+    fi
+    
+    # Method 2: Python JSON parsing
+    if command -v python3 >/dev/null 2>&1; then
+        value=$(echo "$batch_result" | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    for param in data.get('Parameters', []):
+        if param.get('Name') == '$param_name':
+            print(param.get('Value', ''))
+            sys.exit(0)
+except:
+    pass
+" 2>/dev/null)
+        if [ -n "$value" ]; then
+            echo "$value"
+            return 0
+        fi
+    fi
+    
+    # Method 3: Grep/sed fallback
+    value=$(echo "$batch_result" | grep -A 5 "\"Name\": \"$param_name\"" | grep '"Value":' | sed 's/.*"Value": *"\([^"]*\)".*/\1/' | head -n1)
+    if [ -n "$value" ]; then
+        echo "$value"
+        return 0
+    fi
+    
+    echo "$default_value"
+    return 1
+}
+
+# =============================================================================
+# COMPREHENSIVE VARIABLE INITIALIZATION
+# =============================================================================
+
+init_infrastructure_variables() {
+    var_log INFO "Initializing infrastructure variables"
+    
+    # Get instance metadata
+    export INSTANCE_ID="${INSTANCE_ID:-$(get_instance_metadata "instance-id" "")}"
+    export INSTANCE_TYPE="${INSTANCE_TYPE:-$(get_instance_metadata "instance-type" "")}"
+    export AVAILABILITY_ZONE="${AVAILABILITY_ZONE:-$(get_instance_metadata "placement/availability-zone" "")}"
+    export PUBLIC_IP="${PUBLIC_IP:-$(get_instance_metadata "public-ipv4" "")}"
+    export PRIVATE_IP="${PRIVATE_IP:-$(get_instance_metadata "local-ipv4" "")}"
+    
+    # Set AWS region from metadata if not set
+    if [ -z "${AWS_REGION:-}" ] && [ -n "$AVAILABILITY_ZONE" ]; then
+        export AWS_REGION="${AVAILABILITY_ZONE%?}"  # Remove last character (AZ letter)
+    fi
+    
+    # Ensure AWS_REGION has a default
+    export AWS_REGION="${AWS_REGION:-us-east-1}"
+    export AWS_DEFAULT_REGION="$AWS_REGION"
+    
+    var_log SUCCESS "Infrastructure variables initialized"
+}
+
+init_critical_variables_enhanced() {
+    var_log INFO "Initializing critical variables with enhanced security"
+    
+    # Initialize with secure defaults first
+    export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(generate_secure_password)}"
+    export N8N_ENCRYPTION_KEY="${N8N_ENCRYPTION_KEY:-$(generate_encryption_key)}"
+    export N8N_USER_MANAGEMENT_JWT_SECRET="${N8N_USER_MANAGEMENT_JWT_SECRET:-$(generate_jwt_secret)}"
+    
+    var_log SUCCESS "Critical variables initialized with secure defaults"
+}
+
+init_service_variables() {
+    var_log INFO "Initializing service configuration variables"
+    
+    # Database configuration
+    export POSTGRES_DB="${POSTGRES_DB:-n8n}"
+    export POSTGRES_USER="${POSTGRES_USER:-n8n}"
+    
+    # n8n basic auth configuration
     export N8N_BASIC_AUTH_ACTIVE="${N8N_BASIC_AUTH_ACTIVE:-true}"
     export N8N_BASIC_AUTH_USER="${N8N_BASIC_AUTH_USER:-admin}"
     export N8N_BASIC_AUTH_PASSWORD="${N8N_BASIC_AUTH_PASSWORD:-$(generate_secure_password)}"
-    export POSTGRES_DB="${POSTGRES_DB:-n8n}"
-    export POSTGRES_USER="${POSTGRES_USER:-n8n}"
+    
+    # Service configuration
     export ENABLE_METRICS="${ENABLE_METRICS:-true}"
     export LOG_LEVEL="${LOG_LEVEL:-info}"
+    export COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.gpu-optimized.yml}"
     
-    # Infrastructure variables
-    export AWS_DEFAULT_REGION="${AWS_REGION:-us-east-1}"
+    # Network configuration
+    export WEBHOOK_URL="${WEBHOOK_URL:-http://localhost:5678}"
+    export N8N_CORS_ENABLE="${N8N_CORS_ENABLE:-true}"
+    export N8N_CORS_ALLOWED_ORIGINS="${N8N_CORS_ALLOWED_ORIGINS:-*}"
     
-    var_log SUCCESS "Environment variables initialized successfully"
+    # Optional API keys
+    export OPENAI_API_KEY="${OPENAI_API_KEY:-}"
+    
+    var_log SUCCESS "Service variables initialized"
 }
 
-generate_docker_env_file() {
-    local output_file="${1:-/home/ubuntu/GeuseMaker/config/environment.env}"
+load_variables_from_parameter_store_enhanced() {
+    var_log INFO "Loading variables from AWS Parameter Store with enhanced fallbacks"
     
-    var_log INFO "Generating Docker environment file: $output_file"
+    if ! check_aws_availability; then
+        var_log WARN "AWS not available, skipping Parameter Store integration"
+        return 1
+    fi
     
-    mkdir -p "$(dirname "$output_file")"
+    # Try batch retrieval first
+    local batch_result
+    batch_result=$(get_parameters_batch_enhanced)
     
-    cat > "$output_file" << EOF
-# =============================================================================
-# GeuseMaker Environment Configuration
-# Generated: $(date)
-# =============================================================================
-
-# Infrastructure Configuration
-STACK_NAME=$STACK_NAME
-ENVIRONMENT=$ENVIRONMENT
-AWS_REGION=$AWS_REGION
-COMPOSE_FILE=$COMPOSE_FILE
-AWS_DEFAULT_REGION=$AWS_REGION
-
-# Database Configuration
-POSTGRES_DB=$POSTGRES_DB
-POSTGRES_USER=$POSTGRES_USER
-POSTGRES_PASSWORD=$POSTGRES_PASSWORD
-
-# n8n Configuration
-N8N_ENCRYPTION_KEY=$N8N_ENCRYPTION_KEY
-N8N_USER_MANAGEMENT_JWT_SECRET=$N8N_USER_MANAGEMENT_JWT_SECRET
-N8N_BASIC_AUTH_ACTIVE=$N8N_BASIC_AUTH_ACTIVE
-N8N_BASIC_AUTH_USER=$N8N_BASIC_AUTH_USER
-N8N_BASIC_AUTH_PASSWORD=$N8N_BASIC_AUTH_PASSWORD
-N8N_CORS_ENABLE=$N8N_CORS_ENABLE
-N8N_CORS_ALLOWED_ORIGINS=$N8N_CORS_ALLOWED_ORIGINS
-
-# API Keys
-OPENAI_API_KEY=$OPENAI_API_KEY
-
-# Service Configuration
-WEBHOOK_URL=$WEBHOOK_URL
-ENABLE_METRICS=$ENABLE_METRICS
-LOG_LEVEL=$LOG_LEVEL
-
-# Instance Information
-EFS_DNS=\${EFS_DNS:-}
-INSTANCE_ID=\${INSTANCE_ID:-}
-INSTANCE_TYPE=\${INSTANCE_TYPE:-}
-EOF
-    
-    chmod 600 "$output_file"
-    chown ubuntu:ubuntu "$output_file"
-    
-    var_log SUCCESS "Docker environment file generated: $output_file"
+    if [ $? -eq 0 ] && [ -n "$batch_result" ]; then
+        var_log INFO "Using batch parameter retrieval"
+        local loaded_count=0
+        
+        # Extract and set variables from batch result
+        local postgres_password
+        postgres_password=$(extract_parameter_from_batch_enhanced "$batch_result" "/aibuildkit/POSTGRES_PASSWORD" "$POSTGRES_PASSWORD")
+        if [ -n "$postgres_password" ] && [ "$postgres_password" != "$POSTGRES_PASSWORD" ]; then
+            export POSTGRES_PASSWORD="$postgres_password"
+            loaded_count=$((loaded_count + 1))
+            var_log SUCCESS "Loaded POSTGRES_PASSWORD from Parameter Store"
+        fi
+        
+        local n8n_encryption_key
+        n8n_encryption_key=$(extract_parameter_from_batch_enhanced "$batch_result" "/aibuildkit/n8n/ENCRYPTION_KEY" "$N8N_ENCRYPTION_KEY")
+        if [ -n "$n8n_encryption_key" ] && [ "$n8n_encryption_key" != "$N8N_ENCRYPTION_KEY" ]; then
+            export N8N_ENCRYPTION_KEY="$n8n_encryption_key"
+            loaded_count=$((loaded_count + 1))
+            var_log SUCCESS "Loaded N8N_ENCRYPTION_KEY from Parameter Store"
+        fi
+        
+        local n8n_jwt_secret
+        n8n_jwt_secret=$(extract_parameter_from_batch_enhanced "$batch_result" "/aibuildkit/n8n/USER_MANAGEMENT_JWT_SECRET" "$N8N_USER_MANAGEMENT_JWT_SECRET")
+        if [ -n "$n8n_jwt_secret" ] && [ "$n8n_jwt_secret" != "$N8N_USER_MANAGEMENT_JWT_SECRET" ]; then
+            export N8N_USER_MANAGEMENT_JWT_SECRET="$n8n_jwt_secret"
+            loaded_count=$((loaded_count + 1))
+            var_log SUCCESS "Loaded N8N_USER_MANAGEMENT_JWT_SECRET from Parameter Store"
+        fi
+        
+        local openai_api_key
+        openai_api_key=$(extract_parameter_from_batch_enhanced "$batch_result" "/aibuildkit/OPENAI_API_KEY" "$OPENAI_API_KEY")
+        if [ -n "$openai_api_key" ]; then
+            export OPENAI_API_KEY="$openai_api_key"
+            loaded_count=$((loaded_count + 1))
+            var_log SUCCESS "Loaded OPENAI_API_KEY from Parameter Store"
+        fi
+        
+        local webhook_url
+        webhook_url=$(extract_parameter_from_batch_enhanced "$batch_result" "/aibuildkit/WEBHOOK_URL" "$WEBHOOK_URL")
+        if [ -n "$webhook_url" ] && [ "$webhook_url" != "$WEBHOOK_URL" ]; then
+            export WEBHOOK_URL="$webhook_url"
+            loaded_count=$((loaded_count + 1))
+            var_log SUCCESS "Loaded WEBHOOK_URL from Parameter Store"
+        fi
+        
+        var_log SUCCESS "Loaded $loaded_count parameters from Parameter Store via batch retrieval"
+        return 0
+        
+    else
+        var_log WARN "Batch retrieval failed, trying individual parameter requests"
+        
+        # Fallback to individual parameter retrieval
+        local loaded_count=0
+        
+        # Try to load critical parameters individually
+        local postgres_password
+        postgres_password=$(get_parameter_store_value_enhanced "/aibuildkit/POSTGRES_PASSWORD" "$POSTGRES_PASSWORD" "SecureString")
+        if [ $? -eq 0 ] && [ -n "$postgres_password" ] && [ "$postgres_password" != "$POSTGRES_PASSWORD" ]; then
+            export POSTGRES_PASSWORD="$postgres_password"
+            loaded_count=$((loaded_count + 1))
+        fi
+        
+        local n8n_encryption_key
+        n8n_encryption_key=$(get_parameter_store_value_enhanced "/aibuildkit/n8n/ENCRYPTION_KEY" "$N8N_ENCRYPTION_KEY" "SecureString")
+        if [ $? -eq 0 ] && [ -n "$n8n_encryption_key" ] && [ "$n8n_encryption_key" != "$N8N_ENCRYPTION_KEY" ]; then
+            export N8N_ENCRYPTION_KEY="$n8n_encryption_key"
+            loaded_count=$((loaded_count + 1))
+        fi
+        
+        local n8n_jwt_secret
+        n8n_jwt_secret=$(get_parameter_store_value_enhanced "/aibuildkit/n8n/USER_MANAGEMENT_JWT_SECRET" "$N8N_USER_MANAGEMENT_JWT_SECRET" "SecureString")
+        if [ $? -eq 0 ] && [ -n "$n8n_jwt_secret" ] && [ "$n8n_jwt_secret" != "$N8N_USER_MANAGEMENT_JWT_SECRET" ]; then
+            export N8N_USER_MANAGEMENT_JWT_SECRET="$n8n_jwt_secret"
+            loaded_count=$((loaded_count + 1))
+        fi
+        
+        if [ $loaded_count -gt 0 ]; then
+            var_log SUCCESS "Loaded $loaded_count parameters from Parameter Store individually"
+            return 0
+        else
+            var_log WARN "Could not load any parameters from Parameter Store"
+            return 1
+        fi
+    fi
 }
 
-validate_critical_variables() {
-    var_log INFO "Validating critical variables"
+# =============================================================================
+# ENHANCED VALIDATION SYSTEM
+# =============================================================================
+
+validate_critical_variables_enhanced() {
+    var_log INFO "Performing comprehensive validation of critical variables"
     
-    local validation_errors=()
+    local validation_errors=""
+    local error_count=0
     
-    if [ -z "$POSTGRES_PASSWORD" ] || [ ${#POSTGRES_PASSWORD} -lt 8 ]; then
-        validation_errors+=("POSTGRES_PASSWORD is not set or too short")
+    # Validate each critical variable
+    for var in $CRITICAL_VARS; do
+        local value
+        eval "value=\$$var"
+        
+        if [ -z "$value" ]; then
+            validation_errors="$validation_errors\n$var is not set or empty"
+            error_count=$((error_count + 1))
+        elif [ ${#value} -lt 8 ]; then
+            validation_errors="$validation_errors\n$var is too short (minimum 8 characters, current: ${#value})"
+            error_count=$((error_count + 1))
+        fi
+    done
+    
+    # Additional security checks
+    case "$POSTGRES_PASSWORD" in
+        password|postgres|admin|root|test)
+            validation_errors="$validation_errors\nPOSTGRES_PASSWORD uses a common insecure value"
+            error_count=$((error_count + 1))
+            ;;
+    esac
+    
+    # Check encryption key length
+    if [ ${#N8N_ENCRYPTION_KEY} -lt 32 ]; then
+        validation_errors="$validation_errors\nN8N_ENCRYPTION_KEY is too short for security (minimum 32 characters, current: ${#N8N_ENCRYPTION_KEY})"
+        error_count=$((error_count + 1))
     fi
     
-    if [ -z "$N8N_ENCRYPTION_KEY" ] || [ ${#N8N_ENCRYPTION_KEY} -lt 32 ]; then
-        validation_errors+=("N8N_ENCRYPTION_KEY is not set or too short")
-    fi
-    
-    if [ -z "$N8N_USER_MANAGEMENT_JWT_SECRET" ] || [ ${#N8N_USER_MANAGEMENT_JWT_SECRET} -lt 8 ]; then
-        validation_errors+=("N8N_USER_MANAGEMENT_JWT_SECRET is not set or too short")
-    fi
-    
-    if [ ${#validation_errors[@]} -eq 0 ]; then
-        var_log SUCCESS "All critical variables are valid"
+    # Report validation results
+    if [ $error_count -eq 0 ]; then
+        var_log SUCCESS "All critical variables passed validation"
         return 0
     else
-        var_log ERROR "Critical variable validation failed:"
-        for error in "${validation_errors[@]}"; do
-            var_log ERROR "  - $error"
+        var_log ERROR "Critical variable validation failed with $error_count errors:"
+        echo -e "$validation_errors" | while IFS= read -r error; do
+            if [ -n "$error" ]; then
+                var_log ERROR "  - $error"
+            fi
         done
         return 1
     fi
 }
-VARLIB_EOF
+
+validate_optional_variables() {
+    var_log INFO "Validating optional variables"
     
-    chmod +x "$PROJECT_ROOT/lib/variable-management.sh"
-fi
+    local validation_warnings=""
+    
+    # Check API key format
+    if [ -n "$OPENAI_API_KEY" ]; then
+        case "$OPENAI_API_KEY" in
+            sk-*)
+                var_log SUCCESS "OPENAI_API_KEY format appears valid"
+                ;;
+            *)
+                validation_warnings="$validation_warnings\nOPENAI_API_KEY does not match expected format (should start with 'sk-')"
+                ;;
+        esac
+    else
+        validation_warnings="$validation_warnings\nOPENAI_API_KEY is not set - AI features may not work"
+    fi
+    
+    # Check webhook URL format
+    case "$WEBHOOK_URL" in
+        http://*|https://*)
+            var_log SUCCESS "WEBHOOK_URL format is valid"
+            ;;
+        *)
+            validation_warnings="$validation_warnings\nWEBHOOK_URL does not appear to be a valid URL: $WEBHOOK_URL"
+            ;;
+    esac
+    
+    # Report warnings
+    if [ -n "$validation_warnings" ]; then
+        echo -e "$validation_warnings" | while IFS= read -r warning; do
+            if [ -n "$warning" ]; then
+                var_log WARN "$warning"
+            fi
+        done
+    fi
+    
+    var_log SUCCESS "Optional variable validation completed"
+    return 0
+}
 
-# Source the variable management library
-log "Loading variable management system..."
-source "$PROJECT_ROOT/lib/variable-management.sh"
+# =============================================================================
+# ENHANCED FILE GENERATION
+# =============================================================================
 
-# Initialize all environment variables
-if ! init_all_variables; then
-    log "Warning: Variable initialization had issues, but continuing with defaults"
-fi
+generate_docker_env_file_enhanced() {
+    local output_file="${1:-/home/ubuntu/GeuseMaker/config/environment.env}"
+    local backup_file="${output_file}.backup.$(date +%s)"
+    
+    var_log INFO "Generating enhanced Docker environment file: $output_file"
+    
+    # Create directory if it doesn't exist
+    mkdir -p "$(dirname "$output_file")"
+    
+    # Backup existing file
+    if [ -f "$output_file" ]; then
+        cp "$output_file" "$backup_file"
+        var_log INFO "Backed up existing environment file to: $backup_file"
+    fi
+    
+    cat > "$output_file" << EOF
+# =============================================================================
+# GeuseMaker Enhanced Environment Configuration
+# Generated by Variable Management System v$VAR_MGR_VERSION
+# Generated: $(date)
+# Instance: ${INSTANCE_ID:-unknown}
+# Region: ${AWS_REGION:-unknown}
+# =============================================================================
 
-# Validate critical variables
-if ! validate_critical_variables; then
-    log "Error: Critical variable validation failed"
-    exit 1
-fi
+# Infrastructure Configuration
+STACK_NAME=${STACK_NAME:-GeuseMaker}
+ENVIRONMENT=${ENVIRONMENT:-development}
+AWS_REGION=$AWS_REGION
+AWS_DEFAULT_REGION=$AWS_REGION
+COMPOSE_FILE=$COMPOSE_FILE
 
-# Create configuration directory and generate environment file
-mkdir -p /home/ubuntu/GeuseMaker/config
-generate_docker_env_file "/home/ubuntu/GeuseMaker/config/environment.env"
-
-# Create additional fallback environment file for Docker Compose
-cat > /home/ubuntu/GeuseMaker/.env << EOF
-# Docker Compose Environment File
-# This file is automatically sourced by Docker Compose
+# Instance Information
+INSTANCE_ID=$INSTANCE_ID
+INSTANCE_TYPE=$INSTANCE_TYPE
+AVAILABILITY_ZONE=$AVAILABILITY_ZONE
+PUBLIC_IP=$PUBLIC_IP
+PRIVATE_IP=$PRIVATE_IP
 
 # Database Configuration
 POSTGRES_DB=$POSTGRES_DB
@@ -1159,7 +1604,7 @@ N8N_BASIC_AUTH_PASSWORD=$N8N_BASIC_AUTH_PASSWORD
 N8N_CORS_ENABLE=$N8N_CORS_ENABLE
 N8N_CORS_ALLOWED_ORIGINS=$N8N_CORS_ALLOWED_ORIGINS
 
-# API Keys
+# API Keys and External Services
 OPENAI_API_KEY=$OPENAI_API_KEY
 
 # Service Configuration
@@ -1167,17 +1612,174 @@ WEBHOOK_URL=$WEBHOOK_URL
 ENABLE_METRICS=$ENABLE_METRICS
 LOG_LEVEL=$LOG_LEVEL
 
-# Infrastructure
-AWS_REGION=$AWS_REGION
-AWS_DEFAULT_REGION=$AWS_REGION
-STACK_NAME=$STACK_NAME
-ENVIRONMENT=$ENVIRONMENT
+# EFS Configuration (if available)
+EFS_DNS=${EFS_DNS:-}
+
+# Generation metadata
+VAR_MGR_VERSION=$VAR_MGR_VERSION
+VAR_GENERATION_TIME=$(date)
+VAR_GENERATION_METHOD=enhanced
 EOF
+    
+    # Set secure permissions
+    chmod 600 "$output_file"
+    chown ubuntu:ubuntu "$output_file" 2>/dev/null || true
+    
+    var_log SUCCESS "Enhanced Docker environment file generated: $output_file"
+}
 
-chown ubuntu:ubuntu /home/ubuntu/GeuseMaker/.env
-chmod 600 /home/ubuntu/GeuseMaker/.env
+save_fallback_variables() {
+    var_log INFO "Saving fallback variables for future use"
+    
+    cat > "$VAR_FALLBACK_FILE" << EOF
+# GeuseMaker Fallback Variables
+# Generated: $(date)
+# These variables can be used if Parameter Store is unavailable
 
-log "Environment variable initialization completed successfully"
+# Critical Variables (lengths preserved for validation)
+POSTGRES_PASSWORD_LENGTH=${#POSTGRES_PASSWORD}
+N8N_ENCRYPTION_KEY_LENGTH=${#N8N_ENCRYPTION_KEY}
+N8N_USER_MANAGEMENT_JWT_SECRET_LENGTH=${#N8N_USER_MANAGEMENT_JWT_SECRET}
+
+# Configuration checksums for validation
+POSTGRES_PASSWORD_HASH=$(echo -n "$POSTGRES_PASSWORD" | sha256sum | cut -c1-16)
+N8N_ENCRYPTION_KEY_HASH=$(echo -n "$N8N_ENCRYPTION_KEY" | sha256sum | cut -c1-16)
+
+# Service configuration
+POSTGRES_DB=$POSTGRES_DB
+POSTGRES_USER=$POSTGRES_USER
+ENABLE_METRICS=$ENABLE_METRICS
+LOG_LEVEL=$LOG_LEVEL
+WEBHOOK_URL=$WEBHOOK_URL
+N8N_CORS_ENABLE=$N8N_CORS_ENABLE
+N8N_CORS_ALLOWED_ORIGINS=$N8N_CORS_ALLOWED_ORIGINS
+
+# Generation info
+FALLBACK_GENERATION_TIME=$(date)
+FALLBACK_INSTANCE_ID=$INSTANCE_ID
+EOF
+    
+    chmod 600 "$VAR_FALLBACK_FILE"
+    var_log SUCCESS "Fallback variables saved"
+}
+
+# =============================================================================
+# MAIN INITIALIZATION FUNCTION
+# =============================================================================
+
+init_all_variables_enhanced() {
+    local force_parameter_store="${1:-false}"
+    
+    var_log INFO "Starting enhanced variable initialization (force_parameter_store=$force_parameter_store)"
+    
+    # Step 1: Initialize infrastructure variables
+    init_infrastructure_variables
+    
+    # Step 2: Initialize critical variables with secure defaults
+    init_critical_variables_enhanced
+    
+    # Step 3: Initialize service variables
+    init_service_variables
+    
+    # Step 4: Try to load from Parameter Store (if available and not disabled)
+    if [ "$force_parameter_store" != "false" ]; then
+        if load_variables_from_parameter_store_enhanced; then
+            var_log SUCCESS "Parameter Store integration successful"
+        else
+            var_log WARN "Parameter Store integration failed, using secure defaults"
+        fi
+    else
+        var_log INFO "Skipping Parameter Store integration (using defaults)"
+    fi
+    
+    # Step 5: Validate all variables
+    if ! validate_critical_variables_enhanced; then
+        var_log ERROR "Critical variable validation failed"
+        return 1
+    fi
+    
+    validate_optional_variables
+    
+    # Step 6: Generate environment files
+    generate_docker_env_file_enhanced "/home/ubuntu/GeuseMaker/config/environment.env"
+    generate_docker_env_file_enhanced "/home/ubuntu/GeuseMaker/.env" 
+    
+    # Step 7: Save fallback configuration
+    save_fallback_variables
+    
+    var_log SUCCESS "Enhanced variable initialization completed successfully"
+    return 0
+}
+
+# =============================================================================
+# UTILITY FUNCTIONS
+# =============================================================================
+
+show_variable_status_enhanced() {
+    var_log INFO "Enhanced Variable Status Report"
+    echo ""
+    echo "=== CRITICAL VARIABLES ==="
+    for var in $CRITICAL_VARS; do
+        local value
+        eval "value=\$$var"
+        if [ -n "$value" ]; then
+            echo "  ✓ $var: [SET - ${#value} chars]"
+        else
+            echo "  ✗ $var: [NOT SET]"
+        fi
+    done
+    
+    echo ""
+    echo "=== INFRASTRUCTURE VARIABLES ==="
+    echo "  Instance ID: ${INSTANCE_ID:-[NOT SET]}"
+    echo "  Instance Type: ${INSTANCE_TYPE:-[NOT SET]}"
+    echo "  AWS Region: ${AWS_REGION:-[NOT SET]}"
+    echo "  Availability Zone: ${AVAILABILITY_ZONE:-[NOT SET]}"
+    echo "  Public IP: ${PUBLIC_IP:-[NOT SET]}"
+    
+    echo ""
+    echo "=== SERVICE VARIABLES ==="
+    echo "  Database: ${POSTGRES_DB} (user: ${POSTGRES_USER})"
+    echo "  Compose File: ${COMPOSE_FILE}"
+    echo "  Webhook URL: ${WEBHOOK_URL}"
+    echo "  Metrics Enabled: ${ENABLE_METRICS}"
+    echo "  Log Level: ${LOG_LEVEL}"
+    
+    echo ""
+    echo "=== API KEYS ==="
+    if [ -n "$OPENAI_API_KEY" ]; then
+        echo "  ✓ OpenAI API Key: [SET - ${#OPENAI_API_KEY} chars]"
+    else
+        echo "  - OpenAI API Key: [NOT SET]"
+    fi
+    
+    echo ""
+    echo "=== SYSTEM STATUS ==="
+    echo "  AWS CLI Available: $(check_aws_availability && echo "✓ YES" || echo "✗ NO")"
+    echo "  Variable Cache Dir: $VAR_CACHE_DIR"
+    echo "  Parameter Cache: $([ -f "$VAR_PARAMETER_CACHE" ] && echo "✓ EXISTS" || echo "- NOT FOUND")"
+    echo "  Fallback File: $([ -f "$VAR_FALLBACK_FILE" ] && echo "✓ EXISTS" || echo "- NOT FOUND")"
+    echo ""
+}
+
+VARLIB_EOF
+
+chmod +x "$PROJECT_ROOT/lib/variable-management.sh"
+
+# Source the enhanced variable management library
+log "Loading enhanced variable management system..."
+source "$PROJECT_ROOT/lib/variable-management.sh"
+
+# Initialize all environment variables with enhanced system
+log "Initializing variables with enhanced Parameter Store integration..."
+if ! init_all_variables_enhanced true; then
+    log "Warning: Enhanced variable initialization had issues, but continuing with fallbacks"
+fi
+
+# Show variable status for debugging
+show_variable_status_enhanced
+
+log "Enhanced environment variable initialization completed successfully"
 
 log "Application setup completed"
 
