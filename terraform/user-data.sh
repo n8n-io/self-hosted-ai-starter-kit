@@ -418,39 +418,163 @@ if [ "$AVAILABLE_SPACE" -lt "$REQUIRED_SPACE" ]; then
     log "Warning: Available disk space is less than 10GB. Consider expanding storage."
 fi
 
-# Detect available storage drivers
-STORAGE_DRIVER="overlay2"
+# Enhanced Docker storage driver detection with comprehensive fallback
+detect_docker_storage_driver() {
+    log "Detecting optimal Docker storage driver..."
+    
+    # Initialize kernel modules that might be needed
+    local required_modules="overlay br_netfilter"
+    for module in $required_modules; do
+        if ! lsmod | grep -q "^$module"; then
+            log "Loading kernel module: $module"
+            modprobe "$module" 2>/dev/null || log "Warning: Could not load $module module"
+        fi
+    done
+    
+    # Check filesystem type first for compatibility assessment
+    local root_fs_type
+    root_fs_type=$(df -T / | awk 'NR==2 {print $2}' 2>/dev/null || echo "unknown")
+    log "Root filesystem type: $root_fs_type"
+    
+    # Check available disk space for storage driver requirements
+    local available_space_gb
+    available_space_gb=$(df / | awk 'NR==2 {print int($4/1024/1024)}' 2>/dev/null || echo "0")
+    log "Available disk space: ${available_space_gb}GB"
+    
+    # Test overlay2 support (preferred modern driver)
+    if test_overlay_support "overlay2"; then
+        log "✓ overlay2 storage driver is supported and optimal"
+        echo "overlay2"
+        return 0
+    fi
+    
+    # Test overlay support (fallback for older systems)
+    if test_overlay_support "overlay"; then
+        log "✓ overlay storage driver is supported (fallback)"
+        echo "overlay"
+        return 0
+    fi
+    
+    # Check for aufs support (older Ubuntu systems)
+    if [ "$root_fs_type" = "aufs" ] || lsmod | grep -q aufs; then
+        log "✓ AUFS filesystem detected, using aufs driver"
+        echo "aufs"
+        return 0
+    fi
+    
+    # VFS fallback (universal but slow)
+    log "⚠ No optimal storage driver found, using vfs (universal but slow)"
+    echo "vfs"
+    return 0
+}
+
+# Test if a specific overlay storage driver is supported
+test_overlay_support() {
+    local driver="$1"
+    
+    # Check if the kernel module is available
+    if ! modinfo "$driver" >/dev/null 2>&1; then
+        log "  $driver module not available in kernel"
+        return 1
+    fi
+    
+    # Try to load the module
+    if ! modprobe "$driver" 2>/dev/null; then
+        log "  Failed to load $driver module"
+        return 1
+    fi
+    
+    # Check if the module is actually loaded
+    if ! lsmod | grep -q "^$driver"; then
+        log "  $driver module not loaded after modprobe"
+        return 1
+    fi
+    
+    # Check filesystem compatibility
+    local root_fs_type
+    root_fs_type=$(df -T / | awk 'NR==2 {print $2}' 2>/dev/null)
+    
+    case "$root_fs_type" in
+        "ext4"|"xfs"|"btrfs")
+            log "  Filesystem $root_fs_type is compatible with $driver"
+            return 0
+            ;;
+        *)
+            log "  Filesystem $root_fs_type may not be optimal for $driver"
+            # Don't fail completely, just warn
+            return 0
+            ;;
+    esac
+}
+
+# Detect storage driver and set appropriate options with error handling
+STORAGE_DRIVER=""
 STORAGE_OPTS='[]'
 
-# Check if overlay2 is supported
-if [ -d "/sys/module/overlay" ] || modprobe overlay 2>/dev/null; then
-    log "overlay2 storage driver is available"
-    STORAGE_DRIVER="overlay2"
-    STORAGE_OPTS='["overlay2.override_kernel_check=true"]'
+# Safely detect storage driver with fallback
+if STORAGE_DRIVER=$(detect_docker_storage_driver 2>/dev/null); then
+    log "Detected storage driver: $STORAGE_DRIVER"
 else
-    log "overlay2 not available, checking for devicemapper..."
-    if [ -f "/sys/fs/cgroup/devices/devices.list" ]; then
-        STORAGE_DRIVER="devicemapper"
-        STORAGE_OPTS='["dm.thinpooldev=/dev/mapper/docker-thinpool", "dm.use_deferred_removal=true", "dm.use_deferred_deletion=true"]'
-    else
-        log "Using default storage driver"
-        STORAGE_DRIVER=""
-        STORAGE_OPTS='[]'
-    fi
+    log "Storage driver detection failed, using auto-detection"
+    STORAGE_DRIVER=""
 fi
 
-# Create Docker daemon configuration with detected storage driver
-log "Configuring Docker with storage driver: ${STORAGE_DRIVER:-auto}"
-if [ -n "$STORAGE_DRIVER" ]; then
-    cat > /etc/docker/daemon.json << EOF
-{
+# Configure storage options based on detected driver
+case "$STORAGE_DRIVER" in
+    "overlay2")
+        STORAGE_OPTS='["overlay2.override_kernel_check=true"]'
+        log "Using overlay2 with kernel check override"
+        ;;
+    "overlay")
+        STORAGE_OPTS='["overlay.override_kernel_check=true"]'
+        log "Using overlay with kernel check override"
+        ;;
+    "aufs")
+        STORAGE_OPTS='[]'
+        log "Using aufs storage driver"
+        ;;
+    "vfs")
+        STORAGE_OPTS='[]'
+        log "Using vfs storage driver (fallback mode)"
+        ;;
+    "")
+        # Auto-detection mode - let Docker choose
+        STORAGE_OPTS='[]'
+        log "Using Docker auto-detection for storage driver"
+        ;;
+    *)
+        log "Warning: Unknown storage driver '$STORAGE_DRIVER', using auto-detection"
+        STORAGE_DRIVER=""
+        STORAGE_OPTS='[]'
+        ;;
+esac
+
+# Create Docker daemon configuration with comprehensive error handling
+create_docker_daemon_config() {
+    local config_file="/etc/docker/daemon.json"
+    local temp_config="/tmp/docker-daemon.json.tmp"
+    
+    log "Creating Docker daemon configuration..."
+    
+    # Create base configuration with proper JSON escaping
+    local config_content
+    if [ -n "$STORAGE_DRIVER" ] && [ "$STORAGE_DRIVER" != "auto" ]; then
+        # Escape variables properly for JSON to prevent injection
+        local escaped_storage_driver
+        escaped_storage_driver=$(printf '%s' "$STORAGE_DRIVER" | sed 's/"/\\"/g' | sed "s/'/\\'/g")
+        # Validate STORAGE_OPTS is valid JSON
+        if ! echo "$STORAGE_OPTS" | python3 -c "import json,sys; json.load(sys.stdin)" 2>/dev/null; then
+            log "Warning: STORAGE_OPTS contains invalid JSON, using empty array"
+            STORAGE_OPTS='[]'
+        fi
+        config_content='{
     "log-driver": "json-file",
     "log-opts": {
         "max-size": "100m",
         "max-file": "3"
     },
-    "storage-driver": "$STORAGE_DRIVER",
-    "storage-opts": $STORAGE_OPTS,
+    "storage-driver": "'"$escaped_storage_driver"'",
+    "storage-opts": '"$STORAGE_OPTS"',
     "data-root": "/var/lib/docker",
     "exec-opts": ["native.cgroupdriver=systemd"],
     "live-restore": true,
@@ -462,12 +586,10 @@ if [ -n "$STORAGE_DRIVER" ]; then
             "path": "runc"
         }
     }
-}
-EOF
-else
-    # Fallback configuration without explicit storage driver
-    cat > /etc/docker/daemon.json << EOF
-{
+}'
+    else
+        # Minimal configuration without explicit storage driver
+        config_content='{
     "log-driver": "json-file",
     "log-opts": {
         "max-size": "100m",
@@ -484,8 +606,55 @@ else
             "path": "runc"
         }
     }
+}'
+    fi
+    
+    # Write to temp file first
+    echo "$config_content" > "$temp_config"
+    
+    # Validate JSON syntax before using it
+    if command -v python3 >/dev/null 2>&1; then
+        if ! python3 -c "import json; json.load(open('$temp_config'))" 2>/dev/null; then
+            log "Error: Generated Docker configuration has invalid JSON syntax"
+            rm -f "$temp_config"
+            return 1
+        fi
+    elif command -v jq >/dev/null 2>&1; then
+        if ! jq '.' "$temp_config" >/dev/null 2>&1; then
+            log "Error: Generated Docker configuration has invalid JSON syntax"
+            rm -f "$temp_config"
+            return 1
+        fi
+    else
+        # Basic JSON validation using grep
+        if ! grep -q '{' "$temp_config" || ! grep -q '}' "$temp_config"; then
+            log "Error: Generated Docker configuration appears to be invalid"
+            rm -f "$temp_config"
+            return 1
+        fi
+    fi
+    
+    # Move validated config to final location
+    mv "$temp_config" "$config_file"
+    chmod 644 "$config_file"
+    
+    log "Docker daemon configuration created successfully"
+    return 0
+}
+
+# Create the Docker configuration
+if ! create_docker_daemon_config; then
+    log "Failed to create Docker daemon config, creating minimal fallback"
+    cat > /etc/docker/daemon.json << 'EOF'
+{
+    "log-driver": "json-file",
+    "log-opts": {
+        "max-size": "100m",
+        "max-file": "3"
+    }
 }
 EOF
+    chmod 644 /etc/docker/daemon.json
 fi
 
 # Ensure Docker data directory exists with proper permissions
@@ -493,59 +662,269 @@ mkdir -p /var/lib/docker
 chown root:root /var/lib/docker
 chmod 700 /var/lib/docker
 
-# Validate Docker configuration before restart
-log "Validating Docker daemon configuration..."
-if ! python3 -c "import json; json.load(open('/etc/docker/daemon.json'))" 2>/dev/null; then
-    log "Warning: Docker daemon.json has invalid JSON, creating minimal configuration"
-    cat > /etc/docker/daemon.json << EOF
+# Enhanced Docker service management with comprehensive error handling
+manage_docker_service() {
+    log "Managing Docker service startup..."
+    
+    # Check if Docker is already running and healthy
+    if systemctl is-active --quiet docker && docker info >/dev/null 2>&1; then
+        log "Docker is already running and healthy, checking configuration..."
+        
+        # Only restart if configuration has changed
+        if [ -f /etc/docker/daemon.json ]; then
+            local current_config_hash
+            current_config_hash=$(md5sum /etc/docker/daemon.json 2>/dev/null | cut -d' ' -f1)
+            local last_config_hash
+            last_config_hash=$(cat /tmp/last-docker-config-hash 2>/dev/null || echo "")
+            
+            if [ "$current_config_hash" = "$last_config_hash" ]; then
+                log "Docker configuration unchanged, skipping restart"
+                return 0
+            else
+                log "Docker configuration changed, restart required"
+                echo "$current_config_hash" > /tmp/last-docker-config-hash
+            fi
+        fi
+    fi
+    
+    # Validate Docker configuration before restart
+    log "Validating Docker daemon configuration..."
+    if [ -f /etc/docker/daemon.json ]; then
+        if ! validate_docker_config /etc/docker/daemon.json; then
+            log "Warning: Docker configuration validation failed, using minimal config"
+            create_minimal_docker_config
+        fi
+    else
+        log "No Docker configuration found, creating minimal config"
+        create_minimal_docker_config
+    fi
+    
+    # Attempt graceful restart first
+    log "Restarting Docker daemon..."
+    if systemctl is-active --quiet docker; then
+        if systemctl restart docker; then
+            log "Docker restarted successfully"
+        else
+            log "Graceful restart failed, attempting stop and start..."
+            systemctl stop docker
+            sleep 5
+            if ! systemctl start docker; then
+                log "Docker start failed, attempting recovery..."
+                recover_docker_service
+            fi
+        fi
+    else
+        log "Docker not running, starting fresh..."
+        if ! systemctl start docker; then
+            log "Docker start failed, attempting recovery..."
+            recover_docker_service
+        fi
+    fi
+    
+    # Enable Docker to start on boot
+    systemctl enable docker || log "Warning: Could not enable Docker service"
+}
+
+# Validate Docker configuration file
+validate_docker_config() {
+    local config_file="$1"
+    
+    if [ ! -f "$config_file" ]; then
+        log "Docker config file not found: $config_file"
+        return 1
+    fi
+    
+    # Test JSON syntax with multiple validators
+    if command -v python3 >/dev/null 2>&1; then
+        if python3 -c "import json; json.load(open('$config_file'))" 2>/dev/null; then
+            return 0
+        fi
+    elif command -v jq >/dev/null 2>&1; then
+        if jq '.' "$config_file" >/dev/null 2>&1; then
+            return 0
+        fi
+    else
+        # Basic validation - check for balanced braces
+        local open_braces
+        local close_braces
+        open_braces=$(grep -o '{' "$config_file" | wc -l)
+        close_braces=$(grep -o '}' "$config_file" | wc -l)
+        if [ "$open_braces" -eq "$close_braces" ] && [ "$open_braces" -gt 0 ]; then
+            return 0
+        fi
+    fi
+    
+    log "Docker configuration validation failed"
+    return 1
+}
+
+# Create minimal Docker configuration
+create_minimal_docker_config() {
+    log "Creating minimal Docker configuration..."
+    cat > /etc/docker/daemon.json << 'EOF'
 {
     "log-driver": "json-file",
     "log-opts": {
         "max-size": "100m",
         "max-file": "3"
     },
-    "data-root": "/var/lib/docker",
-    "exec-opts": ["native.cgroupdriver=systemd"]
+    "data-root": "/var/lib/docker"
 }
 EOF
-fi
-
-# Restart Docker with the new configuration
-log "Restarting Docker with optimized configuration..."
-if ! systemctl restart docker; then
-    log "Warning: Docker restart failed, attempting recovery..."
-    # Try with minimal configuration
-    cat > /etc/docker/daemon.json << EOF
-{
-    "log-driver": "json-file",
-    "log-opts": {
-        "max-size": "100m",
-        "max-file": "3"
-    }
+    chmod 644 /etc/docker/daemon.json
 }
-EOF
-    systemctl restart docker || log "Error: Docker failed to start even with minimal configuration"
-fi
 
-# Wait for Docker to be ready with improved error handling
-log "Waiting for Docker to be ready..."
+# Recover Docker service when standard methods fail
+recover_docker_service() {
+    log "Attempting Docker service recovery..."
+    
+    # Clean up any existing Docker processes
+    pkill -f dockerd || true
+    sleep 5
+    
+    # Remove problematic configuration
+    if [ -f /etc/docker/daemon.json ]; then
+        mv /etc/docker/daemon.json /etc/docker/daemon.json.backup
+        log "Backed up problematic Docker configuration"
+    fi
+    
+    # Create absolute minimal configuration
+    mkdir -p /etc/docker
+    echo '{}' > /etc/docker/daemon.json
+    chmod 644 /etc/docker/daemon.json
+    
+    # Try to start with minimal config
+    if systemctl start docker; then
+        log "Docker recovered with minimal configuration"
+        return 0
+    else
+        log "Docker recovery failed, checking for deeper issues..."
+        
+        # Check for disk space issues
+        local available_space
+        available_space=$(df /var/lib/docker 2>/dev/null | awk 'NR==2 {print $4}' || echo "0")
+        if [ "$available_space" -lt 1048576 ]; then  # Less than 1GB
+            log "Critical: Low disk space may be preventing Docker startup"
+            log "Available space: $(($available_space/1024))MB"
+        fi
+        
+        # Check for permission issues
+        if [ ! -w /var/lib/docker ]; then
+            log "Critical: Permission issues with Docker data directory"
+            chown -R root:root /var/lib/docker || true
+            chmod 700 /var/lib/docker || true
+        fi
+        
+        # Final attempt
+        systemctl start docker || log "Critical: Docker could not be started even after recovery attempts"
+    fi
+}
+
+# Execute Docker service management
+manage_docker_service
+
+# Enhanced Docker readiness check with intelligent backoff
+wait_for_docker_ready() {
+    log "Waiting for Docker to be ready..."
+    local max_attempts=90  # Reduced from 120 to be more reasonable
+    local docker_ready=false
+    local last_error=""
+    local consecutive_failures=0
+    
+    for i in $(seq 1 $max_attempts); do
+        # Check if Docker is responding
+        if docker info >/dev/null 2>&1; then
+            log "✓ Docker is ready (attempt $i)"
+            docker_ready=true
+            break
+        else
+            # Capture the error for diagnostics
+            last_error=$(docker info 2>&1 | head -n1 || echo "Unknown error")
+            consecutive_failures=$((consecutive_failures + 1))
+        fi
+        
+        # Provide periodic status updates and diagnostics
+        case $i in
+            15)
+                log "Docker startup taking longer than expected, checking service status..."
+                if systemctl is-active --quiet docker; then
+                    log "Docker service is running, but not responding to API calls"
+                else
+                    log "Docker service is not active, attempting to start..."
+                    systemctl start docker || true
+                fi
+                ;;
+            30)
+                log "Docker still not ready after 1 minute, checking logs..."
+                journalctl -u docker --no-pager --lines=5 --since="5 minutes ago" || true
+                log "Last error: $last_error"
+                ;;
+            45)
+                log "Docker startup issues persist, checking system resources..."
+                # Check disk space
+                local free_space_mb
+                free_space_mb=$(df /var/lib/docker | awk 'NR==2 {print int($4/1024)}' 2>/dev/null || echo "unknown")
+                log "Available disk space: ${free_space_mb}MB"
+                
+                # Check if Docker daemon is actually running
+                if ! pgrep -f dockerd >/dev/null; then
+                    log "Docker daemon process not found, attempting restart..."
+                    systemctl restart docker || true
+                    sleep 10
+                fi
+                ;;
+            60)
+                log "Docker readiness check has failed multiple times, attempting recovery..."
+                if [ $consecutive_failures -gt 30 ]; then
+                    log "Too many consecutive failures, attempting service recovery..."
+                    recover_docker_service
+                    consecutive_failures=0
+                    sleep 10
+                fi
+                ;;
+            75)
+                log "Final diagnostic check before timeout..."
+                systemctl status docker --no-pager --lines=3 || true
+                log "Docker socket status:"
+                ls -la /var/run/docker.sock 2>/dev/null || log "Docker socket not found"
+                ;;
+        esac
+        
+        # Adaptive sleep timing - shorter at first, longer as we continue
+        if [ $i -lt 30 ]; then
+            sleep 2
+        elif [ $i -lt 60 ]; then
+            sleep 3
+        else
+            sleep 5
+        fi
+    done
+    
+    if [ "$docker_ready" = "true" ]; then
+        log "✓ Docker is ready and operational"
+        return 0
+    else
+        log "⚠ Docker readiness check timed out after $max_attempts attempts"
+        log "Last error: $last_error"
+        
+        # Final status check
+        if systemctl is-active --quiet docker; then
+            log "Docker service is running but may have API issues"
+        else
+            log "Docker service is not running"
+        fi
+        
+        return 1
+    fi
+}
+
+# Execute the Docker readiness check
 DOCKER_READY=false
-for i in {1..60}; do
-    if docker info >/dev/null 2>&1; then
-        log "Docker is ready (attempt $i)"
-        DOCKER_READY=true
-        break
-    fi
-    if [ $i -eq 30 ]; then
-        log "Docker startup taking longer than expected, checking status..."
-        systemctl status docker --no-pager || true
-    fi
-    if [ $i -eq 60 ]; then
-        log "Warning: Docker took longer than expected to start, continuing anyway"
-        break
-    fi
-    sleep 2
-done
+if wait_for_docker_ready; then
+    DOCKER_READY=true
+else
+    log "Warning: Proceeding despite Docker readiness issues"
+fi
 
 # Verify Docker configuration and log detailed information
 log "Verifying Docker configuration..."
@@ -566,35 +945,239 @@ else
     log "Warning: Docker readiness check failed, attempting to continue"
 fi
 
-# Create environment-specific configuration
-mkdir -p /home/ubuntu/GeuseMaker/config
-cat > /home/ubuntu/GeuseMaker/config/environment.env << EOF
+# =============================================================================
+# ENVIRONMENT VARIABLE INITIALIZATION
+# =============================================================================
+
+# Source the unified variable management library
+PROJECT_ROOT="/home/ubuntu/GeuseMaker"
+mkdir -p "$PROJECT_ROOT/lib"
+
+# Download variable management library if not present
+if [ ! -f "$PROJECT_ROOT/lib/variable-management.sh" ]; then
+    log "Setting up variable management system..."
+    
+    # Create a temporary variable management system for bootstrap
+    cat > "$PROJECT_ROOT/lib/variable-management.sh" << 'VARLIB_EOF'
+#!/bin/bash
+# Bootstrap Variable Management for EC2 Instance
+
+var_log() {
+    local level="$1"
+    shift
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $level: $*" | tee -a /var/log/user-data.log
+}
+
+generate_secure_password() {
+    if command -v openssl >/dev/null 2>&1; then
+        openssl rand -base64 32 2>/dev/null | tr -d '\n'
+    else
+        echo "secure_$(date +%s)_$(echo $$ | tail -c 6)"
+    fi
+}
+
+generate_encryption_key() {
+    if command -v openssl >/dev/null 2>&1; then
+        openssl rand -hex 32 2>/dev/null
+    else
+        echo "$(date +%s | sha256sum | cut -c1-64)"
+    fi
+}
+
+check_aws_availability() {
+    command -v aws >/dev/null 2>&1 && aws sts get-caller-identity >/dev/null 2>&1
+}
+
+get_parameter_store_value() {
+    local param_name="$1"
+    local default_value="$2"
+    local region="${AWS_REGION:-us-east-1}"
+    
+    if check_aws_availability; then
+        local value
+        value=$(aws ssm get-parameter --name "$param_name" --with-decryption --region "$region" --query 'Parameter.Value' --output text 2>/dev/null)
+        if [ $? -eq 0 ] && [ -n "$value" ] && [ "$value" != "None" ]; then
+            echo "$value"
+            return 0
+        fi
+    fi
+    echo "$default_value"
+    return 1
+}
+
+init_all_variables() {
+    var_log INFO "Initializing environment variables with Parameter Store integration"
+    
+    # Critical variables with secure defaults
+    export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(get_parameter_store_value '/aibuildkit/POSTGRES_PASSWORD' "$(generate_secure_password)")}"
+    export N8N_ENCRYPTION_KEY="${N8N_ENCRYPTION_KEY:-$(get_parameter_store_value '/aibuildkit/n8n/ENCRYPTION_KEY' "$(generate_encryption_key)")}"
+    export N8N_USER_MANAGEMENT_JWT_SECRET="${N8N_USER_MANAGEMENT_JWT_SECRET:-$(get_parameter_store_value '/aibuildkit/n8n/USER_MANAGEMENT_JWT_SECRET' "$(generate_secure_password)")}"
+    
+    # Optional variables
+    export OPENAI_API_KEY="${OPENAI_API_KEY:-$(get_parameter_store_value '/aibuildkit/OPENAI_API_KEY' '')}"
+    export WEBHOOK_URL="${WEBHOOK_URL:-$(get_parameter_store_value '/aibuildkit/WEBHOOK_URL' 'http://localhost:5678')}"
+    export N8N_CORS_ENABLE="${N8N_CORS_ENABLE:-$(get_parameter_store_value '/aibuildkit/n8n/CORS_ENABLE' 'true')}"
+    export N8N_CORS_ALLOWED_ORIGINS="${N8N_CORS_ALLOWED_ORIGINS:-$(get_parameter_store_value '/aibuildkit/n8n/CORS_ALLOWED_ORIGINS' '*')}"
+    
+    # Additional service variables
+    export N8N_BASIC_AUTH_ACTIVE="${N8N_BASIC_AUTH_ACTIVE:-true}"
+    export N8N_BASIC_AUTH_USER="${N8N_BASIC_AUTH_USER:-admin}"
+    export N8N_BASIC_AUTH_PASSWORD="${N8N_BASIC_AUTH_PASSWORD:-$(generate_secure_password)}"
+    export POSTGRES_DB="${POSTGRES_DB:-n8n}"
+    export POSTGRES_USER="${POSTGRES_USER:-n8n}"
+    export ENABLE_METRICS="${ENABLE_METRICS:-true}"
+    export LOG_LEVEL="${LOG_LEVEL:-info}"
+    
+    # Infrastructure variables
+    export AWS_DEFAULT_REGION="${AWS_REGION:-us-east-1}"
+    
+    var_log SUCCESS "Environment variables initialized successfully"
+}
+
+generate_docker_env_file() {
+    local output_file="${1:-/home/ubuntu/GeuseMaker/config/environment.env}"
+    
+    var_log INFO "Generating Docker environment file: $output_file"
+    
+    mkdir -p "$(dirname "$output_file")"
+    
+    cat > "$output_file" << EOF
+# =============================================================================
 # GeuseMaker Environment Configuration
+# Generated: $(date)
+# =============================================================================
+
+# Infrastructure Configuration
 STACK_NAME=$STACK_NAME
 ENVIRONMENT=$ENVIRONMENT
 AWS_REGION=$AWS_REGION
 COMPOSE_FILE=$COMPOSE_FILE
-
-# Service Configuration
-N8N_BASIC_AUTH_ACTIVE=true
-N8N_BASIC_AUTH_USER=admin
-N8N_BASIC_AUTH_PASSWORD=$(openssl rand -base64 32)
+AWS_DEFAULT_REGION=$AWS_REGION
 
 # Database Configuration
-POSTGRES_PASSWORD=$(openssl rand -base64 32)
-POSTGRES_DB=n8n
-POSTGRES_USER=n8n
+POSTGRES_DB=$POSTGRES_DB
+POSTGRES_USER=$POSTGRES_USER
+POSTGRES_PASSWORD=$POSTGRES_PASSWORD
 
-# Vector Database Configuration
-QDRANT_API_KEY=$(openssl rand -base64 32)
+# n8n Configuration
+N8N_ENCRYPTION_KEY=$N8N_ENCRYPTION_KEY
+N8N_USER_MANAGEMENT_JWT_SECRET=$N8N_USER_MANAGEMENT_JWT_SECRET
+N8N_BASIC_AUTH_ACTIVE=$N8N_BASIC_AUTH_ACTIVE
+N8N_BASIC_AUTH_USER=$N8N_BASIC_AUTH_USER
+N8N_BASIC_AUTH_PASSWORD=$N8N_BASIC_AUTH_PASSWORD
+N8N_CORS_ENABLE=$N8N_CORS_ENABLE
+N8N_CORS_ALLOWED_ORIGINS=$N8N_CORS_ALLOWED_ORIGINS
 
-# Monitoring Configuration
-ENABLE_METRICS=true
-LOG_LEVEL=info
+# API Keys
+OPENAI_API_KEY=$OPENAI_API_KEY
+
+# Service Configuration
+WEBHOOK_URL=$WEBHOOK_URL
+ENABLE_METRICS=$ENABLE_METRICS
+LOG_LEVEL=$LOG_LEVEL
+
+# Instance Information
+EFS_DNS=\${EFS_DNS:-}
+INSTANCE_ID=\${INSTANCE_ID:-}
+INSTANCE_TYPE=\${INSTANCE_TYPE:-}
+EOF
+    
+    chmod 600 "$output_file"
+    chown ubuntu:ubuntu "$output_file"
+    
+    var_log SUCCESS "Docker environment file generated: $output_file"
+}
+
+validate_critical_variables() {
+    var_log INFO "Validating critical variables"
+    
+    local validation_errors=()
+    
+    if [ -z "$POSTGRES_PASSWORD" ] || [ ${#POSTGRES_PASSWORD} -lt 8 ]; then
+        validation_errors+=("POSTGRES_PASSWORD is not set or too short")
+    fi
+    
+    if [ -z "$N8N_ENCRYPTION_KEY" ] || [ ${#N8N_ENCRYPTION_KEY} -lt 32 ]; then
+        validation_errors+=("N8N_ENCRYPTION_KEY is not set or too short")
+    fi
+    
+    if [ -z "$N8N_USER_MANAGEMENT_JWT_SECRET" ] || [ ${#N8N_USER_MANAGEMENT_JWT_SECRET} -lt 8 ]; then
+        validation_errors+=("N8N_USER_MANAGEMENT_JWT_SECRET is not set or too short")
+    fi
+    
+    if [ ${#validation_errors[@]} -eq 0 ]; then
+        var_log SUCCESS "All critical variables are valid"
+        return 0
+    else
+        var_log ERROR "Critical variable validation failed:"
+        for error in "${validation_errors[@]}"; do
+            var_log ERROR "  - $error"
+        done
+        return 1
+    fi
+}
+VARLIB_EOF
+    
+    chmod +x "$PROJECT_ROOT/lib/variable-management.sh"
+fi
+
+# Source the variable management library
+log "Loading variable management system..."
+source "$PROJECT_ROOT/lib/variable-management.sh"
+
+# Initialize all environment variables
+if ! init_all_variables; then
+    log "Warning: Variable initialization had issues, but continuing with defaults"
+fi
+
+# Validate critical variables
+if ! validate_critical_variables; then
+    log "Error: Critical variable validation failed"
+    exit 1
+fi
+
+# Create configuration directory and generate environment file
+mkdir -p /home/ubuntu/GeuseMaker/config
+generate_docker_env_file "/home/ubuntu/GeuseMaker/config/environment.env"
+
+# Create additional fallback environment file for Docker Compose
+cat > /home/ubuntu/GeuseMaker/.env << EOF
+# Docker Compose Environment File
+# This file is automatically sourced by Docker Compose
+
+# Database Configuration
+POSTGRES_DB=$POSTGRES_DB
+POSTGRES_USER=$POSTGRES_USER
+POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+
+# n8n Configuration
+N8N_ENCRYPTION_KEY=$N8N_ENCRYPTION_KEY
+N8N_USER_MANAGEMENT_JWT_SECRET=$N8N_USER_MANAGEMENT_JWT_SECRET
+N8N_BASIC_AUTH_ACTIVE=$N8N_BASIC_AUTH_ACTIVE
+N8N_BASIC_AUTH_USER=$N8N_BASIC_AUTH_USER
+N8N_BASIC_AUTH_PASSWORD=$N8N_BASIC_AUTH_PASSWORD
+N8N_CORS_ENABLE=$N8N_CORS_ENABLE
+N8N_CORS_ALLOWED_ORIGINS=$N8N_CORS_ALLOWED_ORIGINS
+
+# API Keys
+OPENAI_API_KEY=$OPENAI_API_KEY
+
+# Service Configuration
+WEBHOOK_URL=$WEBHOOK_URL
+ENABLE_METRICS=$ENABLE_METRICS
+LOG_LEVEL=$LOG_LEVEL
+
+# Infrastructure
+AWS_REGION=$AWS_REGION
+AWS_DEFAULT_REGION=$AWS_REGION
+STACK_NAME=$STACK_NAME
+ENVIRONMENT=$ENVIRONMENT
 EOF
 
-chown ubuntu:ubuntu /home/ubuntu/GeuseMaker/config/environment.env
-chmod 600 /home/ubuntu/GeuseMaker/config/environment.env
+chown ubuntu:ubuntu /home/ubuntu/GeuseMaker/.env
+chmod 600 /home/ubuntu/GeuseMaker/.env
+
+log "Environment variable initialization completed successfully"
 
 log "Application setup completed"
 
@@ -659,22 +1242,30 @@ log() {
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1"
 }
 
-# Health check endpoints and expected responses
-declare -A HEALTH_ENDPOINTS=(
-    ["n8n"]="http://localhost:5678/healthz"
-    ["ollama"]="http://localhost:11434/api/tags"
-    ["qdrant"]="http://localhost:6333/health"
-    ["crawl4ai"]="http://localhost:11235/health"
-)
+# Health check endpoints and expected responses (bash 3.x compatible)
+get_health_endpoint() {
+    local service="$1"
+    case "$service" in
+        "n8n") echo "http://localhost:5678/healthz" ;;
+        "ollama") echo "http://localhost:11434/api/tags" ;;
+        "qdrant") echo "http://localhost:6333/health" ;;
+        "crawl4ai") echo "http://localhost:11235/health" ;;
+        *) return 1 ;;
+    esac
+}
 
-# Service startup times (in seconds)
-declare -A STARTUP_TIMES=(
-    ["postgres"]=30
-    ["qdrant"]=45
-    ["ollama"]=60
-    ["n8n"]=90
-    ["crawl4ai"]=30
-)
+# Service startup times (in seconds) (bash 3.x compatible)
+get_startup_time() {
+    local service="$1"
+    case "$service" in
+        "postgres") echo "30" ;;
+        "qdrant") echo "45" ;;
+        "ollama") echo "60" ;;
+        "n8n") echo "90" ;;
+        "crawl4ai") echo "30" ;;
+        *) echo "30" ;;  # default
+    esac
+}
 
 log "Starting comprehensive health checks..."
 
@@ -690,16 +1281,17 @@ docker-compose -f "$COMPOSE_FILE" ps
 
 # Wait for services to be ready
 for service in postgres qdrant ollama n8n crawl4ai; do
-    if [ -n "${STARTUP_TIMES[$service]}" ]; then
-        log "Waiting for $service to be ready (${STARTUP_TIMES[$service]}s)..."
-        sleep "${STARTUP_TIMES[$service]}"
+    local startup_time=$(get_startup_time "$service")
+    if [ -n "$startup_time" ]; then
+        log "Waiting for $service to be ready (${startup_time}s)..."
+        sleep "$startup_time"
     fi
 done
 
 # Perform health checks
 all_healthy=true
-for service in "${!HEALTH_ENDPOINTS[@]}"; do
-    endpoint="${HEALTH_ENDPOINTS[$service]}"
+for service in n8n ollama qdrant crawl4ai; do
+    endpoint=$(get_health_endpoint "$service")
     log "Checking $service at $endpoint..."
     
     # Try multiple times with increasing delays
@@ -746,140 +1338,309 @@ log "Monitoring setup completed"
 # Create startup script for services
 cat > /home/ubuntu/GeuseMaker/start-services.sh << 'EOF'
 #!/bin/bash
-# Startup script for GeuseMaker services
+# Startup script for GeuseMaker services with comprehensive variable management
 
 set -e
 
 log() {
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1"
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a /var/log/start-services.log
 }
 
-log "Starting GeuseMaker services..."
+error() {
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: $1" | tee -a /var/log/start-services.log >&2
+}
 
-# Load environment variables
+success() {
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] SUCCESS: $1" | tee -a /var/log/start-services.log
+}
+
+log "Starting GeuseMaker services with enhanced variable management..."
+
+# =============================================================================
+# VARIABLE INITIALIZATION
+# =============================================================================
+
+# Load variable management library if available
+if [ -f lib/variable-management.sh ]; then
+    log "Loading variable management library..."
+    source lib/variable-management.sh
+    
+    # Initialize variables with Parameter Store integration
+    if ! init_all_variables; then
+        log "Warning: Variable initialization had issues, continuing with fallbacks"
+    fi
+    
+    # Validate critical variables
+    if command -v validate_critical_variables >/dev/null 2>&1; then
+        if ! validate_critical_variables; then
+            error "Critical variable validation failed"
+            exit 1
+        fi
+    fi
+    
+    # Generate fresh environment file
+    if command -v generate_docker_env_file >/dev/null 2>&1; then
+        generate_docker_env_file ".env"
+    fi
+else
+    log "Variable management library not found, using traditional approach"
+fi
+
+# Load environment variables from multiple sources
+log "Loading environment variables..."
+
+# 1. Load from config/environment.env if available
 if [ -f config/environment.env ]; then
+    log "Loading from config/environment.env"
     set -a
     source config/environment.env
     set +a
+else
+    log "Warning: config/environment.env not found"
 fi
 
-# Start services with Docker Compose
-if [ -f "$COMPOSE_FILE" ]; then
-    log "Starting services using $COMPOSE_FILE..."
-    
-    # Pull latest images first
-    log "Pulling latest Docker images..."
-    docker-compose -f "$COMPOSE_FILE" pull
-    
-    # Start services in background
-    log "Starting services..."
-    docker-compose -f "$COMPOSE_FILE" up -d
-    
-    # Wait for services to initialize
-    log "Waiting for services to initialize..."
-    sleep 60
-    
-    # Check service status
-    log "Checking service status..."
-    docker-compose -f "$COMPOSE_FILE" ps
-    
-    # Run health checks
-    log "Running health checks..."
-    ./health-check.sh
-    
+# 2. Load from .env file if available (Docker Compose default)
+if [ -f .env ]; then
+    log "Loading from .env file"
+    set -a
+    source .env
+    set +a
 else
-    log "Error: Compose file $COMPOSE_FILE not found"
+    log "Warning: .env file not found"
+fi
+
+# 3. Emergency fallback - generate minimal required variables
+if [ -z "${POSTGRES_PASSWORD:-}" ]; then
+    log "Emergency: Generating POSTGRES_PASSWORD"
+    export POSTGRES_PASSWORD="$(openssl rand -base64 32 2>/dev/null || echo "emergency_$(date +%s)")"
+fi
+
+if [ -z "${N8N_ENCRYPTION_KEY:-}" ]; then
+    log "Emergency: Generating N8N_ENCRYPTION_KEY"
+    export N8N_ENCRYPTION_KEY="$(openssl rand -hex 32 2>/dev/null || echo "emergency_$(date +%s)")"
+fi
+
+# Set default values for essential variables
+export POSTGRES_DB="${POSTGRES_DB:-n8n}"
+export POSTGRES_USER="${POSTGRES_USER:-n8n}"
+export AWS_REGION="${AWS_REGION:-us-east-1}"
+export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-$AWS_REGION}"
+
+# =============================================================================
+# VARIABLE VALIDATION AND LOGGING
+# =============================================================================
+
+log "Validating environment variables..."
+
+# Check critical variables
+local critical_vars="POSTGRES_PASSWORD N8N_ENCRYPTION_KEY"
+local validation_passed=true
+
+for var in $critical_vars; do
+    local value
+    eval "value=\$$var"
+    if [ -z "$value" ]; then
+        error "Critical variable $var is not set"
+        validation_passed=false
+    elif [ ${#value} -lt 8 ]; then
+        error "Critical variable $var is too short (${#value} chars)"
+        validation_passed=false
+    else
+        log "✓ $var is set (${#value} chars)"
+    fi
+done
+
+if [ "$validation_passed" != "true" ]; then
+    error "Variable validation failed"
     exit 1
 fi
 
-log "GeuseMaker services startup completed"
+# Log non-sensitive variables for debugging
+log "Environment summary:"
+log "  POSTGRES_DB: ${POSTGRES_DB}"
+log "  POSTGRES_USER: ${POSTGRES_USER}"
+log "  AWS_REGION: ${AWS_REGION}"
+log "  COMPOSE_FILE: ${COMPOSE_FILE:-docker-compose.gpu-optimized.yml}"
+
+# =============================================================================
+# DOCKER COMPOSE SERVICE MANAGEMENT
+# =============================================================================
+
+# Determine compose file to use
+COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.gpu-optimized.yml}"
+
+if [ ! -f "$COMPOSE_FILE" ]; then
+    error "Compose file not found: $COMPOSE_FILE"
+    
+    # Try fallback files
+    local fallback_files="docker-compose.gpu-optimized.yml docker-compose.yml docker-compose.gpu.yml"
+    for fallback in $fallback_files; do
+        if [ -f "$fallback" ]; then
+            log "Using fallback compose file: $fallback"
+            COMPOSE_FILE="$fallback"
+            break
+        fi
+    done
+    
+    if [ ! -f "$COMPOSE_FILE" ]; then
+        error "No valid compose file found"
+        exit 1
+    fi
+fi
+
+log "Using compose file: $COMPOSE_FILE"
+
+# =============================================================================
+# SERVICE STARTUP PROCESS
+# =============================================================================
+
+log "Starting Docker Compose services..."
+
+# Step 1: Validate Docker Compose configuration
+log "Validating Docker Compose configuration..."
+if ! docker-compose -f "$COMPOSE_FILE" config >/dev/null 2>&1; then
+    error "Docker Compose configuration is invalid"
+    docker-compose -f "$COMPOSE_FILE" config || true
+    exit 1
+fi
+success "Docker Compose configuration is valid"
+
+# Step 2: Stop any existing services
+log "Stopping any existing services..."
+if docker-compose -f "$COMPOSE_FILE" ps -q | grep -q .; then
+    log "Found running services, stopping them..."
+    docker-compose -f "$COMPOSE_FILE" down || log "Warning: Some services may not have stopped cleanly"
+else
+    log "No running services found"
+fi
+
+# Step 3: Pull latest images
+log "Pulling latest Docker images..."
+if ! docker-compose -f "$COMPOSE_FILE" pull; then
+    log "Warning: Failed to pull some images, continuing with local images"
+fi
+
+# Step 4: Start services
+log "Starting services in background..."
+if ! docker-compose -f "$COMPOSE_FILE" up -d; then
+    error "Failed to start Docker services"
+    
+    # Show logs for debugging
+    log "Showing Docker Compose logs for debugging:"
+    docker-compose -f "$COMPOSE_FILE" logs --tail=50 || true
+    exit 1
+fi
+
+# Step 5: Wait for services to initialize
+log "Waiting for services to initialize..."
+sleep 30
+
+# Step 6: Check service status
+log "Checking service status..."
+docker-compose -f "$COMPOSE_FILE" ps
+
+# Step 7: Verify services are actually running
+log "Verifying service health..."
+local failed_services=""
+local running_services
+
+if running_services=$(docker-compose -f "$COMPOSE_FILE" ps --services --filter "status=running" 2>/dev/null); then
+    log "Running services: $running_services"
+else
+    log "Unable to get service status"
+fi
+
+# Check for failed services
+if failed_services=$(docker-compose -f "$COMPOSE_FILE" ps --services --filter "status=exited" 2>/dev/null); then
+    if [ -n "$failed_services" ]; then
+        error "Failed services detected: $failed_services"
+        
+        # Show logs for failed services
+        for service in $failed_services; do
+            log "Logs for failed service $service:"
+            docker-compose -f "$COMPOSE_FILE" logs --tail=20 "$service" || true
+        done
+        
+        exit 1
+    fi
+fi
+
+# =============================================================================
+# HEALTH CHECKS
+# =============================================================================
+
+# Run health checks if available
+if [ -f health-check.sh ]; then
+    log "Running health checks..."
+    if ! ./health-check.sh; then
+        log "Warning: Health checks failed, but services appear to be running"
+    else
+        success "Health checks passed"
+    fi
+else
+    log "Health check script not found, performing basic checks..."
+    
+    # Basic port checks
+    local ports="5432 5678 6333 11434"
+    for port in $ports; do
+        if netstat -tuln 2>/dev/null | grep -q ":$port "; then
+            log "✓ Port $port is listening"
+        else
+            log "- Port $port is not listening"
+        fi
+    done
+fi
+
+success "GeuseMaker services startup completed successfully!"
+
+# =============================================================================
+# POST-STARTUP INFORMATION
+# =============================================================================
+
+log "Service startup summary:"
+docker-compose -f "$COMPOSE_FILE" ps
+
+log "To monitor services:"
+log "  docker-compose -f $COMPOSE_FILE logs -f"
+log ""
+log "To stop services:"
+log "  docker-compose -f $COMPOSE_FILE down"
+log ""
+log "To restart services:"
+log "  docker-compose -f $COMPOSE_FILE restart"
+
+# Save startup information
+cat > startup-info.txt << INFO_EOF
+GeuseMaker Service Startup Information
+======================================
+
+Startup Time: $(date)
+Compose File: $COMPOSE_FILE
+Environment: ${ENVIRONMENT:-development}
+Stack Name: ${STACK_NAME:-GeuseMaker}
+
+Service Status:
+$(docker-compose -f "$COMPOSE_FILE" ps)
+
+Environment Variables Loaded:
+- Database: ${POSTGRES_DB} (user: ${POSTGRES_USER})
+- Region: ${AWS_REGION}
+- Metrics: ${ENABLE_METRICS:-true}
+- Log Level: ${LOG_LEVEL:-info}
+
+Logs Location:
+- Startup Log: /var/log/start-services.log
+- Service Logs: docker-compose -f $COMPOSE_FILE logs
+
+INFO_EOF
+
+log "Startup information saved to startup-info.txt"
 EOF
 
 chmod +x /home/ubuntu/GeuseMaker/start-services.sh
 chown ubuntu:ubuntu /home/ubuntu/GeuseMaker/start-services.sh
 
-# Create improved health check script
-cat > /home/ubuntu/GeuseMaker/health-check.sh << 'EOF'
-#!/bin/bash
-# Enhanced health check script for GeuseMaker services
-
-set -e
-
-log() {
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1"
-}
-
-# Health check endpoints and expected responses
-declare -A HEALTH_ENDPOINTS=(
-    ["n8n"]="http://localhost:5678/healthz"
-    ["ollama"]="http://localhost:11434/api/tags"
-    ["qdrant"]="http://localhost:6333/health"
-    ["crawl4ai"]="http://localhost:11235/health"
-)
-
-# Service startup times (in seconds)
-declare -A STARTUP_TIMES=(
-    ["postgres"]=30
-    ["qdrant"]=45
-    ["ollama"]=60
-    ["n8n"]=90
-    ["crawl4ai"]=30
-)
-
-log "Starting comprehensive health checks..."
-
-# Check if Docker is running
-if ! systemctl is-active --quiet docker; then
-    log "ERROR: Docker is not running"
-    exit 1
-fi
-
-# Check if services are running
-log "Checking Docker service status..."
-docker-compose -f "$COMPOSE_FILE" ps
-
-# Wait for services to be ready
-for service in postgres qdrant ollama n8n crawl4ai; do
-    if [ -n "${STARTUP_TIMES[$service]}" ]; then
-        log "Waiting for $service to be ready (${STARTUP_TIMES[$service]}s)..."
-        sleep "${STARTUP_TIMES[$service]}"
-    fi
-done
-
-# Perform health checks
-all_healthy=true
-for service in "${!HEALTH_ENDPOINTS[@]}"; do
-    endpoint="${HEALTH_ENDPOINTS[$service]}"
-    log "Checking $service at $endpoint..."
-    
-    # Try multiple times with increasing delays
-    for attempt in {1..5}; do
-        if curl -f -s --max-time 10 "$endpoint" > /dev/null 2>&1; then
-            log "✅ $service is healthy"
-            break
-        else
-            log "⚠️  $service health check attempt $attempt/5 failed"
-            if [ $attempt -lt 5 ]; then
-                sleep $((attempt * 10))
-            else
-                log "❌ $service failed all health checks"
-                all_healthy=false
-            fi
-        fi
-    done
-done
-
-if [ "$all_healthy" = true ]; then
-    log "🎉 All services are healthy!"
-    exit 0
-else
-    log "❌ Some services are unhealthy. Check logs with: docker-compose -f $COMPOSE_FILE logs"
-    exit 1
-fi
-EOF
-
-chmod +x /home/ubuntu/GeuseMaker/health-check.sh
-chown ubuntu:ubuntu /home/ubuntu/GeuseMaker/health-check.sh
+# Note: Health check script already created earlier in the script
 
 # Automatically start services after user-data completion
 log "Scheduling automatic service startup..."

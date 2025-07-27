@@ -5,6 +5,21 @@
 # =============================================================================
 
 # =============================================================================
+# VARIABLE INITIALIZATION AND DEFAULTS
+# =============================================================================
+
+# Initialize variables with defaults to prevent unbound variable errors
+ALB_SCHEME="${ALB_SCHEME:-internet-facing}"
+ALB_TYPE="${ALB_TYPE:-application}"
+SPOT_TYPE="${SPOT_TYPE:-one-time}"
+CLOUDWATCH_LOG_GROUP="${CLOUDWATCH_LOG_GROUP:-/aws/ec2/GeuseMaker}"
+CLOUDWATCH_LOG_RETENTION="${CLOUDWATCH_LOG_RETENTION:-7}"
+CLOUDFRONT_PRICE_CLASS="${CLOUDFRONT_PRICE_CLASS:-PriceClass_100}"
+CLOUDFRONT_MIN_TTL="${CLOUDFRONT_MIN_TTL:-0}"
+CLOUDFRONT_DEFAULT_TTL="${CLOUDFRONT_DEFAULT_TTL:-86400}"
+CLOUDFRONT_MAX_TTL="${CLOUDFRONT_MAX_TTL:-31536000}"
+
+# =============================================================================
 # ON-DEMAND INSTANCE LAUNCH
 # =============================================================================
 
@@ -238,7 +253,8 @@ create_target_group() {
         return 0
     fi
 
-    # Create target group
+    # Create target group with improved health check settings
+    log "Creating target group with improved health check settings for containerized applications..."
     tg_arn=$(aws elbv2 create-target-group \
         --name "$tg_name" \
         --protocol HTTP \
@@ -247,10 +263,10 @@ create_target_group() {
         --health-check-protocol HTTP \
         --health-check-path "$health_check_path" \
         --health-check-port "$health_check_port" \
-        --health-check-interval-seconds 30 \
-        --health-check-timeout-seconds 5 \
+        --health-check-interval-seconds 60 \
+        --health-check-timeout-seconds 15 \
         --healthy-threshold-count 2 \
-        --unhealthy-threshold-count 3 \
+        --unhealthy-threshold-count 5 \
         --target-type instance \
         --tags Key=Name,Value="$tg_name" Key=Stack,Value="$stack_name" Key=Service,Value="$service_name" \
         --query 'TargetGroups[0].TargetGroupArn' \
@@ -376,21 +392,46 @@ setup_cloudfront_distribution() {
 
     log "Setting up CloudFront distribution for ALB: $alb_dns_name"
 
-    # Set default CloudFront TTL values if not set
+    # Validate required parameters
+    if [[ -z "$stack_name" ]]; then
+        error "Stack name is required for CloudFront setup"
+        return 1
+    fi
+    
+    if [[ -z "$alb_dns_name" ]]; then
+        error "ALB DNS name is required for CloudFront setup"
+        return 1
+    fi
+
+    # Set default CloudFront TTL values with proper validation
     local min_ttl="${CLOUDFRONT_MIN_TTL:-0}"
     local default_ttl="${CLOUDFRONT_DEFAULT_TTL:-86400}"
     local max_ttl="${CLOUDFRONT_MAX_TTL:-31536000}"
-    local caller_ref="${stack_name}-$(date +%s)"
-    local origin_id="${stack_name}-alb-origin"
+    local price_class="${CLOUDFRONT_PRICE_CLASS:-PriceClass_100}"
+    
+    # Validate TTL values are numeric
+    if ! [[ "$min_ttl" =~ ^[0-9]+$ ]] || ! [[ "$default_ttl" =~ ^[0-9]+$ ]] || ! [[ "$max_ttl" =~ ^[0-9]+$ ]]; then
+        error "CloudFront TTL values must be numeric"
+        return 1
+    fi
+    
+    # Sanitize input values to prevent JSON injection
+    local sanitized_stack_name
+    sanitized_stack_name=$(echo "$stack_name" | tr -cd '[:alnum:]-' | head -c 64)
+    local sanitized_alb_dns
+    sanitized_alb_dns=$(echo "$alb_dns_name" | tr -cd '[:alnum:].-' | head -c 253)
+    
+    local caller_ref="${sanitized_stack_name}-$(date +%s)"
+    local origin_id="${sanitized_stack_name}-alb-origin"
     
     # Create distribution configuration with validated JSON structure
-    local temp_config_file="/tmp/cloudfront-config-${stack_name}-$(date +%s).json"
+    local temp_config_file="/tmp/cloudfront-config-${sanitized_stack_name}-$(date +%s).json"
     
     # Generate CloudFront configuration with proper escaping and validation
     cat > "$temp_config_file" << EOF
 {
     "CallerReference": "${caller_ref}",
-    "Comment": "CloudFront distribution for ${stack_name} GeuseMaker",
+    "Comment": "CloudFront distribution for ${sanitized_stack_name} GeuseMaker",
     "DefaultCacheBehavior": {
         "TargetOriginId": "${origin_id}",
         "ViewerProtocolPolicy": "redirect-to-https",
@@ -423,7 +464,7 @@ setup_cloudfront_distribution() {
         "Quantity": 1,
         "Items": [{
             "Id": "${origin_id}",
-            "DomainName": "${alb_dns_name}",
+            "DomainName": "${sanitized_alb_dns}",
             "OriginPath": "${origin_path}",
             "CustomOriginConfig": {
                 "HTTPPort": 80,
@@ -439,8 +480,7 @@ setup_cloudfront_distribution() {
         }]
     },
     "Enabled": true,
-    "PriceClass": "${CLOUDFRONT_PRICE_CLASS:-PriceClass_100}",
-    "CallerReference": "${caller_ref}"
+    "PriceClass": "${price_class}"
 }
 EOF
 

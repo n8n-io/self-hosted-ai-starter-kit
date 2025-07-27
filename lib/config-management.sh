@@ -343,22 +343,26 @@ validate_configuration_file() {
         return 1
     fi
     
-    # Check for required sections (more flexible validation)
-    local required_sections=("global" "infrastructure" "applications")
-    local missing_sections=()
+    # Check for required sections (bash 3.x compatible)
+    local required_sections="global infrastructure applications"
+    local missing_sections=""
     
-    for section in "${required_sections[@]}"; do
+    for section in $required_sections; do
         if ! grep -q "^${section}:" "$config_file" && ! grep -q "^[[:space:]]*${section}:" "$config_file"; then
-            missing_sections+=("$section")
+            if [ -z "$missing_sections" ]; then
+                missing_sections="$section"
+            else
+                missing_sections="$missing_sections $section"
+            fi
         fi
     done
     
-    if [[ ${#missing_sections[@]} -gt 0 ]]; then
+    if [ -n "$missing_sections" ]; then
         if declare -f warning >/dev/null 2>&1; then
-            warning "Configuration file missing recommended sections: ${missing_sections[*]}"
+            warning "Configuration file missing recommended sections: $missing_sections"
             warning "Some features may not work as expected"
         else
-            echo "WARNING: Configuration file missing sections: ${missing_sections[*]}" >&2
+            echo "WARNING: Configuration file missing sections: $missing_sections" >&2
         fi
         # Don't fail for missing sections, just warn
     fi
@@ -710,26 +714,42 @@ generate_secrets_env_vars() {
 # =============================================================================
 
 # Database Secrets
-POSTGRES_PASSWORD=\${POSTGRES_PASSWORD}
+POSTGRES_PASSWORD=\${POSTGRES_PASSWORD:-\$(openssl rand -base64 32 2>/dev/null || echo "fallback_$(date +%s)")}
 
-# n8n Secrets
-N8N_ENCRYPTION_KEY=\${N8N_ENCRYPTION_KEY}
-N8N_USER_MANAGEMENT_JWT_SECRET=\${N8N_USER_MANAGEMENT_JWT_SECRET}
+# n8n Secrets  
+N8N_ENCRYPTION_KEY=\${N8N_ENCRYPTION_KEY:-\$(openssl rand -hex 32 2>/dev/null || echo "fallback_$(date +%s)")}
+N8N_USER_MANAGEMENT_JWT_SECRET=\${N8N_USER_MANAGEMENT_JWT_SECRET:-\$(openssl rand -base64 32 2>/dev/null || echo "fallback_$(date +%s)")}
+
+# n8n Configuration
+N8N_BASIC_AUTH_ACTIVE=\${N8N_BASIC_AUTH_ACTIVE:-true}
+N8N_BASIC_AUTH_USER=\${N8N_BASIC_AUTH_USER:-admin}
+N8N_BASIC_AUTH_PASSWORD=\${N8N_BASIC_AUTH_PASSWORD:-\$(openssl rand -base64 32 2>/dev/null || echo "fallback_$(date +%s)")}
 
 # API Keys
-OPENAI_API_KEY=\${OPENAI_API_KEY}
+OPENAI_API_KEY=\${OPENAI_API_KEY:-}
 
 # AWS Infrastructure (populated by deployment scripts)
-EFS_DNS=\${EFS_DNS}
-INSTANCE_ID=\${INSTANCE_ID}
-INSTANCE_TYPE=\${INSTANCE_TYPE}
+EFS_DNS=\${EFS_DNS:-}
+INSTANCE_ID=\${INSTANCE_ID:-}
+INSTANCE_TYPE=\${INSTANCE_TYPE:-}
 
 # Monitoring and Health Check URLs
-WEBHOOK_URL=\${WEBHOOK_URL}
-NOTIFICATION_WEBHOOK=\${NOTIFICATION_WEBHOOK}
+WEBHOOK_URL=\${WEBHOOK_URL:-http://localhost:5678}
+NOTIFICATION_WEBHOOK=\${NOTIFICATION_WEBHOOK:-}
 
 # Default region for AWS services
-AWS_DEFAULT_REGION=\${AWS_REGION}
+AWS_DEFAULT_REGION=\${AWS_REGION:-us-east-1}
+
+# Variable Management Integration
+# Source variable management library if available
+if [ -f "\${PROJECT_ROOT:-/home/ubuntu/GeuseMaker}/lib/variable-management.sh" ]; then
+    source "\${PROJECT_ROOT:-/home/ubuntu/GeuseMaker}/lib/variable-management.sh"
+    
+    # Initialize variables with Parameter Store integration
+    if command -v init_all_variables >/dev/null 2>&1; then
+        init_all_variables || true
+    fi
+fi
 EOF
 }
 
@@ -836,9 +856,9 @@ validate_image_versions() {
         return 1
     fi
     
-    # Validate required services are defined
-    local required_services=("postgres" "n8n" "ollama" "qdrant" "crawl4ai")
-    for service in "${required_services[@]}"; do
+    # Validate required services are defined (bash 3.x compatible)
+    local required_services="postgres n8n ollama qdrant crawl4ai"
+    for service in $required_services; do
         if ! yq eval ".services.${service}" "$image_config_file" >/dev/null 2>&1; then
             if declare -f warning >/dev/null 2>&1; then
                 warning "Missing image configuration for service: $service"
@@ -913,9 +933,9 @@ version: '3.8'
 services:
 EOF
 
-    # Generate image overrides for each service
-    local services=("postgres" "n8n" "ollama" "qdrant" "crawl4ai")
-    for service in "${services[@]}"; do
+    # Generate image overrides for each service (bash 3.x compatible)
+    local services="postgres n8n ollama qdrant crawl4ai"
+    for service in $services; do
         local image_version
         if image_version=$(get_image_version "$service"); then
             cat >> "$output_file" << EOF

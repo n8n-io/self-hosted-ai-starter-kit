@@ -856,10 +856,22 @@ wait_for_ssh_ready() {
         return 1
     fi
     
-    # Check key file permissions (should be 400 or 600)
-    local key_perms=$(stat -c %a "$key_file" 2>/dev/null || stat -f %A "$key_file" 2>/dev/null)
-    if [ "$key_perms" != "400" ] && [ "$key_perms" != "600" ]; then
-        warning "SSH key file has permissive permissions ($key_perms), consider: chmod 400 $key_file"
+    # Check key file permissions (should be 400 or 600) - cross-platform
+    local key_perms=""
+    if [ -f "$key_file" ]; then
+        # Use portable method for both Linux and macOS
+        if stat -c %a "$key_file" >/dev/null 2>&1; then
+            key_perms=$(stat -c %a "$key_file")
+        elif stat -f %Mp%Lp "$key_file" >/dev/null 2>&1; then
+            key_perms=$(stat -f %Mp%Lp "$key_file")
+        else
+            # Fallback for systems without stat
+            key_perms=$(ls -l "$key_file" | cut -c2-10)
+        fi
+        
+        if [ "$key_perms" != "400" ] && [ "$key_perms" != "600" ] && [ -n "$key_perms" ]; then
+            warning "SSH key file has permissive permissions ($key_perms), consider: chmod 400 $key_file"
+        fi
     fi
     
     # Basic IP validation
@@ -1108,22 +1120,29 @@ deploy_application_stack() {
         return 1
     fi
     
-    # Sanitize inputs to prevent command injection
-    stack_name=$(echo "$stack_name" | sed 's/[^a-zA-Z0-9-]//g')
-    environment=$(echo "$environment" | sed 's/[^a-zA-Z0-9-]//g')
-    compose_file=$(basename "$compose_file" | sed 's/[^a-zA-Z0-9.-]//g')
-    
-    # Validate sanitized inputs
-    if [[ -z "$stack_name" ]] || [[ -z "$environment" ]] || [[ -z "$compose_file" ]]; then
-        error "Invalid input after sanitization"
+    # Validate and sanitize inputs to prevent command injection
+    # Validate stack name format first
+    if [[ ! "$stack_name" =~ ^[a-zA-Z][a-zA-Z0-9-]{0,31}$ ]]; then
+        error "Invalid stack name format. Must start with letter, contain only alphanumeric and hyphens, max 32 chars: '$stack_name'"
         return 1
     fi
     
-    # Validate stack name length
-    if [[ ${#stack_name} -gt 32 ]]; then
-        error "Stack name too long: '$stack_name'. Maximum 32 characters."
+    # Validate environment format
+    if [[ ! "$environment" =~ ^[a-zA-Z][a-zA-Z0-9-]{0,31}$ ]]; then
+        error "Invalid environment format. Must start with letter, contain only alphanumeric and hyphens, max 32 chars: '$environment'"
         return 1
     fi
+    
+    # Validate compose file name format
+    if [[ ! "$(basename "$compose_file")" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]{0,63}\.(yml|yaml)$ ]]; then
+        error "Invalid compose file format. Must be a valid YAML file: '$compose_file'"
+        return 1
+    fi
+    
+    # Use validated inputs (no need for further sanitization)
+    local sanitized_stack_name="$stack_name"
+    local sanitized_environment="$environment"
+    local sanitized_compose_file="$(basename "$compose_file")"
 
     log "Deploying application stack to $instance_ip..."
     
@@ -1151,12 +1170,12 @@ deploy_application_stack() {
         sleep 3  # Give user time to see the message
     fi
     
-    # Copy and run the fix script
+    # Copy and run the fix script using validated variables
     scp -i "$key_file" -o StrictHostKeyChecking=no \
         ./scripts/fix-deployment-issues.sh ubuntu@"$instance_ip":/tmp/
     
     ssh -i "$key_file" -o StrictHostKeyChecking=no ubuntu@"$instance_ip" \
-        "chmod +x /tmp/fix-deployment-issues.sh && sudo /tmp/fix-deployment-issues.sh '$stack_name' '$AWS_REGION' 2>&1 | tee -a /var/log/deployment.log"
+        "chmod +x /tmp/fix-deployment-issues.sh && sudo /tmp/fix-deployment-issues.sh '$sanitized_stack_name' '$AWS_REGION' 2>&1 | tee -a /var/log/deployment.log"
 
     # Generate environment configuration
     info "Generating environment configuration..."
@@ -1164,10 +1183,10 @@ deploy_application_stack() {
 cd /home/ubuntu/GeuseMaker
 echo "\$(date): Starting environment configuration..." | tee -a /var/log/deployment.log
 chmod +x scripts/config-manager.sh
-echo "\$(date): Generating $environment configuration..." | tee -a /var/log/deployment.log
-./scripts/config-manager.sh generate $environment 2>&1 | tee -a /var/log/deployment.log
+echo "\$(date): Generating $sanitized_environment configuration..." | tee -a /var/log/deployment.log
+./scripts/config-manager.sh generate $sanitized_environment 2>&1 | tee -a /var/log/deployment.log
 echo "\$(date): Setting up environment variables..." | tee -a /var/log/deployment.log
-./scripts/config-manager.sh env $environment 2>&1 | tee -a /var/log/deployment.log
+./scripts/config-manager.sh env $sanitized_environment 2>&1 | tee -a /var/log/deployment.log
 echo "\$(date): Environment configuration completed" | tee -a /var/log/deployment.log
 EOF
 
@@ -1235,11 +1254,11 @@ fi
 
 # Pull latest images
 echo "\$(date): Pulling Docker images..." | tee -a "\$DEPLOY_LOG"
-\$DOCKER_COMPOSE_CMD -f $compose_file pull 2>&1 | tee -a "\$DEPLOY_LOG"
+\$DOCKER_COMPOSE_CMD -f $sanitized_compose_file pull 2>&1 | tee -a "\$DEPLOY_LOG"
 
 # Start services
 echo "\$(date): Starting Docker services..." | tee -a "\$DEPLOY_LOG"
-\$DOCKER_COMPOSE_CMD -f $compose_file up -d 2>&1 | tee -a "\$DEPLOY_LOG"
+\$DOCKER_COMPOSE_CMD -f $sanitized_compose_file up -d 2>&1 | tee -a "\$DEPLOY_LOG"
 
 # Wait for services to stabilize
 echo "\$(date): Waiting for services to stabilize..." | tee -a "\$DEPLOY_LOG"
@@ -1247,7 +1266,7 @@ sleep 30
 
 # Check service status
 echo "\$(date): Checking service status..." | tee -a "\$DEPLOY_LOG"
-\$DOCKER_COMPOSE_CMD -f $compose_file ps 2>&1 | tee -a "\$DEPLOY_LOG"
+\$DOCKER_COMPOSE_CMD -f $sanitized_compose_file ps 2>&1 | tee -a "\$DEPLOY_LOG"
 
 echo "\$(date): Application deployment completed" | tee -a "\$DEPLOY_LOG"
 EOF
@@ -1824,25 +1843,70 @@ if ! install_docker_compose; then
     exit 1
 fi
 
-# Optimize Docker daemon for limited disk space
+# Optimize Docker daemon for limited disk space with improved configuration
 echo "\$(date): Optimizing Docker configuration..."
 mkdir -p /etc/docker
+
+# Create enhanced Docker daemon configuration
 cat > /etc/docker/daemon.json << 'DOCKEREOF'
 {
     "log-driver": "json-file",
     "log-opts": {
         "max-size": "10m",
-        "max-file": "3"
+        "max-file": "5",
+        "compress": "true"
     },
     "storage-driver": "overlay2",
     "storage-opts": [
-        "overlay2.size=25G"
+        "overlay2.size=30G"
     ],
-    "max-concurrent-downloads": 2,
-    "max-concurrent-uploads": 2,
-    "live-restore": true
+    "max-concurrent-downloads": 3,
+    "max-concurrent-uploads": 3,
+    "default-ulimits": {
+        "nofile": {
+            "Name": "nofile",
+            "Hard": 64000,
+            "Soft": 64000
+        }
+    },
+    "live-restore": true,
+    "userland-proxy": false,
+    "experimental": false,
+    "features": {
+        "buildkit": true
+    }
 }
 DOCKEREOF
+
+# Reload systemd and restart Docker with proper error handling
+echo "\$(date): Restarting Docker with new configuration..."
+systemctl daemon-reload
+if ! systemctl restart docker; then
+    echo "\$(date): Docker restart failed, attempting recovery..."
+    # Try to recover by resetting to default configuration
+    cp /etc/docker/daemon.json /etc/docker/daemon.json.backup
+    echo '{}' > /etc/docker/daemon.json
+    systemctl restart docker
+    sleep 5
+    # Restore configuration if basic restart worked
+    if docker info >/dev/null 2>&1; then
+        mv /etc/docker/daemon.json.backup /etc/docker/daemon.json
+        systemctl restart docker
+    fi
+fi
+
+# Wait for Docker to be ready
+echo "\$(date): Waiting for Docker daemon to be ready..."
+for i in \$(seq 1 30); do
+    if docker info >/dev/null 2>&1; then
+        echo "\$(date): Docker daemon is ready"
+        break
+    fi
+    if [ \$i -eq 30 ]; then
+        echo "\$(date): WARNING: Docker daemon failed to become ready"
+    fi
+    sleep 2
+done
 
 # Install NVIDIA Container Toolkit (for GPU instances)
 if lspci | grep -i nvidia; then

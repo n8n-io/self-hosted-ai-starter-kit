@@ -26,8 +26,14 @@ warning() { echo -e "${YELLOW}[WARNING] $1${NC}" >&2; }
 cleanup_docker_space() {
     log "Cleaning up Docker to free disk space..."
     
-    # Stop all containers to free up space
-    docker stop $(docker ps -aq) 2>/dev/null || true
+    # Stop all containers to free up space (safely)
+    if docker ps -q >/dev/null 2>&1; then
+        for container in $(docker ps -q); do
+            if [ -n "$container" ]; then
+                docker stop "$container" 2>/dev/null || true
+            fi
+        done
+    fi
     
     # Remove unused containers, networks, images, and build cache
     docker system prune -af --volumes || true
@@ -53,16 +59,19 @@ expand_root_volume() {
     if [ "$disk_usage" -gt 80 ]; then
         warning "Root volume is ${disk_usage}% full. Attempting to expand..."
         
-        # Get the root device
+        # Get the root device safely
         local root_device
-        root_device=$(lsblk -no PKNAME /dev/$(lsblk -no KNAME /))
-        
-        if [ -n "$root_device" ]; then
-            # Resize the partition and filesystem
-            sudo growpart "/dev/$root_device" 1 2>/dev/null || true
-            sudo resize2fs "/dev/${root_device}1" 2>/dev/null || true
-            
-            success "Root volume expansion attempted"
+        local root_kname
+        root_kname=$(lsblk -no KNAME / 2>/dev/null) || return 1
+        if [ -n "$root_kname" ] && [ -b "/dev/$root_kname" ]; then
+            root_device=$(lsblk -no PKNAME "/dev/$root_kname" 2>/dev/null)
+            if [ -n "$root_device" ] && [ -b "/dev/$root_device" ]; then
+                # Resize the partition and filesystem
+                sudo growpart "/dev/$root_device" 1 2>/dev/null || true
+                sudo resize2fs "/dev/${root_device}1" 2>/dev/null || true
+                
+                success "Root volume expansion attempted"
+            fi
         fi
     else
         log "Root volume usage is acceptable (${disk_usage}%)"
@@ -181,9 +190,21 @@ create_efs_for_stack() {
         --filters "Name=vpc-id,Values=$vpc_id" "Name=state,Values=available" \
         --query 'Subnets[].SubnetId' \
         --output text | tr '\t' '\n')
-    # Convert to array bash 3.x compatible way
-    local subnet_ids
-    subnet_ids=($subnet_ids_raw)
+    # Validate and process subnet IDs safely
+    local subnet_ids=""
+    for subnet_id in $subnet_ids_raw; do
+        # Validate subnet ID format
+        if [[ "$subnet_id" =~ ^subnet-[a-z0-9]{8,17}$ ]]; then
+            subnet_ids="$subnet_ids $subnet_id"
+        else
+            warning "Invalid subnet ID format: $subnet_id"
+        fi
+    done
+    
+    if [ -z "$subnet_ids" ]; then
+        error "No valid subnet IDs found"
+        return 1
+    fi
     
     # Create security group for EFS
     local efs_sg_id
@@ -204,7 +225,7 @@ create_efs_for_stack() {
         --region "$aws_region"
     
     # Create mount targets
-    for subnet_id in "${subnet_ids[@]}"; do
+    for subnet_id in $subnet_ids; do
         aws efs create-mount-target \
             --file-system-id "$efs_id" \
             --subnet-id "$subnet_id" \

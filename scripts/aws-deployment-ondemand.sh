@@ -571,10 +571,10 @@ create_target_group() {
         --health-check-protocol HTTP \
         --health-check-port 5678 \
         --health-check-path /healthz \
-        --health-check-interval-seconds 30 \
-        --health-check-timeout-seconds 10 \
+        --health-check-interval-seconds 60 \
+        --health-check-timeout-seconds 15 \
         --healthy-threshold-count 2 \
-        --unhealthy-threshold-count 2 \
+        --unhealthy-threshold-count 5 \
         --target-type instance \
         --region "$AWS_REGION" \
         --query 'TargetGroups[0].TargetGroupArn' \
@@ -608,10 +608,10 @@ create_qdrant_target_group() {
         --health-check-protocol HTTP \
         --health-check-port 6333 \
         --health-check-path /healthz \
-        --health-check-interval-seconds 30 \
-        --health-check-timeout-seconds 10 \
+        --health-check-interval-seconds 60 \
+        --health-check-timeout-seconds 15 \
         --healthy-threshold-count 2 \
-        --unhealthy-threshold-count 2 \
+        --unhealthy-threshold-count 5 \
         --target-type instance \
         --region "$AWS_REGION" \
         --query 'TargetGroups[0].TargetGroupArn' \

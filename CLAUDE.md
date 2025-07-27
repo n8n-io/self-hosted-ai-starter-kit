@@ -42,6 +42,19 @@ make destroy STACK_NAME=test        # Clean up test resources
 ./tools/test-runner.sh --report     # Generate HTML test reports
 ```
 
+### Single Test Command Patterns
+```bash
+# Test individual functions without full deployment
+./test-function-logic.sh             # Test specific function logic
+./test-function-issues.sh            # Test issue handling functions
+./test-spot-alb-commands.sh          # Test spot instance + ALB commands
+
+# Validate specific configurations
+./tests/test-compose-validation.sh   # Docker Compose validation
+./tests/test-config-integration.sh   # Configuration integration tests
+./tests/test-docker-compose.sh       # Full Docker Compose testing
+```
+
 ### Architecture Overview
 - **Shared Libraries**: `/lib/*.sh` - Common functions sourced by all scripts
   - Always source `aws-deployment-common.sh` and `error-handling.sh` in deployment scripts
@@ -106,6 +119,17 @@ make validate                # Validate all configurations
 make help                    # Show all available commands
 make install-deps            # Install required dependencies
 make check-deps              # Check if all dependencies are available
+```
+
+**Configuration Management (requires ENV parameter):**
+```bash
+make config-generate ENV=development     # Generate all config files for environment
+make config-validate ENV=staging        # Validate configuration for environment
+make config-show ENV=production         # Show configuration summary
+make config-env ENV=development         # Generate environment file only
+make config-override ENV=staging        # Generate Docker Compose override only
+make config-terraform ENV=production    # Generate Terraform variables only
+make config-test                        # Run configuration management tests
 ```
 
 **Testing (MANDATORY before deployment):**
@@ -590,32 +614,47 @@ make test                                    # Run all tests via test-runner.sh
   ├── spot-instance.sh         # Spot instance management and pricing
   ├── ondemand-instance.sh     # On-demand instance specific operations
   ├── simple-instance.sh       # Simple deployment specific functions
-  └── aws-config.sh           # Configuration defaults and environment
+  ├── aws-config.sh           # Configuration defaults and environment
+  ├── config-management.sh    # Configuration generation and validation
+  └── docker-compose-installer.sh # Docker Compose installation utilities
 
 /scripts/                      # Main deployment orchestrators
   ├── aws-deployment-unified.sh # Main orchestrator (recommended)
-  ├── aws-deployment.sh        # Intelligent deployment with cross-region analysis
   ├── aws-deployment-simple.sh # Simple on-demand deployment
   ├── aws-deployment-ondemand.sh # Full on-demand deployment
   ├── simple-demo.sh           # Test deployment logic without AWS costs
   ├── setup-parameter-store.sh # Parameter Store management
   ├── security-validation.sh   # Security validation functions
-  └── fix-deployment-issues.sh # Deployment troubleshooting
+  ├── fix-deployment-issues.sh # Deployment troubleshooting
+  ├── config-manager.sh        # Configuration management system
+  ├── cleanup-consolidated.sh  # EFS and resource cleanup
+  └── validate-deployment.sh   # Deployment validation
 
 /tools/                        # Development and testing tools
   ├── test-runner.sh          # Comprehensive test orchestration (bash 3.x/4.x compatible)
   ├── install-deps.sh         # Dependency installation
   ├── validate-config.sh      # Configuration validation
-  └── monitoring-setup.sh     # Monitoring configuration
+  ├── monitoring-setup.sh     # Monitoring configuration
+  └── validate-improvements.sh # Validation improvements
 
 /tests/                        # Testing framework
-  ├── unit/                   # Python unit tests (pytest)
-  ├── integration/            # Integration tests
-  └── test-*.sh              # Shell-based validation scripts
+  ├── lib/                    # Shell test libraries and framework
+  ├── test-*.sh              # Shell-based validation scripts
+  └── unit/                   # Python unit tests (if present)
 
 /config/                       # Environment settings and version locks
-  ├── environments/          # Environment-specific configurations
-  └── image-versions.yml     # Container image version management
+  ├── environments/          # Environment-specific configurations (development.yml, production.yml, staging.yml)
+  ├── image-versions.yml     # Container image version management
+  ├── defaults.yml           # Default configuration values
+  ├── deployment-types.yml   # Deployment type configurations
+  └── docker-compose-template.yml # Docker Compose template
+
+/n8n/                         # n8n workflow automation assets
+  ├── demo-data/workflows/   # Pre-built workflow templates and examples
+  └── demo-data/credentials/ # Credential templates for n8n setup
+
+/ollama/models/               # Ollama LLM model configurations
+  └── *.Modelfile           # Model definition files
 
 /.cursor/rules/                # IDE development guidelines
   ├── aws.mdc               # AWS architecture patterns and best practices

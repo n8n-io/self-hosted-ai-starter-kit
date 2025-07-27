@@ -277,7 +277,7 @@ test_log_error_special_characters() {
     setup_test_environment
     init_error_handling "$ERROR_MODE_RESILIENT" "$TEST_ERROR_LOG"
     
-    local special_message="Error with $pecial ch@rs & symbols!"
+    local special_message="Error with \$pecial ch@rs & symbols!"
     local output
     output=$(log_error "$special_message" 2>&1)
     

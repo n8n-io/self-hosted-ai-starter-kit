@@ -1,6 +1,12 @@
 {
-    "timestamp": "2025-07-26T23:12:47Z",
-    "project": "GeuseMaker",
-    "environment": "development",
-    "results": {}
+  "timestamp": "2025-07-27T01:52:29Z",
+  "project": "GeuseMaker",
+  "environment": "development",
+  "results": {
+    "security": {
+      "status": "passed",
+      "timestamp": "2025-07-27T01:52:31Z",
+      "exit_code": "0"
+    }
+  }
 }

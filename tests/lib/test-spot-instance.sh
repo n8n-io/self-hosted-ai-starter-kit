@@ -66,9 +66,22 @@ mock_aws_commands() {
     
     # Mock bc command for floating point comparisons
     mock_function "bc" '
-        # Simple mock for basic comparisons
-        local expression="$1"
-        if [[ "$expression" == *"< 0.1"* ]]; then
+        # Read from stdin when called with pipe
+        local expression
+        if [ -p /dev/stdin ]; then
+            read expression
+        else
+            expression="$1"
+        fi
+        
+        # Handle specific price comparisons for our test data
+        if [[ "$expression" == "0.0987 < 0.1234" ]]; then
+            echo "1"  # 0.0987 is less than 0.1234 (true)
+        elif [[ "$expression" == "0.1456 < 0.0987" ]]; then
+            echo "0"  # 0.1456 is not less than 0.0987 (false)
+        elif [[ "$expression" == "0.1456 < 0.1234" ]]; then
+            echo "0"  # 0.1456 is not less than 0.1234 (false)
+        elif [[ "$expression" == *"< 0.1"* ]]; then
             echo "1"  # true
         elif [[ "$expression" == *"< 0.2"* ]]; then
             echo "1"  # true
@@ -324,7 +337,14 @@ test_analyze_spot_pricing_floating_point_comparison() {
     
     # Mock bc to handle floating point correctly
     mock_function "bc" '
-        local expr="$1"
+        # Read from stdin when called with pipe
+        local expr
+        if [ -p /dev/stdin ]; then
+            read expr
+        else
+            expr="$1"
+        fi
+        
         if [[ "$expr" == "0.0987 < 0.1234" ]]; then
             echo "1"
         elif [[ "$expr" == "0.1456 < 0.0987" ]]; then
