@@ -1,3 +1,0 @@
-[submodule ".submodules/n8n-io-original"]
-	path = .submodules/n8n-io-original
-	url = https://github.com/n8n-io/self-hosted-ai-starter-kit.git
