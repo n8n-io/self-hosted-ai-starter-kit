@@ -1,0 +1,37 @@
+FROM n8nio/n8n:latest
+
+USER root
+
+# Install system dependencies
+RUN apk add --no-cache \
+    curl \
+    wget \
+    git \
+    bash \
+    sudo \
+    docker \
+    docker-compose
+
+# Install GitHub CLI
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+
+# Install dotenv-vault
+RUN curl -sfS https://vault.dotenv.org/install.sh | sh
+
+# Add node user to docker group
+RUN addgroup node docker
+
+# Switch back to node user
+USER node
+
+# Set working directory
+WORKDIR /home/node
+
+# Copy entrypoint script
+COPY --chown=node:node entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["n8n"]

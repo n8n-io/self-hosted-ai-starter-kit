@@ -3,12 +3,15 @@ volumes:
   postgres_storage:
   ollama_storage:
   qdrant_storage:
+  docker_socket:
 
 networks:
   demo:
 
 x-n8n: &service-n8n
-  image: n8nio/n8n:latest
+  build:
+    context: .
+    dockerfile: Dockerfile.n8n
   networks: ['demo']
   environment:
     - DB_TYPE=postgresdb
@@ -20,8 +23,13 @@ x-n8n: &service-n8n
     - N8N_ENCRYPTION_KEY
     - N8N_USER_MANAGEMENT_JWT_SECRET
     - OLLAMA_HOST=ollama:11434
+    - WEBHOOK_URL=https://${NGROK_DOMAIN}
   env_file:
     - .env
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+    - /usr/bin/docker:/usr/bin/docker:ro
+    - /usr/bin/docker-compose:/usr/bin/docker-compose:ro
 
 x-ollama: &service-ollama
   image: ollama/ollama:latest
@@ -51,6 +59,8 @@ services:
     image: postgres:16-alpine
     hostname: postgres
     networks: ['demo']
+    ports:
+      - 5432:5432
     restart: unless-stopped
     environment:
       - POSTGRES_USER
@@ -64,6 +74,23 @@ services:
       timeout: 5s
       retries: 10
 
+  ngrok:
+    image: ngrok/ngrok:latest
+    hostname: ngrok
+    container_name: ngrok
+    networks: ['demo']
+    restart: unless-stopped
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    command: 
+      - "http"
+      - "--domain=${NGROK_DOMAIN}"
+      - "n8n:5678"
+    ports:
+      - "4040:4040"
+    depends_on:
+      - n8n
+
   n8n-import:
     <<: *service-n8n
     hostname: n8n-import
@@ -71,9 +98,24 @@ services:
     entrypoint: /bin/sh
     command:
       - "-c"
-      - "n8n import:credentials --separate --input=/backup/credentials && n8n import:workflow --separate --input=/backup/workflows"
+      - |
+        if [ -n "$$N8N_CUSTOM_IMPORT_PATH" ] && [ -d "$$N8N_CUSTOM_IMPORT_PATH" ]; then
+          echo "Importing from custom path: $$N8N_CUSTOM_IMPORT_PATH"
+          if [ -d "$$N8N_CUSTOM_IMPORT_PATH/credentials" ]; then
+            n8n import:credentials --separate --input=$$N8N_CUSTOM_IMPORT_PATH/credentials
+          fi
+          if [ -d "$$N8N_CUSTOM_IMPORT_PATH/workflows" ]; then
+            n8n import:workflow --separate --input=$$N8N_CUSTOM_IMPORT_PATH/workflows
+          fi
+        else
+          echo "Using default demo data"
+          n8n import:credentials --separate --input=/demo-data/credentials && n8n import:workflow --separate --input=/demo-data/workflows
+        fi
     volumes:
-      - ./n8n/backup:/backup
+      - ./n8n/demo-data:/demo-data
+      - /mnt/c/users/smart/.n8n/storage/volumes/projects/e8ZY6SWt84kxXzMl/backup:/backup
+    environment:
+      - N8N_CUSTOM_IMPORT_PATH=${N8N_CUSTOM_IMPORT_PATH}
     depends_on:
       postgres:
         condition: service_healthy
@@ -87,13 +129,73 @@ services:
       - 5678:5678
     volumes:
       - n8n_storage:/home/node/.n8n
-      - ./n8n/backup:/backup
+      - ./n8n/demo-data:/demo-data
       - ./shared:/data/shared
+      - /mnt/c/users/smart/.n8n/storage/volumes/projects/e8ZY6SWt84kxXzMl/backup:/backup
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/bin/docker:/usr/bin/docker:ro
+      - /usr/bin/docker-compose:/usr/bin/docker-compose:ro
+    environment:
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_USER=${POSTGRES_USER}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_PERSONALIZATION_ENABLED=false
+      - N8N_ENCRYPTION_KEY
+      - N8N_USER_MANAGEMENT_JWT_SECRET
+      - OLLAMA_HOST=ollama:11434
+      - WEBHOOK_URL=https://${NGROK_DOMAIN}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
     depends_on:
       postgres:
         condition: service_healthy
       n8n-import:
         condition: service_completed_successfully
+
+  n8n-updater:
+    image: alpine:latest
+    container_name: n8n-updater
+    networks: ['demo']
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./:/workspace
+    working_dir: /workspace
+    environment:
+      - AUTO_UPDATE_ENABLED=${AUTO_UPDATE_ENABLED}
+      - AUTO_UPDATE_INTERVAL=${AUTO_UPDATE_INTERVAL:-24h}
+    command: >
+      sh -c "
+        apk add --no-cache docker-cli docker-compose curl &&
+        while true; do
+          if [ \"$$AUTO_UPDATE_ENABLED\" = \"true\" ]; then
+            echo \"Checking for n8n updates at $(date)\"
+            if docker pull n8nio/n8n:latest; then
+              echo \"New image found, rebuilding n8n service...\"
+              cd /workspace && docker-compose build n8n && docker-compose up -d n8n
+              echo \"n8n updated successfully at $(date)\"
+            else
+              echo \"No new image available\"
+            fi
+          else
+            echo \"Auto-update disabled\"
+          fi
+          
+          # Convert interval to seconds
+          INTERVAL_SEC=86400  # Default 24h
+          case \"$$AUTO_UPDATE_INTERVAL\" in
+            *h) INTERVAL_SEC=$$(echo \"$$AUTO_UPDATE_INTERVAL\" | sed 's/h//' | awk '{print $$1 * 3600}') ;;
+            *m) INTERVAL_SEC=$$(echo \"$$AUTO_UPDATE_INTERVAL\" | sed 's/m//' | awk '{print $$1 * 60}') ;;
+            *s) INTERVAL_SEC=$$(echo \"$$AUTO_UPDATE_INTERVAL\" | sed 's/s//') ;;
+          esac
+          
+          echo \"Sleeping for $$INTERVAL_SEC seconds...\"
+          sleep $$INTERVAL_SEC
+        done
+      "
+    depends_on:
+      - n8n
 
   qdrant:
     image: qdrant/qdrant
