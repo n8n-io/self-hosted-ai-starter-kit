@@ -108,7 +108,7 @@ services:
     volumes:
       - qdrant_storage:/qdrant/storage
     environment:
-      - QDRANT__TELEMETRY_DISABLED=true
+#      - QDRANT__TELEMETRY_DISABLED=true
     
   ollama-cpu:
     profiles: ["cpu"]
@@ -147,6 +147,9 @@ services:
     privileged: true
     environment:
       - EGL_PLATFORM=surfaceless
+      - OLLAMA_INTEL_GPU=true
+      - ONEAPI_DEVICE_SELECTOR=level_zero:0
+      - LIBVA_DRIVER_NAME=iHD
 
   ollama-pull-llama-cpu:
     profiles: ["cpu"]
