@@ -1,28 +1,33 @@
 FROM ubuntu:24.04
 
-# 1) Install VAAPI + OpenCL ICD cleanly
+# 1) Core VAAPI + OpenCL ICD for Intel Arc, cleanup of any blocklisted drivers
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      curl \
-      mesa-utils \
-      libegl1-mesa \
-      libgl1-mesa-dri \
-      vainfo \
-      clinfo \
+    curl \
+    mesa-utils \
+    libegl1-mesa \
+    libgl1-mesa-dri \
+    vainfo \
+    clinfo \
  && apt-get remove --purge -y i965-va-driver va-driver-all mesa-va-drivers || true \
  && apt-get install --reinstall -y intel-media-va-driver-non-free intel-opencl-icd \
+ # Optional: Intel OneAPI runtime for Level Zero + SYCL
+ && apt-get install -y --no-install-recommends \
+    intel-oneapi-runtime-compilers \
+    intel-oneapi-runtime-dpcpp \
  && rm -rf /var/lib/apt/lists/*
 
-# 2) Headless EGL
+# 2) Headless EGL + Intel environment defaults
 ENV EGL_PLATFORM=surfaceless \
-    LIBVA_DRIVER_NAME=iHD
+    LIBVA_DRIVER_NAME=iHD \
+    OLLAMA_INTEL_GPU=true \
+    ONEAPI_DEVICE_SELECTOR=level_zero:0
 
-# 3) Install Ollama CLI
+# 3) Install Ollama CLI (latest release)
 ENV OLLAMA_DIR=/usr/local/lib/ollama \
     OLLAMA_BIN=/usr/local/bin/ollama
-
 RUN export RELEASE=$(curl -fsSL https://api.github.com/repos/ollama/ollama/releases/latest \
-                   | grep '"tag_name"' | awk -F '"' '{print $4}') \
+      | grep '"tag_name"' | awk -F '"' '{print $4}') \
  && curl -fsSL "https://github.com/ollama/ollama/releases/download/${RELEASE}/ollama-linux-amd64.tgz" \
       -o /tmp/ollama.tgz \
  && mkdir -p ${OLLAMA_DIR} \
@@ -30,11 +35,17 @@ RUN export RELEASE=$(curl -fsSL https://api.github.com/repos/ollama/ollama/relea
  && ln -sf ${OLLAMA_DIR}/bin/ollama ${OLLAMA_BIN} \
  && rm /tmp/ollama.tgz
 
-EXPOSE 11434
-CMD ["ollama"]
-
+# 4) Quick driver sanity‑check at build
 RUN if dpkg -l | grep -E "i965-va-driver|va-driver-all|mesa-va-drivers"; then \
       echo "❌ Blocklisted drivers found!" && exit 1; \
     else \
       echo "✅ No banned VAAPI drivers detected."; \
     fi
+
+EXPOSE 11434
+
+# 5) Lightweight healthcheck — will run at container start
+HEALTHCHECK --interval=30s --timeout=10s \
+  CMD sycl-ls || exit 1
+
+CMD ["ollama"]
