@@ -173,6 +173,6 @@ services:
   ollama-pull-llama-intel:
     profiles: ["gpu-intel"]
     <<: *init-ollama
-   image: ollama/ollama:latest
+   image: intelanalytics/ipex-llm-inference-cpp-xpu:latest
     depends_on:
       - ollama-intel
