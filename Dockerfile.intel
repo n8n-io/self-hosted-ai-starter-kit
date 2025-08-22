@@ -11,10 +11,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
  intel-oneapi-mkl \           # Optimized math routines (BLAS, LAPACK, FFT) for CPU fallback
  intel-oneapi-tbb \           # Threading runtime for parallel CPU processing
  intel-oneapi-openmp \        # High-performance OpenMP runtime
- intel-oneapi-dnnl \          # oneDNN deep neural network library for CPU inference \
- intel-level-zero-gpu \
- intel-opencl-icd \
- clinfo intel-gpu-tools
+ intel-oneapi-dnnl            # oneDNN deep neural network library for CPU inference
 COPY intel-igc-core-2_2.14.1+19448_amd64.deb \
      intel-igc-opencl-2_2.14.1+19448_amd64.deb \
      libze-intel-gpu1_25.27.34303.5-0_amd64.deb /tmp/
