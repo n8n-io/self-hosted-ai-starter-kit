@@ -8,14 +8,20 @@ RUN apt-get update && apt-get install -y curl gnupg lsb-release \
 
 # 2) Install Intel GPU runtime components
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+ intel-oneapi-mkl \           # Optimized math routines (BLAS, LAPACK, FFT) for CPU fallback
+ intel-oneapi-tbb \           # Threading runtime for parallel CPU processing
+ intel-oneapi-openmp \        # High-performance OpenMP runtime
+ intel-oneapi-dnnl \          # oneDNN deep neural network library for CPU inference \
  intel-level-zero-gpu \
  intel-opencl-icd \
- intel-media-va-driver-non-free \
- libmfx1 libmfxgen1 libvpl2 \
- intel-oneapi-runtime-compilers \
- intel-oneapi-runtime-dpcpp \
- clinfo intel-gpu-tools \
- mesa-utils libegl1-mesa libgl1-mesa-dri vainfo \
+ clinfo intel-gpu-tools
+COPY intel-igc-core-2_2.14.1+19448_amd64.deb \
+     intel-igc-opencl-2_2.14.1+19448_amd64.deb \
+     libze-intel-gpu1_25.27.34303.5-0_amd64.deb /tmp/
+RUN dpkg -i /tmp/intel-igc-core-2_2.14.1+19448_amd64.deb \
+           /tmp/intel-igc-opencl-2_2.14.1+19448_amd64.deb \
+           /tmp/libze-intel-gpu1_25.27.34303.5-0_amd64.deb \
+ && apt-mark hold intel-igc-core intel-igc-opencl libze-intel-gpu1 \
  && apt-get remove --purge -y i965-va-driver va-driver-all mesa-va-drivers || true \
  && rm -rf /var/lib/apt/lists/*
 
