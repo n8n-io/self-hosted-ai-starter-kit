@@ -23,10 +23,11 @@ x-n8n: &service-n8n
     - N8N_PERSONALIZATION_ENABLED=false
     - N8N_ENCRYPTION_KEY
     - N8N_USER_MANAGEMENT_JWT_SECRET
-    - OLLAMA_HOST=ollama:11434
-  depends_on:
-    postgres:
-      condition: service_healthy
+
+  - OLLAMA_HOST=${OLLAMA_HOST:-ollama:11434}
+  env_file:
+    - path: .env
+      required: true
 
 x-ollama: &service-ollama
   image: ollama/ollama:latest
@@ -76,9 +77,13 @@ services:
     entrypoint: /bin/sh
     command:
       - "-c"
-      - "n8n import:credentials --separate --input=/backup/credentials && n8n import:workflow --separate --input=/backup/workflows"
+      - "n8n import:credentials --separate --input=/demo-data/credentials && n8n import:workflow --separate --input=/demo-data/workflows"
     volumes:
-      - ./n8n/backup:/backup
+
+    - ./n8n/demo-data:/demo-data
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   n8n:
     <<: *service-n8n
@@ -89,7 +94,7 @@ services:
       - 5678:5678
     volumes:
       - n8n_storage:/home/node/.n8n
-      - ./n8n/backup:/backup
+      - ./n8n/demo-data:/demo-data
       - ./shared:/data/shared
     depends_on:
       postgres:
