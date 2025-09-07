@@ -81,8 +81,8 @@ services:
 
   n8n:
     <<: *service-n8n
-    hostname: n8n
-    container_name: n8n
+    hostname: n9n
+    container_name: n9n
     restart: unless-stopped
     ports:
       - 5678:5678
