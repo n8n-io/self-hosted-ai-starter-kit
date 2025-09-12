@@ -1,0 +1,49 @@
+services:
+  - type: web
+    name: n8n-app
+    env: docker
+    region: oregon
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: N8N_HOST
+        value: 0.0.0.0
+      - key: N8N_PORT
+        value: 5678
+      - key: N8N_PROTOCOL
+        value: http
+      - key: NODE_ENV
+        value: production
+      - key: N8N_BASIC_AUTH_ACTIVE
+        value: true
+      - key: N8N_BASIC_AUTH_USER
+        value: admin
+      - key: N8N_BASIC_AUTH_PASSWORD
+        generateValue: true
+      - key: N8N_ENCRYPTION_KEY
+        generateValue: true
+      - key: WEBHOOK_URL
+        value: https://n8n-app.onrender.com
+      - key: N8N_LOG_LEVEL
+        value: info
+      - key: N8N_LOG_OUTPUT
+        value: console
+      - key: EXECUTIONS_DATA_PRUNE
+        value: true
+      - key: EXECUTIONS_DATA_MAX_AGE
+        value: 168
+      - key: N8N_DISABLE_PRODUCTION_MAIN_PROCESS
+        value: true
+      - key: EXECUTIONS_PROCESS
+        value: main
+      
+  # Optional: PostgreSQL database
+  # Uncomment if you want a dedicated database
+  # - type: pserv
+  #   name: n8n-db
+  #   env: postgres
+  #   plan: starter
+  #   property: n8n
+  #   databases:
+  #     - name: n8n
+  #       user: n8n_user
