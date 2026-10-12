@@ -1,0 +1,44 @@
+name: litellm
+services:
+
+  db:
+    image: postgres:16
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: litellm
+      POSTGRES_DB: litellm
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U litellm" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  litellm:
+    image: docker.litellm.ai/berriai/litellm:main-stable
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?}
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:?}
+      DATABASE_URL: postgresql://litellm:litellm@db:5432/litellm
+      STORE_MODEL_IN_DB: "True"
+    networks:
+      - default
+      - traefik
+      - n8n
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=traefik
+      - traefik.http.services.litellm.loadbalancer.server.port=4000
+
+networks:
+  traefik:
+    external: true
+  n8n:
+    external: true
+
+volumes:
+  postgres_data:

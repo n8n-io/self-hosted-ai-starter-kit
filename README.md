@@ -1,235 +1,135 @@
 # Self-hosted AI starter kit
 
-**Self-hosted AI Starter Kit** is an open-source Docker Compose template designed to swiftly initialize a comprehensive local AI and low-code development environment.
+**Self-hosted AI Starter Kit** is a Docker Compose template that starts a
+local n8n stack (n8n, PostgreSQL, task runners, Traefik with local HTTPS)
+and, optionally, local AI services (vLLM, Qdrant). [Tilt](https://tilt.dev/)
+orchestrates the compose projects and a small CLI (`packages/cli`) generates
+the `.env` files.
 
-![n8n.io - Screenshot](https://raw.githubusercontent.com/n8n-io/self-hosted-ai-starter-kit/main/assets/n8n-demo.gif)
-
-Curated by <https://github.com/n8n-io>, it combines the self-hosted n8n
-platform with a curated list of compatible AI products and components to
-quickly get started with building self-hosted AI workflows.
-
-> [!TIP]
-> [Read the announcement](https://blog.n8n.io/self-hosted-ai/)
+![n8n.io - Screenshot](assets/n8n-demo.gif)
 
 ### What’s included
 
 ✅ [**Self-hosted n8n**](https://n8n.io/) - Low-code platform with over 400
-integrations and advanced AI components
+integrations and advanced AI components, running behind Traefik with local
+HTTPS and task runners
 
-✅ [**Ollama**](https://ollama.com/) - Cross-platform LLM platform to install
-and run the latest local LLMs
+✅ [**PostgreSQL**](https://www.postgresql.org/) - Workhorse of the Data
+Engineering world, handles large amounts of data safely
 
-✅ [**Qdrant**](https://qdrant.tech/) - Open-source, high performance vector
-store with an comprehensive API
+✅ [**Traefik**](https://traefik.io/) - Reverse proxy with local HTTPS,
+routing on `<service>.<DOMAIN>`
 
-✅ [**PostgreSQL**](https://www.postgresql.org/) -  Workhorse of the Data
-Engineering world, handles large amounts of data safely.
+✅ [**Tilt**](https://tilt.dev/) - Orchestrates the Docker Compose projects
 
-### What you can build
+✅ [**vLLM**](https://docs.vllm.ai/) *(optional)* - High-throughput LLM
+serving engine for running local models
 
-⭐️ **AI Agents** for scheduling appointments
+✅ [**Ollama**](https://ollama.com/) *(optional)* - Cross-platform LLM
+platform to install and run the latest local LLMs
 
-⭐️ **Summarize Company PDFs** securely without data leaks
+✅ [**Qdrant**](https://qdrant.tech/) *(optional)* - Open-source, high
+performance vector store with a comprehensive API
 
-⭐️ **Smarter Slack Bots** for enhanced company communications and IT operations
+## 🛠️ Prerequisites
 
-⭐️ **Private Financial Document Analysis** at minimal cost
+| Tool | Notes |
+| ---- | ----- |
+| Docker | Docker Desktop, OrbStack or Docker Engine with Compose v2 |
+| Node.js + [pnpm](https://pnpm.io/) 10.32.1 | `npm i -g pnpm@10.32.1` |
+| [Tilt](https://docs.tilt.dev/install.html) | `brew install tilt` |
+| [mkcert](https://github.com/FiloSottile/mkcert) | `brew install mkcert`. Used to create the local TLS certificate for `*.dev.localhost` |
+| NVIDIA Container Toolkit | Only for `AI_RUNTIME=gpu-nvidia` |
 
-## Installation
-
-### Cloning the Repository
+## ⚡️ Quickstart
 
 ```bash
-git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
-cd self-hosted-ai-starter-kit
-cp .env.example .env # you should update secrets and passwords inside
+pnpm install
+pnpm build        # builds packages/cli; required before `setup`
+pnpm run setup    # creates a .env next to every .env.template (never overwrites)
+pnpm run config   # optional: set DOMAIN, AI_RUNTIME and N8N_VARIANT in the root .env
+pnpm run dev      # tilt up
 ```
 
-### Running n8n using Docker Compose
+- On first start Tilt creates the Docker networks and, if missing, a TLS certificate in `~/.certs/dev` (`scripts/cert.sh`, using a CA in the same folder). To make your browser trust it, run `CAROOT=~/.certs/dev mkcert -install` once (needs sudo).
+- n8n is available at `https://n8n.dev.localhost`. Traefik routes on `<service>.<DOMAIN>`.
+- To start only some services, name them: `tilt up traefik postgres n8n n8n-runner`. Groups are `traefik`, `postgres`, `redis`, `garage` and `vault`.
+- Stop and remove containers with `tilt down`.
+
+## ⚙️ Configuration
+
+The root `.env` is read by the `Tiltfile`:
+
+```bash
+# The domain to run the Docker Compose services on
+DOMAIN=dev.localhost
+# The hardware-supported AI runtime
+# Options: cpu-x86-64, cpu-arm64, apple-silicon, dgx-spark, gpu-nvidia or gpu-amd
+AI_RUNTIME=cpu-x86-64
+# Which variant of n8n to run in ./compose/n8n
+# Options: base, community or enterprise
+N8N_VARIANT=base
+```
+
+`AI_RUNTIME` defaults to `cpu-x86-64`. Set it to match your hardware (`pnpm run config`) before starting the vLLM resource.
+
+Per-project settings live in `.env` files next to each compose file, generated from `.env.template`:
+
+- `compose/n8n/.env`: n8n version, encryption key, runner token, database credentials and `N8N_LICENSE_ACTIVATION_KEY`. Replace the template's license key with your own; n8n starts without a valid one but runs unlicensed.
+- `compose/ai-models/.env`: `VLLM_VERSION` and `HF_TOKEN`, a [Hugging Face token](https://huggingface.co/settings/tokens) that is required for gated models such as Nemotron.
+
+> [!NOTE]
+> `.env` files are never committed.
+
+## 🤖 AI models
+
+`compose/ai-models/docker-compose.vllm-runtimes.yml` runs one vLLM model (default `Qwen/Qwen3-0.6B`, override with `VLLM_MODEL`) on the runtime selected by `AI_RUNTIME`. In Tilt, start the `vllm-<AI_RUNTIME>` resource, then:
+
+```bash
+curl localhost:8000/v1/models
+```
 
 #### For Nvidia GPU users
 
-```bash
-git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
-cd self-hosted-ai-starter-kit
-cp .env.example .env # you should update secrets and passwords inside
-docker compose --profile gpu-nvidia up
-```
-
-> [!NOTE]
-> If you have not used your Nvidia GPU with Docker before, please follow the
-> [Ollama Docker instructions](https://docs.ollama.com/docker).
-
-### For AMD GPU users on Linux
-
-```bash
-git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
-cd self-hosted-ai-starter-kit
-cp .env.example .env # you should update secrets and passwords inside
-docker compose --profile gpu-amd up
-```
+- `gpu-nvidia`: the same image and flags were run as a Kubernetes pod on an RTX 3090 (x86-64) and served requests. The compose file itself has not been run on a GPU host.
 
 #### For Mac / Apple Silicon users
 
-If you’re using a Mac with an M1 or newer processor, you can't expose your GPU
-to the Docker instance, unfortunately. There are two options in this case:
+- `cpu-arm64` currently fails on Apple silicon with a compiler error during `torch.compile` (`sme` without `sve2`).
+- `apple-silicon`: Docker on macOS cannot reach the Metal GPU, so this runtime runs Ollama natively on the host instead of in a container. Install it with `brew install ollama`, then in Tilt trigger `ollama-apple-silicon` (it reuses an Ollama that is already running) and `ollama-pull-llama-apple-silicon`. Containers reach it at `http://host.docker.internal:11434`. On an Apple M5, `llama3.2` generated about 49 tokens/s natively (100% GPU). vLLM is not used on this runtime.
 
-1. Run the starter kit fully on CPU, like in the section "For everyone else"
-   below
-2. Run Ollama on your Mac for faster inference, and connect to that from the
-   n8n instance
+#### For NVIDIA DGX Spark users
 
-If you want to run Ollama on your mac, check the
-[Ollama homepage](https://ollama.com/)
-for installation instructions, and run the starter kit as follows:
+- `dgx-spark`: NVIDIA DGX Spark (arm64 Grace CPU, Blackwell GB10 GPU, unified memory). vLLM runs as `vllm-dgx-spark`: the `vllm/vllm-openai:v0.31.0` image pinned to `linux/arm64`, `memlock`/`stack` ulimits, and only `VLLM_GPU_MEM_UTIL` of the shared memory (default `0.3`, not vLLM's 0.9). That image is multi-arch and its arm64 build ships CUDA 13.0, which the GB10 needs. Ollama reuses the unchanged `ollama-gpu-nvidia` service (no Spark-specific tuning). **Not tested on a Spark**: only the compose config and the Tiltfile load were checked here, and whether the vLLM image's kernels run on the GB10 (compute capability 12.1; the image lists 12.0) and whether Ollama's container finds the GPU are unverified.
 
-```bash
-git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
-cd self-hosted-ai-starter-kit
-cp .env.example .env # you should update secrets and passwords inside
-docker compose up
-```
+#### Embeddings
 
-##### For Mac users running OLLAMA locally
+`compose/ai-models/docker-compose.vllm.yml` serves the Nemotron embedding model on an NVIDIA GPU with `--gpu-memory-utilization=0.15`. It loaded and answered `/v1/embeddings` on a 24 GiB RTX 3090 with that setting (as a Kubernetes pod with the same image and flags).
 
-If you're running OLLAMA locally on your Mac (not in Docker), you need to modify the OLLAMA_HOST environment variable
+#### Ollama
 
-1. Set OLLAMA_HOST to `host.docker.internal:11434` in your .env file. 
-2. Additionally, after you see "Editor is now accessible via: <http://localhost:5678/>":
+`compose/ai-models/docker-compose.ollama.yml` runs Ollama on the runtime selected by `AI_RUNTIME`. In Tilt, trigger `ollama-cpu` (or `ollama-gpu-nvidia` / `ollama-gpu-amd`), then `ollama-pull-llama-cpu` (same suffix) to download `llama3.2`. The API listens on `localhost:11434`.
 
-    1. Head to <http://localhost:5678/home/credentials>
-    2. Click on "Local Ollama service"
-    3. Change the base URL to "http://host.docker.internal:11434/"
+## 🧰 AI and secret services
 
-#### For everyone else
+Optional resources that start only when triggered in Tilt:
 
-```bash
-git clone https://github.com/n8n-io/self-hosted-ai-starter-kit.git
-cd self-hosted-ai-starter-kit
-cp .env.example .env # you should update secrets and passwords inside
-docker compose --profile cpu up
-```
+⭐️ `qdrant`: vector database, reachable from containers on the `n8n` network at `http://qdrant:6333`.
 
-## ⚡️ Quick start and usage
+⭐️ `litellm-db`, then `litellm`: LiteLLM proxy at `https://litellm.<DOMAIN>`. Trigger the database first, since `litellm` waits for it.
 
-The core of the Self-hosted AI Starter Kit is a Docker Compose file, pre-configured with network and storage settings, minimizing the need for additional installations.
-After completing the installation steps above, simply follow the steps below to get started.
+⭐️ `vault` and `vault-unseal`: HashiCorp Vault for n8n external secrets. A fresh Vault must be initialized once; see [compose/n8n-services/vault/README.md](compose/n8n-services/vault/README.md).
 
-1. Open <http://localhost:5678/> in your browser to set up n8n. You’ll only
-   have to do this once.
-2. Open the included workflow:
-   <http://localhost:5678/workflow/srOnR8PAY3u4RSwb>
-3. Click the **Chat** button at the bottom of the canvas, to start running the workflow.
-4. If this is the first time you’re running the workflow, you may need to wait
-   until Ollama finishes downloading Llama3.2. You can inspect the docker
-   console logs to check on the progress.
+## 📂 Structure
 
-To open n8n at any time, visit <http://localhost:5678/> in your browser.
+- `compose/` Docker Compose projects (proxy, n8n, n8n-data, n8n-services, ai-models, ai-services)
+- `scripts/` helper scripts used by the `Tiltfile` (Docker networks, TLS certificate)
+- `packages/cli` the `n8n-starter` CLI ([README](packages/cli/README.md))
+- `Tiltfile` wires the compose projects together
 
-With your n8n instance, you’ll have access to over 400 integrations and a
-suite of basic and advanced AI nodes such as
-[AI Agent](https://docs.n8n.io/integrations/builtin/cluster-nodes/root-nodes/n8n-nodes-langchain.agent/),
-[Text classifier](https://docs.n8n.io/integrations/builtin/cluster-nodes/root-nodes/n8n-nodes-langchain.text-classifier/),
-and [Information Extractor](https://docs.n8n.io/integrations/builtin/cluster-nodes/root-nodes/n8n-nodes-langchain.information-extractor/)
-nodes. To keep everything local, just remember to use the Ollama node for your
-language model and Qdrant as your vector store.
-
-> [!NOTE]
-> This starter kit is designed to help you get started with self-hosted AI
-> workflows. While it’s not fully optimized for production environments, it
-> combines robust components that work well together for proof-of-concept
-> projects. You can customize it to meet your specific needs
-
-## Upgrading
-
-* ### For Nvidia GPU setups:
+## 👩‍💻 Development
 
 ```bash
-docker compose --profile gpu-nvidia pull
-docker compose create && docker compose --profile gpu-nvidia up
+pnpm test   # CLI unit tests
+pnpm lint   # dclint on ./compose
 ```
-
-* ### For Mac / Apple Silicon users
-
-```bash
-docker compose pull
-docker compose create && docker compose up
-```
-
-* ### For Non-GPU setups:
-
-```bash
-docker compose --profile cpu pull
-docker compose create && docker compose --profile cpu up
-```
-
-## 👓 Recommended reading
-
-n8n is full of useful content for getting started quickly with its AI concepts
-and nodes. If you run into an issue, go to [support](#support).
-
-- [AI agents for developers: from theory to practice with n8n](https://blog.n8n.io/ai-agents/)
-- [Tutorial: Build an AI workflow in n8n](https://docs.n8n.io/advanced-ai/intro-tutorial/)
-- [Langchain Concepts in n8n](https://docs.n8n.io/advanced-ai/langchain/langchain-n8n/)
-- [Demonstration of key differences between agents and chains](https://docs.n8n.io/advanced-ai/examples/agent-chain-comparison/)
-- [What are vector databases?](https://docs.n8n.io/advanced-ai/examples/understand-vector-databases/)
-
-## 🎥 Video walkthrough
-
-- [Installing and using Local AI for n8n](https://www.youtube.com/watch?v=xz_X2N-hPg0)
-
-## 🛍️ More AI templates
-
-For more AI workflow ideas, visit the [**official n8n AI template
-gallery**](https://n8n.io/workflows/categories/ai/). From each workflow,
-select the **Use workflow** button to automatically import the workflow into
-your local n8n instance.
-
-### Learn AI key concepts
-
-- [AI Agent Chat](https://n8n.io/workflows/1954-ai-agent-chat/)
-- [AI chat with any data source (using the n8n workflow too)](https://n8n.io/workflows/2026-ai-chat-with-any-data-source-using-the-n8n-workflow-tool/)
-- [Chat with OpenAI Assistant (by adding a memory)](https://n8n.io/workflows/2098-chat-with-openai-assistant-by-adding-a-memory/)
-- [Use an open-source LLM (via Hugging Face)](https://n8n.io/workflows/1980-use-an-open-source-llm-via-huggingface/)
-- [Chat with PDF docs using AI (quoting sources)](https://n8n.io/workflows/2165-chat-with-pdf-docs-using-ai-quoting-sources/)
-- [AI agent that can scrape webpages](https://n8n.io/workflows/2006-ai-agent-that-can-scrape-webpages/)
-
-### Local AI templates
-
-- [Tax Code Assistant](https://n8n.io/workflows/2341-build-a-tax-code-assistant-with-qdrant-mistralai-and-openai/)
-- [Breakdown Documents into Study Notes with MistralAI and Qdrant](https://n8n.io/workflows/2339-breakdown-documents-into-study-notes-using-templating-mistralai-and-qdrant/)
-- [Financial Documents Assistant using Qdrant and](https://n8n.io/workflows/2335-build-a-financial-documents-assistant-using-qdrant-and-mistralai/) [Mistral.ai](http://mistral.ai/)
-- [Recipe Recommendations with Qdrant and Mistral](https://n8n.io/workflows/2333-recipe-recommendations-with-qdrant-and-mistral/)
-
-## Tips & tricks
-
-### Accessing local files
-
-The self-hosted AI starter kit will create a shared folder (by default,
-located in the same directory) which is mounted to the n8n container and
-allows n8n to access files on disk. This folder within the n8n container is
-located at `/data/shared` -- this is the path you’ll need to use in nodes that
-interact with the local filesystem.
-
-**Nodes that interact with the local filesystem**
-
-- [Read/Write Files from Disk](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.filesreadwrite/)
-- [Local File Trigger](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.localfiletrigger/)
-- [Execute Command](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.executecommand/)
-
-## 📜 License
-
-This project is licensed under the Apache License 2.0 - see the
-[LICENSE](LICENSE) file for details.
-
-## 💬 Support
-
-Join the conversation in the [n8n Forum](https://community.n8n.io/), where you
-can:
-
-- **Share Your Work**: Show off what you’ve built with n8n and inspire others
-  in the community.
-- **Ask Questions**: Whether you’re just getting started or you’re a seasoned
-  pro, the community and our team are ready to support with any challenges.
-- **Propose Ideas**: Have an idea for a feature or improvement? Let us know!
-  We’re always eager to hear what you’d like to see next.

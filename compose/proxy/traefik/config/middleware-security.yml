@@ -1,0 +1,20 @@
+http:
+  middlewares:
+    security:
+      headers:
+        # Blocks the page from being framed at all - strongest clickjacking defense
+        frameDeny: true
+        # Legacy X-XSS-Protection header; no-op in modern browsers but harmless for older ones
+        browserXssFilter: true
+        # Stops browsers from MIME-sniffing responses away from the declared Content-Type
+        contentTypeNosniff: true
+        # Apply HSTS to subdomains too, not just the exact host
+        stsIncludeSubdomains: true
+        # Allow this domain to be submitted to browser HSTS preload lists
+        stsPreload: true
+        # Enforce HTTPS for 1 year - the minimum required for HSTS preload eligibility
+        stsSeconds: 31536000
+        # Limits what's sent in the Referer header to cross-origin requests - avoids leaking full URLs/paths
+        referrerPolicy: "strict-origin-when-cross-origin"
+        # Disables sensitive browser features by default; override per-service if an app legitimately needs one
+        permissionsPolicy: "camera=(), microphone=(), geolocation=()"

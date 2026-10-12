@@ -1,0 +1,22 @@
+---
+name: docker-socket-proxy
+services:
+  docker-socket-proxy:
+    image: linuxserver/socket-proxy:3.2.10
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - CONTAINERS=1
+      - POST=0
+      - LOG_LEVEL=notice
+    networks:
+      - traefik
+    read_only: true
+    security_opt:
+      - no-new-privileges=true
+    tmpfs:
+      - /run
+
+networks:
+  traefik:
+    external: true

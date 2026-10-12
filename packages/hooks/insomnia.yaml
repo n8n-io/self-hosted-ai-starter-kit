@@ -1,0 +1,473 @@
+type: collection.insomnia.rest/5.0
+schema_version: "5.1"
+name: N8N Backend Hook API
+meta:
+  id: wrk_179d4597c1b0470aae4a225875956964
+  created: 1774254328338
+  modified: 1774254328338
+  description: ""
+collection:
+  - name: test
+    meta:
+      id: fld_fd8ecb606e984efc9857765c924cd446
+      created: 1774254400363
+      modified: 1774257766322
+      sortKey: -1774257764167
+      description: ""
+    children:
+      - url: http://localhost:5678/webhook/test-header-encryption
+        name: prod webhook header encrypt
+        meta:
+          id: req_57bc88117ee646a89472ef5b810e6d3b
+          created: 1778695250868
+          modified: 1778709513720
+          isPrivate: false
+          description: ""
+          sortKey: -1774254481363
+        method: GET
+        headers:
+          - name: User-Agent
+            value: insomnia/12.5.0
+            description: ""
+            disabled: false
+          - name: encrypt-header-token
+            value: super-secret-header-token
+            description: ""
+            disabled: false
+        settings:
+          renderRequestBody: true
+          encodeUrl: true
+          followRedirects: global
+          cookies:
+            send: true
+            store: true
+          rebuildPath: true
+      - url: http://localhost:5678/webhook-test/test-header-encryption
+        name: test webhook header encrypt
+        meta:
+          id: req_a62f921b934f46a58e7d236b60fc4d56
+          created: 1778697286079
+          modified: 1778709536942
+          isPrivate: false
+          description: ""
+          sortKey: -1774254481313
+        method: GET
+        headers:
+          - name: User-Agent
+            value: insomnia/12.5.0
+            description: ""
+            disabled: false
+          - name: encrypt-header-token
+            value: super-secret-header-token
+            description: ""
+            disabled: false
+        settings:
+          renderRequestBody: true
+          encodeUrl: true
+          followRedirects: global
+          cookies:
+            send: true
+            store: true
+          rebuildPath: true
+  - name: owner
+    meta:
+      id: fld_dbbd24e9aa1f4c35816372fce5072ca8
+      created: 1774257712694
+      modified: 1774257768599
+      sortKey: -1774257764117
+      description: ""
+    children:
+      - url: "{{ _.url }}/owner/setup"
+        name: setup owner
+        meta:
+          id: req_cc9beaa2367242478c3200f68fc5181c
+          created: 1774260378661
+          modified: 1774282616950
+          isPrivate: false
+          description: ""
+          sortKey: -1774260382551
+        method: POST
+        body:
+          mimeType: application/json
+          text: |-
+            {
+            	"email": "owner@n8n.io",
+            	"firstName": "n8n",
+            	"lastName": "owner",
+            	"password": "ThisIsNotSecure123!"
+            }
+        headers:
+          - name: Content-Type
+            value: application/json
+          - name: User-Agent
+            value: insomnia/12.1.0
+            description: ""
+            disabled: false
+        settings:
+          renderRequestBody: true
+          encodeUrl: true
+          followRedirects: global
+          cookies:
+            send: true
+            store: true
+          rebuildPath: true
+      - url: "{{ _.url }}/owner"
+        name: get owner
+        meta:
+          id: req_00ff8c595785477380ed02245c9a59a3
+          created: 1774271367493
+          modified: 1774282249844
+          isPrivate: false
+          description: ""
+          sortKey: -1774257431907
+        method: GET
+        headers:
+          - name: User-Agent
+            value: insomnia/12.1.0
+            description: ""
+            disabled: false
+          - name: x-n8n-api-key
+            value: "{{ _['api-key'] }}"
+            description: ""
+            disabled: false
+        settings:
+          renderRequestBody: true
+          encodeUrl: true
+          followRedirects: global
+          cookies:
+            send: true
+            store: true
+          rebuildPath: true
+  - name: settings
+    meta:
+      id: fld_c56f646a06f14707a14a3ff24d9088e5
+      created: 1774257741144
+      modified: 1774966770445
+      sortKey: -1774256923234.75
+      description: ""
+    children:
+      - url: "{{ _.url }}/settings/sso"
+        name: get sso settings
+        meta:
+          id: req_3084e65a780b44d4b4524217a58bf443
+          created: 1774429139179
+          modified: 1774600182447
+          isPrivate: false
+          description: ""
+          sortKey: -1774429142518
+        method: GET
+        headers:
+          - name: User-Agent
+            value: insomnia/12.1.0
+            description: ""
+            disabled: false
+          - name: x-n8n-api-key
+            value: "{{ _['api-key'] }}"
+            description: ""
+            disabled: false
+        settings:
+          renderRequestBody: true
+          encodeUrl: true
+          followRedirects: global
+          cookies:
+            send: true
+            store: true
+          rebuildPath: true
+      - url: "{{ _.url }}/settings/sso/saml"
+        name: set sso saml settings
+        meta:
+          id: req_63728b297e6145e3ab84e0ff155a339e
+          created: 1774600178425
+          modified: 1774600411587
+          isPrivate: false
+          description: ""
+          sortKey: -1774350675425.5
+        method: POST
+        body:
+          mimeType: application/json
+          text: |-
+            {
+            	"metadataUrl": "http://www.okta.com/idpId",
+            	"loginEnabled": false
+            }
+        headers:
+          - name: Content-Type
+            value: application/json
+          - name: User-Agent
+            value: insomnia/12.1.0
+            description: ""
+            disabled: false
+          - name: x-n8n-api-key
+            value: "{{ _['api-key'] }}"
+            description: ""
+            disabled: false
+        settings:
+          renderRequestBody: true
+          encodeUrl: true
+          followRedirects: global
+          cookies:
+            send: true
+            store: true
+          rebuildPath: true
+      - url: "{{ _.url }}/settings/sso/oidc"
+        name: set sso oidc settings
+        meta:
+          id: req_4264d4cfd6d84d62bf2f13cfaf2d6705
+          created: 1774600865127
+          modified: 1774600958385
+          isPrivate: false
+          description: ""
+          sortKey: -1774389908971.75
+        method: POST
+        body:
+          mimeType: application/json
+          text: |-
+            {
+            	"authenticationContextClassReference": [],
+            	"clientId": "asd",
+            	"clientSecret": "asd",
+            	"discoveryEndpoint": "http://n8n.io/not-set",
+            	"loginEnabled": false,
+            	"prompt": "select_account"
+            }
+        headers:
+          - name: Content-Type
+            value: application/json
+          - name: User-Agent
+            value: insomnia/12.1.0
+            description: ""
+            disabled: false
+          - name: x-n8n-api-key
+            value: "{{ _['api-key'] }}"
+            description: ""
+            disabled: false
+        settings:
+          renderRequestBody: true
+          encodeUrl: true
+          followRedirects: global
+          cookies:
+            send: true
+            store: true
+          rebuildPath: true
+  - name: users
+    meta:
+      id: fld_3b33d5d43c854b5886a7a3163b70051a
+      created: 1774272187143
+      modified: 1774272194872
+      sortKey: -1774257764092
+      description: ""
+    children:
+      - name: api-keys
+        meta:
+          id: fld_6d7d2ccd860148059dd8f82c71abb984
+          created: 1774257764067
+          modified: 1774272204277
+          sortKey: -1774272204241
+          description: ""
+        children:
+          - url: "{{ _.url }}/users/{{ _['user-id'] }}/api-keys"
+            name: list api keys
+            meta:
+              id: req_22509d16f91047dda3026572658d5767
+              created: 1774272208333
+              modified: 1774874211369
+              isPrivate: false
+              description: ""
+              sortKey: -1774272208333
+            method: GET
+            headers:
+              - name: User-Agent
+                value: insomnia/12.1.0
+                description: ""
+                disabled: false
+              - name: x-n8n-api-key
+                value: "{{ _['api-key'] }}"
+                description: ""
+                disabled: false
+            settings:
+              renderRequestBody: true
+              encodeUrl: true
+              followRedirects: global
+              cookies:
+                send: true
+                store: true
+              rebuildPath: true
+          - url: "{{ _.url }}/users/{{ _['user-id'] }}/api-keys"
+            name: create api key
+            meta:
+              id: req_79379edba3bd40ff9b64d27846b749a4
+              created: 1774275734926
+              modified: 1774875310823
+              isPrivate: false
+              description: ""
+              sortKey: -1774266295442
+            method: POST
+            body:
+              mimeType: application/json
+              text: |-
+                {
+                	"label": "test api key 4",
+                	"expiresAt": "1805816227042"
+                }
+            headers:
+              - name: Content-Type
+                value: application/json
+              - name: User-Agent
+                value: insomnia/12.1.0
+                description: ""
+                disabled: false
+              - name: x-n8n-api-key
+                value: "{{ _['api-key'] }}"
+                description: ""
+                disabled: false
+            settings:
+              renderRequestBody: true
+              encodeUrl: true
+              followRedirects: global
+              cookies:
+                send: true
+                store: true
+              rebuildPath: true
+          - url: "{{ _.url }}/users/{{ _['user-id'] }}/jwt-token"
+            name: get jwt token
+            meta:
+              id: req_2611dca4de354a9b80adb0cb837c4016
+              created: 1774622752043
+              modified: 1774875429893
+              isPrivate: false
+              description: ""
+              sortKey: -1774263338996.5
+            method: GET
+            headers:
+              - name: User-Agent
+                value: insomnia/12.1.0
+                description: ""
+                disabled: false
+              - name: x-n8n-api-key
+                value: "{{ _['api-key'] }}"
+                description: ""
+                disabled: false
+            settings:
+              renderRequestBody: true
+              encodeUrl: true
+              followRedirects: global
+              cookies:
+                send: true
+                store: true
+              rebuildPath: true
+  - name: workflows
+    meta:
+      id: fld_c6ce943100ba43c287bbe1b1ef734e31
+      created: 1774966758057
+      modified: 1774966767944
+      sortKey: -1774256082377.5
+      description: ""
+    children:
+      - url: "{{ _.url }}/workflows/validate"
+        name: validate workflow
+        meta:
+          id: req_33575ba6777b4417952c4bd978662a48
+          created: 1774966787805
+          modified: 1774968285808
+          isPrivate: false
+          description: ""
+          sortKey: -1774966791267
+        method: POST
+        body:
+          mimeType: application/json
+          text: |-
+            {
+            	"workflow": {
+            		"nodes": [
+            			{
+            				"parameters": {
+            					"rule": {
+            						"interval": [
+            							{}
+            						]
+            					}
+            				},
+            				"type": "n8n-nodes-base.scheduleTrigger",
+            				"typeVersion": 1.3,
+            				"position": [
+            					0,
+            					0
+            				],
+            				"id": "e9c758be-83f1-44ba-8da1-409e345ca3bb",
+            				"name": "Schedule Trigger"
+            			},
+            			{
+            				"parameters": {
+            					"assignments": {
+            						"assignments": [
+            							{
+            								"id": "15ccc5a9-3141-41a9-8017-a52565a5f92a",
+            								"name": "foo",
+            								"value": "bar",
+            								"type": "string"
+            							}
+            						]
+            					},
+            					"options": {}
+            				},
+            				"type": "n8n-nodes-base.set",
+            				"typeVersion": 3.4,
+            				"position": [
+            					208,
+            					0
+            				],
+            				"id": "b1d05f04-70d0-437f-9f95-7e2d2226f6ae",
+            				"name": "Edit Fields"
+            			}
+            		],
+            		"connections": {
+            			"Schedule Trigger": {
+            				"main": [
+            					[
+            						{
+            							"node": "Edit Fields",
+            							"type": "main",
+            							"index": 0
+            						}
+            					]
+            				]
+            			}
+            		}
+            	}
+            }
+        headers:
+          - name: Content-Type
+            value: application/json
+          - name: User-Agent
+            value: insomnia/12.1.0
+            description: ""
+            disabled: false
+          - name: x-n8n-api-key
+            value: "{{ _['api-key'] }}"
+            description: ""
+            disabled: false
+        settings:
+          renderRequestBody: true
+          encodeUrl: true
+          followRedirects: global
+          cookies:
+            send: true
+            store: true
+          rebuildPath: true
+cookieJar:
+  name: Default Jar
+  meta:
+    id: jar_44e60e75179b8a5271096fd7543266a5abcd422e
+    created: 1774254328340
+    modified: 1774254328340
+environments:
+  name: Base Environment
+  meta:
+    id: env_44e60e75179b8a5271096fd7543266a5abcd422e
+    created: 1774254328339
+    modified: 1774874194134
+    isPrivate: false
+  data:
+    url: http://localhost:5678/api-custom/v1
+    api-key: REDACTED
+    user-id: 104c0668-84fe-4751-9cc3-85a214e0a5f8

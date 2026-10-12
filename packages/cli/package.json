@@ -1,0 +1,44 @@
+{
+  "name": "n8n-starter",
+  "type": "module",
+  "version": "0.0.0",
+  "description": "A starter cli for the n8n self-hosted-ai-starter-kit docker repository.",
+  "author": "n8n",
+  "license": "MIT",
+  "homepage": "https://github.com/n8n-io/self-hosted-ai-starter-kit/#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/n8n-io/self-hosted-ai-starter-kit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/n8n-io/self-hosted-ai-starter-kit/issues"
+  },
+  "bin": {
+    "n8n-starter": "./dist/index.mjs"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "start": "node dist/index.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "release": "bumpp",
+    "prepublishOnly": "pnpm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "bumpp": "^11.1.0",
+    "tsdown": "^0.22.5",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "@bomb.sh/args": "^0.3.1",
+    "@clack/prompts": "^1.8.1",
+    "portless": "^0.15.6",
+    "zod": "^4.6.5"
+  }
+}

@@ -1,0 +1,31 @@
+name: vllm
+services:
+  vllm-nvidia-nemotron-3-embed:
+    image: vllm/vllm-openai:${VLLM_VERSION:?}
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+    networks:
+      - n8n
+    command:
+      - --model=nvidia/Nemotron-3-Embed-8B-BF16
+      - --served-model-name=nvidia/Nemotron-3-Embed-8B-BF16
+      # No --task flag: this vLLM version rejects it outright, and the model
+      # is already packaged as a sentence-transformers embedding model, so
+      # vLLM should auto-detect its type from the model's own config.
+      - --gpu-memory-utilization=0.15
+      - --max-model-len=8192
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    profiles:
+      - nemotron-3-embed
+    shm_size: "8gb"
+
+networks:
+  n8n:
+    external: true

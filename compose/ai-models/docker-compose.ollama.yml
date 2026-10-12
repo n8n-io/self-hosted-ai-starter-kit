@@ -1,0 +1,72 @@
+x-init-ollama: &init-ollama
+  image: ollama/ollama:${OLLAMA_VERSION:?}
+  networks: [ "n8n" ]
+  volumes:
+    - ollama_storage:/root/.ollama
+  entrypoint: /bin/sh
+  environment:
+    - OLLAMA_HOST=ollama:11434
+  command:
+    - "-c"
+    - "sleep 3; ollama pull llama3.2"
+x-ollama: &service-ollama
+  image: ollama/ollama:${OLLAMA_VERSION:?}
+  container_name: ollama
+  networks: [ "n8n" ]
+  restart: unless-stopped
+  ports:
+    - 11434:11434
+  volumes:
+    - ollama_storage:/root/.ollama
+
+# Profiles match AI_RUNTIME (cpu-x86-64 | cpu-arm64 | gpu-nvidia | gpu-amd)
+name: ollama
+services:
+  ollama-cpu:
+    <<: *service-ollama
+    profiles: [ "cpu-x86-64", "cpu-arm64" ]
+
+  ollama-gpu-amd:
+    image: ollama/ollama:${OLLAMA_VERSION:?}-rocm
+    <<: *service-ollama
+    devices:
+      - "/dev/kfd"
+      - "/dev/dri"
+    profiles: [ "gpu-amd" ]
+
+  ollama-gpu-nvidia:
+    <<: *service-ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    profiles: [ "dgx-spark", "gpu-nvidia" ]
+
+  ollama-pull-llama-cpu:
+    depends_on:
+      - ollama-cpu
+    <<: *init-ollama
+    profiles: [ "cpu-x86-64", "cpu-arm64" ]
+
+  ollama-pull-llama-gpu-amd:
+    image: ollama/ollama:${OLLAMA_VERSION:?}-rocm
+    depends_on:
+      - ollama-gpu-amd
+    <<: *init-ollama
+    profiles: [ "gpu-amd" ]
+
+  ollama-pull-llama-gpu-nvidia:
+    depends_on:
+      - ollama-gpu-nvidia
+    <<: *init-ollama
+    profiles: [ "dgx-spark", "gpu-nvidia" ]
+
+networks:
+  n8n:
+    external: true
+
+volumes:
+  ollama_storage:

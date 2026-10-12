@@ -1,0 +1,20 @@
+name: qdrant
+services:
+  qdrant:
+    image: qdrant/qdrant:${QDRANT_VERSION:?}
+    container_name: qdrant
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    networks:
+      - n8n
+    restart: unless-stopped
+    hostname: qdrant
+
+
+networks:
+  n8n:
+    external: true
+
+volumes:
+  qdrant_storage:
+

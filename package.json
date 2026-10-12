@@ -1,0 +1,26 @@
+{
+  "name": "self-hosted-ai-starter-kit",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "setup": "node packages/cli/dist/index.mjs setup",
+    "config": "node packages/cli/dist/index.mjs config",
+    "dev": "tilt up",
+    "build": "pnpm -r run build",
+    "test": "pnpm -r run test",
+    "lint": "dclint ./compose --recursive",
+    "lint:fix": "dclint ./compose --fix --recursive",
+    "lint:help": "dclint --help",
+    "reset": "node packages/cli/dist/index.mjs reset"
+  },
+  "keywords": [],
+  "author": "n8n",
+  "license": "ISC",
+  "packageManager": "pnpm@10.32.1",
+  "devDependencies": {
+    "dclint": "^3.1.0",
+    "tsdown": "^0.23.0",
+    "typescript": "^7.0.2"
+  }
+}
