@@ -1,0 +1,52 @@
+name: garage
+services:
+  garage:
+    image: dxflrs/garage:v2.1.0
+    volumes:
+      - ./garage.toml:/etc/garage.toml
+      - ./.volumes/meta:/var/lib/garage/meta
+      - ./.volumes/data:/var/lib/garage/data
+    networks:
+      - traefik
+      - garage
+    # ports:
+    #   - '3900:3900'
+    #   - '3901:3901'
+    #   - '3902:3902'
+    #   - '3903:3903'
+    labels:
+      - traefik.enable=true
+      # S3 API
+      - traefik.http.services.garage-s3.loadbalancer.server.port=3900
+      - traefik.http.routers.garage-s3.service=garage-s3
+      - traefik.http.routers.garage-s3.rule=Host(`s3.${DOMAIN:?}`)
+      - traefik.http.routers.garage-s3.entrypoints=websecure
+      # WEB API for static bucket file serving
+      - traefik.http.services.garage-web.loadbalancer.server.port=3902
+      - traefik.http.routers.garage-web.service=garage-web
+      - traefik.http.routers.garage-web.rule=Host(`s3web.${DOMAIN:?}`)
+      - traefik.http.routers.garage-web.entrypoints=websecure
+
+  garage-webui:
+    image: khairul169/garage-webui:1.1.0
+    volumes:
+      - ./garage.toml:/etc/garage.toml:ro
+    environment:
+      API_BASE_URL: "http://garage:3903"
+      S3_ENDPOINT_URL: "http://garage:3900"
+    networks:
+      - traefik
+      - garage
+    labels:
+      - traefik.enable=true
+      # S3 WEB UI
+      - traefik.http.services.garage-webui.loadbalancer.server.port=3909
+      - traefik.http.routers.garage-webui.service=garage-webui
+      - traefik.http.routers.garage-webui.rule=Host(`s3ui.${DOMAIN:?}`)
+      - traefik.http.routers.garage-webui.entrypoints=websecure
+
+networks:
+  traefik:
+    external: true
+  garage:
+    external: true

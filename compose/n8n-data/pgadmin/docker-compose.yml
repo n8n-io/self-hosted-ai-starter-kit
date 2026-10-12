@@ -1,0 +1,27 @@
+---
+name: pgadmin
+services:
+  pgadmin:
+    image: dpage/pgadmin4:9.11.0
+    # depends_on:
+    #   postgres:
+    #     condition: service_healthy
+    volumes:
+      - ./.volumes/data:/var/lib/pgadmin
+      - ./server.json:/pgadmin4/servers.json
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+    networks:
+      - traefik
+      - postgres
+    labels:
+      - traefik.enable=true
+
+networks:
+  traefik:
+    external: true
+  postgres:
+    external: true

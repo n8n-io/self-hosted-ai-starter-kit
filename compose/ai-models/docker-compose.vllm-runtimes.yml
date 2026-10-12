@@ -1,0 +1,111 @@
+# Run one vLLM model on different AI runtimes. Exactly one service starts,
+# selected by AI_RUNTIME (cpu-x86-64 | cpu-arm64 | gpu-nvidia | gpu-amd) from
+# the root .env.
+#
+# Compose cannot interpolate variables inside `profiles:`, so the variable is
+# handed to Compose through COMPOSE_PROFILES instead:
+#
+#   COMPOSE_PROFILES=$AI_RUNTIME docker compose -f docker-compose.vllm-runtimes.yml up
+#
+# cpu-arm64 also covers Apple silicon Macs: Docker on macOS cannot reach the
+# Metal GPU, so it runs on the CPU. For GPU speed on a Mac, run vLLM-Metal
+# natively on the host instead.
+
+x-vllm: &vllm
+  restart: unless-stopped
+  networks:
+    - n8n
+  ports:
+    - ${VLLM_PORT:-8000}:8000
+  volumes:
+    - hf_cache:/root/.cache/huggingface
+  environment:
+    - HF_TOKEN=${HF_TOKEN:-}
+  command:
+    - --model=${VLLM_MODEL:-Qwen/Qwen3-0.6B}
+    - --served-model-name=${VLLM_MODEL:-Qwen/Qwen3-0.6B}
+    - --max-model-len=${VLLM_MAX_MODEL_LEN:-4096}
+
+x-vllm-cpu: &vllm-cpu
+  <<: *vllm
+  privileged: true
+  shm_size: 4gb
+  environment:
+    - HF_TOKEN=${HF_TOKEN:-}
+    - VLLM_CPU_KVCACHE_SPACE=${VLLM_CPU_KVCACHE_SPACE:-4}
+  command:
+    - --model=${VLLM_MODEL:-Qwen/Qwen3-0.6B}
+    - --served-model-name=${VLLM_MODEL:-Qwen/Qwen3-0.6B}
+    - --max-model-len=${VLLM_MAX_MODEL_LEN:-4096}
+    - --dtype=bfloat16
+
+name: vllm-runtime
+services:
+  vllm-cpu-arm64:
+    image: vllm/vllm-openai-cpu:${VLLM_VERSION:?}-arm64
+    <<: *vllm-cpu
+    profiles: [ "cpu-arm64" ]
+  vllm-cpu-x86-64:
+    image: vllm/vllm-openai-cpu:${VLLM_VERSION:?}-x86_64
+    <<: *vllm-cpu
+    profiles: [ "cpu-x86-64" ]
+
+  # NVIDIA DGX Spark: arm64 Grace CPU + Blackwell GB10 GPU with 128 GB of unified memory.
+  # The vllm/vllm-openai image is multi-arch (arm64 builds use CUDA 13). Memory is shared with the host,
+  # so vLLM only claims a fraction of it (VLLM_GPU_MEM_UTIL) instead of its 0.9 default.
+  vllm-dgx-spark:
+    image: vllm/vllm-openai:${VLLM_VERSION:?}
+    command:
+      - --model=${VLLM_MODEL:-Qwen/Qwen3-0.6B}
+      - --served-model-name=${VLLM_MODEL:-Qwen/Qwen3-0.6B}
+      - --max-model-len=${VLLM_MAX_MODEL_LEN:-4096}
+      - --gpu-memory-utilization=${VLLM_GPU_MEM_UTIL:-0.3}
+    <<: *vllm
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    ipc: host
+    platform: linux/arm64
+    profiles: [ "dgx-spark" ]
+    ulimits:
+      memlock: -1
+      stack: 67108864
+
+  vllm-gpu-amd:
+    image: vllm/vllm-openai-rocm:${VLLM_VERSION:?}
+    <<: *vllm
+    cap_add:
+      - SYS_PTRACE
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+    ipc: host
+    profiles: [ "gpu-amd" ]
+    security_opt:
+      - seccomp=unconfined
+
+  vllm-gpu-nvidia:
+    image: vllm/vllm-openai:${VLLM_VERSION:?}
+    <<: *vllm
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    ipc: host
+    profiles: [ "gpu-nvidia" ]
+networks:
+  n8n:
+    external: true
+
+volumes:
+  hf_cache:
+

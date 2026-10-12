@@ -1,0 +1,47 @@
+---
+name: vault
+services:
+  vault:
+    image: hashicorp/vault:1.21
+    volumes:
+      - ./.volumes/data:/vault/data
+      - ./vault.hcl:/vault/config/vault.hcl
+      - ./vault-init-n8n.sh:/home/vault/vault-init-n8n.sh
+    environment:
+      - VAULT_ADDR=http://0.0.0.0:8200
+    networks:
+      - traefik
+      - vault
+    command: vault server -config=/vault/config/vault.hcl
+    healthcheck:
+      test: [ "CMD-SHELL", 'vault status -format=json 2>/dev/null | grep -q ''"sealed": false''' ]
+      interval: 10s
+      timeout: 5s
+      retries: 1000
+      start_period: 20s
+    labels:
+      - traefik.enable=true
+    cap_add:
+      - IPC_LOCK
+
+  vault-unseal:
+    image: ghcr.io/lrstanley/vault-unseal:0.7
+    depends_on:
+      - vault
+    environment:
+      - NODES=http://vault:8200
+      - TOKENS=${VAULT_UNSEAL_KEY:-}
+      - ALLOW_SINGLE_NODE=true
+      - TLS_SKIP_VERIFY=true
+      - EMAIL_ENABLED=false
+      - CHECK_INTERVAL=3s
+      - MAX_CHECK_INTERVAL=10s
+      - LOG_LEVEL=warn
+    networks:
+      - vault
+
+networks:
+  traefik:
+    external: true
+  vault:
+    external: true

@@ -1,0 +1,93 @@
+# yaml-language-server: $schema=https://www.schemastore.org/traefik-v3.json
+
+# Global configuration
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
+# Experimental features
+experimental:
+  fastProxy: {}
+
+# Ping configuration
+ping:
+  entryPoint: "ping"
+
+# Logging
+log:
+  level: DEBUG
+  format: common
+  filePath: /var/log/traefik/traefik.log
+
+# Access logs
+accessLog:
+  addInternals: true
+  format: common
+  filePath: /var/log/traefik/access.log
+
+# API and Dashboard
+api:
+  dashboard: true
+  insecure: false
+
+# Metrics
+metrics:
+  prometheus:
+    entryPoint: metrics
+    addRoutersLabels: true
+
+# Entry points
+entryPoints:
+  ping:
+    address: ":8082"
+
+  metrics:
+    address: ":9090"
+
+  web:
+    address: ":80/tcp"
+    http:
+      encodedCharacters:
+        allowEncodedSlash: true
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+
+  websecure:
+    address: ":443/tcp"
+    asDefault: true
+    http:
+      encodedCharacters:
+        allowEncodedSlash: true
+      tls:
+        options: default
+      middlewares:
+        - default@file
+    #http3: {}
+
+# Server transport
+serversTransport:
+  insecureSkipVerify: true
+
+# Providers
+providers:
+  file:
+    directory: /config/
+    watch: true
+
+  docker:
+    endpoint: "tcp://docker-socket-proxy:2375"
+    exposedByDefault: false
+    network: traefik
+    watch: true
+    defaultRule: Host(`{{ index .Labels "com.docker.compose.service"}}.{{ env "DOMAIN" }}`)
+
+  # swarm:
+  #   endpoint: "tcp://docker-socket-proxy:2375"
+  #   exposedByDefault: false
+  #   network: traefik-swarm
+  #   watch: true
+  #   defaultRule: Host(`{{ ( .Name | trimPrefix (normalize (index .Labels "com.docker.stack.namespace") ) | trimPrefix "-" ) }}.{{ env "DOMAIN" }}`)
+
+  

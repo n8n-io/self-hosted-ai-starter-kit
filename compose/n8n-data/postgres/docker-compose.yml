@@ -1,0 +1,25 @@
+name: postgres
+services:
+  postgres:
+    image: postgres:17
+    volumes:
+      - ./.volumes/postgres:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER
+      - POSTGRES_PASSWORD
+      - POSTGRES_DB
+    ports:
+      - '0.0.0.0:5432:5432'
+    networks:
+      - postgres
+    restart: on-failure
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    hostname: postgres
+
+networks:
+  postgres:
+    external: true

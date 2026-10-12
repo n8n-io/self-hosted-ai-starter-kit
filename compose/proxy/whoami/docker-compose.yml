@@ -1,0 +1,22 @@
+name: whoami
+services:
+  whoami:
+    image: traefik/whoami:v1.11.0
+    labels:
+      - traefik.enable=true
+      # - traefik.docker.network=traefik
+      # - traefik.http.services.whoami.loadbalancer.server.port=80
+      # - traefik.http.routers.whoami-http.service=whoami
+      # - traefik.http.routers.whoami-http.rule=Host(`whoami.${DOMAIN:?}`)
+      # - traefik.http.routers.whoami-http.entrypoints=web
+      # - traefik.http.routers.whoami-https.service=whoami
+      # - traefik.http.routers.whoami-https.rule=Host(`whoami.${DOMAIN:?}`)
+      # - traefik.http.routers.whoami-https.entrypoints=websecure
+      # - traefik.http.routers.whoami-https.tls=true
+      # - traefik.http.routers.whoami-https.tls.certresolver=cloudflare
+    deploy:
+      replicas: 1
+
+networks:
+  traefik:
+    external: true

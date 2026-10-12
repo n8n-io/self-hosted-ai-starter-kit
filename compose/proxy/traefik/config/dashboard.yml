@@ -1,0 +1,8 @@
+http:
+  routers:
+    traefik-https:
+      entrypoints: websecure
+      rule: Host(`traefik.{{ env "DOMAIN" }}`)
+      service: api@internal
+      middlewares:
+        - dashboard-path@file

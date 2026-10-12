@@ -1,0 +1,30 @@
+---
+name: traefik
+services:
+  traefik:
+    image: traefik:v3.6.6
+    volumes:
+      - ./traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./config/:/config/:ro
+      - ${HOME}/.certs/dev/cert.pem:/certs/cert.pem:ro
+      - ${HOME}/.certs/dev/key.pem:/certs/key.pem:ro
+      # - $HOME/.portless/server.pem:/certs/cert.pem:ro
+      # - $HOME/.portless/server-key.pem:/certs/key.pem:ro
+    environment:
+      - TZ=${TZ:-Europe/Berlin}
+      - DOMAIN=${DOMAIN:?}
+    ports:
+      - '127.0.0.1:80:80'
+      - '127.0.0.1:443:443'
+    networks:
+      - traefik
+    healthcheck:
+      test: [ "CMD", "wget", "--spider", "-q", "http://127.0.0.1:8082/ping" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  traefik:
+    external: true

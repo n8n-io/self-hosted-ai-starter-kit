@@ -1,0 +1,20 @@
+name: redis
+services:
+  redis:
+    image: redis:8-alpine
+    volumes:
+      - ./.volumes/data:/data
+    ports:
+      - '0.0.0.0:6379:6379'
+    networks:
+      - redis
+    restart: on-failure
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+networks:
+  redis:
+    external: true

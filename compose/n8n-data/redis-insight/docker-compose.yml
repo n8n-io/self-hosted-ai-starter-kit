@@ -1,0 +1,22 @@
+name: redisinsight
+services:
+  redisinsight:
+    image: redis/redisinsight:3.0.2
+    volumes:
+      - ./.volumes/data:/data
+    environment:
+      RI_REDIS_HOST: redis
+      RI_REDIS_PORT: 6379
+      RI_REDIS_ALIAS: redis
+      RI_LOG_LEVEL: info
+    networks:
+      - traefik
+      - redis
+    labels:
+      - traefik.enable=true
+
+networks:
+  traefik:
+    external: true
+  redis:
+    external: true
