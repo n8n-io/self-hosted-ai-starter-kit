@@ -11,6 +11,35 @@ services:
     depends_on:
       sandbox-api:
         condition: service_healthy
+      ollama-adapter:
+        condition: service_healthy
+
+  # Interner OpenAI-Kompatibilitaetsadapter fuer mehrstufige Ollama-Tool-Calls.
+  # Er repariert nur Nachrichten-Metadaten und protokolliert keine Inhalte.
+  ollama-adapter:
+    image: node:22-alpine
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    command: ["node", "/app/server.mjs"]
+    environment:
+      PORT: "11435"
+      OLLAMA_BASE_URL: "http://host.docker.internal:11434"
+      REASONING_EFFORT: "low"
+    volumes:
+      - ./ollama-adapter/server.mjs:/app/server.mjs:ro
+    tmpfs:
+      - /tmp
+    networks: ["demo"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:11435/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
 
   qdrant:
     ports: !override
