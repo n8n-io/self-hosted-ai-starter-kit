@@ -33,11 +33,12 @@ function messageToolCalls(message) {
 
 export function sanitizeMessages(messages, cache = toolCallCache) {
   if (!Array.isArray(messages)) {
-    return { messages, repaired: 0, dropped: 0 };
+    return { messages, repaired: 0, canonicalized: 0, dropped: 0 };
   }
 
   const output = [];
   let repaired = 0;
+  let canonicalized = 0;
   let dropped = 0;
 
   for (const original of messages) {
@@ -69,8 +70,18 @@ export function sanitizeMessages(messages, cache = toolCallCache) {
     const previousCalls = messageToolCalls(previous);
     const previousMatch = previousCalls.find((call) => call.id === callId);
 
-    if (previousMatch && previousCalls.length === 1) {
+    if (previousMatch) {
+      const canonicalAssistant = {
+        role: 'assistant',
+        content: null,
+        tool_calls: [previousMatch],
+      };
+      if (previous.reasoning) canonicalAssistant.reasoning = previous.reasoning;
+
+      output[output.length - 1] = canonicalAssistant;
+      message.name = previousMatch.function.name;
       output.push(message);
+      canonicalized += 1;
       continue;
     }
 
@@ -94,11 +105,52 @@ export function sanitizeMessages(messages, cache = toolCallCache) {
       output.push(syntheticAssistant);
     }
 
+    message.name = matchingCall.function.name;
     output.push(message);
     repaired += 1;
   }
 
-  return { messages: output, repaired, dropped };
+  return { messages: output, repaired, canonicalized, dropped };
+}
+
+function stringifyToolContent(content) {
+  if (typeof content === 'string') return content;
+  return JSON.stringify(content ?? null);
+}
+
+export function flattenToolHistory(messages, cache = toolCallCache) {
+  if (!Array.isArray(messages)) {
+    return { messages, flattened: 0 };
+  }
+
+  const output = [];
+  let flattened = 0;
+
+  for (const message of messages) {
+    if (message.role === 'assistant' && messageToolCalls(message).length > 0) {
+      for (const call of messageToolCalls(message)) cache.set(call.id, call);
+
+      if (typeof message.content === 'string' && message.content.trim()) {
+        output.push({ role: 'assistant', content: message.content });
+      }
+      continue;
+    }
+
+    if (message.role === 'tool') {
+      const call = cache.get(message.tool_call_id);
+      const name = message.name || call?.function?.name || 'unknown_tool';
+      output.push({
+        role: 'user',
+        content: `[Tool result: ${name}]\n${stringifyToolContent(message.content)}`,
+      });
+      flattened += 1;
+      continue;
+    }
+
+    output.push(message);
+  }
+
+  return { messages: output, flattened };
 }
 
 function cacheToolCallsFromJson(payload, cache = toolCallCache) {
@@ -225,16 +277,34 @@ export function startServer({
       ) {
         const payload = JSON.parse(rawBody.toString('utf8'));
         const sanitized = sanitizeMessages(payload.messages);
-        payload.messages = sanitized.messages;
+        const flattened = flattenToolHistory(sanitized.messages);
+        payload.messages = flattened.messages;
         payload.reasoning_effort = reasoningEffort;
         body = Buffer.from(JSON.stringify(payload));
 
         console.log(
           JSON.stringify({
             path: request.url,
-            messages: payload.messages.map((message) => message.role),
+            messages: payload.messages.map((message) => ({
+              role: message.role,
+              contentType:
+                message.content === null
+                  ? 'null'
+                  : Array.isArray(message.content)
+                    ? 'array'
+                    : typeof message.content,
+              reasoning: Boolean(message.reasoning),
+              toolCalls: messageToolCalls(message).map((call) => ({
+                id: call.id,
+                name: call.function.name,
+              })),
+              toolCallId: message.tool_call_id,
+              name: message.name,
+            })),
             repaired: sanitized.repaired,
+            canonicalized: sanitized.canonicalized,
             dropped: sanitized.dropped,
+            flattened: flattened.flattened,
             reasoningEffort,
           }),
         );
