@@ -1,0 +1,9 @@
+# Emergency rollback for the preserved PostgreSQL 16 volume.
+# Use only as the final override file and never combine with `down -v`.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      PGDATA: /var/lib/postgresql/data
+    volumes: !override
+      - postgres_storage:/var/lib/postgresql/data

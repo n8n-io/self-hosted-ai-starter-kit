@@ -37,6 +37,11 @@ Engineering world, handles large amounts of data safely.
 
 ## Installation
 
+> [!NOTE]
+> This fork's pinned local stack, health checks, backup procedure, and
+> PostgreSQL rollback steps are documented in
+> [`docs/local-operations.md`](docs/local-operations.md).
+
 ### Cloning the Repository
 
 ```bash
