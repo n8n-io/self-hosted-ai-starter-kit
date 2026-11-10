@@ -16,6 +16,27 @@ PostgreSQL have no published host ports.
 The native Ollama service runs on the Mac at `http://localhost:11434`.
 Containers reach it through `host.docker.internal`.
 
+## Create the Assistant model alias
+
+Download the trusted `gpt-oss-20b-MXFP4.gguf` file and verify its SHA-256:
+
+`27cd6c432c7672cb812a92f611cf3ba7bbc35928262bb1e1253ff4ee6ae35901`
+
+Create the exact alias referenced by `.env`:
+
+```bash
+cat > /tmp/Modelfile.gpt-oss-n8n <<'EOF'
+FROM "/absolute/path/to/gpt-oss-20b-MXFP4.gguf"
+PARAMETER num_ctx 131072
+EOF
+
+ollama create gpt-oss-20b-n8n -f /tmp/Modelfile.gpt-oss-n8n
+ollama show gpt-oss-20b-n8n
+```
+
+`ollama show` must report `context length 131072` and `num_ctx 131072`.
+After creation, Ollama owns a local copy and no longer needs the source GGUF.
+
 ## Everyday commands
 
 ```bash
@@ -83,7 +104,7 @@ stamp=$(date +%Y%m%d-%H%M%S)
 backup="$HOME/Library/Application Support/n8n-backups/$stamp"
 mkdir -p "$backup"
 
-docker compose stop n8n n8n-runners
+docker compose stop n8n n8n-runners qdrant
 
 docker compose exec -T postgres sh -eu -c \
   'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' \
@@ -94,10 +115,25 @@ docker compose exec -T postgres sh -eu -c \
   > "$backup/globals.sql"
 
 cp .env "$backup/runtime.env"
+
+# N8N_DEFAULT_BINARY_DATA_MODE=filesystem stores binary workflow data here.
+docker run --rm \
+  -v self-hosted-ai-starter-kit_n8n_storage:/source:ro \
+  -v "$backup":/backup \
+  postgres:18.6-alpine3.24 \
+  tar -C /source -czf /backup/n8n_storage.tgz .
+
+# Qdrant vectors are separate from PostgreSQL and need their own archive.
+docker run --rm \
+  -v self-hosted-ai-starter-kit_qdrant_storage:/source:ro \
+  -v "$backup":/backup \
+  postgres:18.6-alpine3.24 \
+  tar -C /source -czf /backup/qdrant_storage.tgz .
+
 chmod 600 "$backup"/*
 shasum -a 256 "$backup"/* > "$backup/SHA256SUMS"
 
-docker compose up -d n8n n8n-runners
+docker compose up -d n8n n8n-runners qdrant
 ```
 
 Verify a custom-format dump before relying on it:
@@ -106,6 +142,10 @@ Verify a custom-format dump before relying on it:
 docker run --rm -i postgres:18.6-alpine3.24 \
   pg_restore --list < "$backup/n8n.dump" > "$backup/restore.list"
 ```
+
+A complete restore also requires `n8n_storage.tgz` and
+`qdrant_storage.tgz`. Restore them only while n8n and Qdrant are stopped,
+into empty replacement volumes; never extract over running volumes.
 
 ## PostgreSQL 18 layout
 
@@ -143,7 +183,17 @@ docker compose \
   up -d n8n n8n-runners
 ```
 
-Confirm `SHOW server_version` reports PostgreSQL 16 before reopening n8n.
+Confirm PostgreSQL 16 before reopening n8n:
+
+```bash
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.override.yml \
+  -f docker-compose.postgres16-rollback.yml \
+  exec -T postgres sh -eu -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SHOW server_version;"'
+```
+
 Return to PostgreSQL 18 only after stopping n8n and PostgreSQL again.
 
 ## Workflow verification
