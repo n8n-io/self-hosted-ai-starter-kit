@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { once } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import http from 'node:http';
 import test from 'node:test';
 
@@ -9,6 +9,7 @@ import {
   sanitizeMessages,
   startServer,
   ToolCallCache,
+  writeWithBackpressure,
 } from './server.mjs';
 
 const call = {
@@ -260,15 +261,30 @@ test('forwards requests without a messages array unchanged', async (t) => {
   assert.deepEqual(received, requestBody);
 });
 
+test('stops waiting for drain when the client connection closes', async () => {
+  const response = new EventEmitter();
+  response.destroyed = false;
+  response.write = () => false;
+
+  const write = writeWithBackpressure(response, Buffer.from('chunk'));
+  response.destroyed = true;
+  response.emit('close');
+
+  assert.equal(await write, false);
+});
+
 test('streams SSE chunks without buffering the complete response', async (t) => {
   let upstreamEnded = false;
-  const upstream = http.createServer((_request, response) => {
+  let releaseUpstream;
+  const upstreamMayFinish = new Promise((resolve) => {
+    releaseUpstream = resolve;
+  });
+  const upstream = http.createServer(async (_request, response) => {
     response.writeHead(200, { 'content-type': 'text/event-stream' });
-    response.write('data: {"choices":[{"delta":{"content":"first"}}]}\\n\\n');
-    setTimeout(() => {
-      response.end('data: [DONE]\\n\\n');
-      upstreamEnded = true;
-    }, 75);
+    response.write('data: {"choices":[{"delta":{"content":"first"}}]}\n\n');
+    await upstreamMayFinish;
+    response.end('data: [DONE]\n\n');
+    upstreamEnded = true;
   });
   t.after(() => close(upstream));
   upstream.listen(0, '127.0.0.1');
@@ -293,6 +309,7 @@ test('streams SSE chunks without buffering the complete response', async (t) => 
   assert.equal(upstreamEnded, false);
   assert.match(new TextDecoder().decode(firstChunk.value), /first/);
 
+  releaseUpstream();
   while (!(await reader.read()).done) {
     // Drain the remaining stream so the adapter can finish cleanly.
   }

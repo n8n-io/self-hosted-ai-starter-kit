@@ -1,4 +1,3 @@
-import { once } from 'node:events';
 import http from 'node:http';
 import { pathToFileURL } from 'node:url';
 
@@ -329,16 +328,24 @@ function responseHeaders(headers) {
   return forwarded;
 }
 
-async function writeWithBackpressure(response, chunk) {
+export async function writeWithBackpressure(response, chunk) {
   if (response.destroyed) return false;
   if (response.write(chunk)) return true;
 
-  try {
-    await once(response, 'drain');
-    return !response.destroyed;
-  } catch {
-    return false;
-  }
+  return await new Promise((resolve) => {
+    const finish = (writable) => {
+      response.off('drain', onDrain);
+      response.off('close', onClose);
+      response.off('error', onClose);
+      resolve(writable);
+    };
+    const onDrain = () => finish(!response.destroyed);
+    const onClose = () => finish(false);
+
+    response.once('drain', onDrain);
+    response.once('close', onClose);
+    response.once('error', onClose);
+  });
 }
 
 async function forwardUpstreamResponse(upstreamResponse, response) {

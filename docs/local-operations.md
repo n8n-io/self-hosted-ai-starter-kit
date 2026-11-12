@@ -22,6 +22,14 @@ Download the trusted `gpt-oss-20b-MXFP4.gguf` file and verify its SHA-256:
 
 `27cd6c432c7672cb812a92f611cf3ba7bbc35928262bb1e1253ff4ee6ae35901`
 
+Verify the downloaded file before importing it:
+
+```bash
+shasum -a 256 "/absolute/path/to/gpt-oss-20b-MXFP4.gguf"
+```
+
+The first field in the output must exactly match the SHA-256 above.
+
 Create the exact alias referenced by `.env`:
 
 ```bash
@@ -146,6 +154,30 @@ docker run --rm -i postgres:18.6-alpine3.24 \
 A complete restore also requires `n8n_storage.tgz` and
 `qdrant_storage.tgz`. Restore them only while n8n and Qdrant are stopped,
 into empty replacement volumes; never extract over running volumes.
+
+```bash
+backup="/absolute/path/to/the/backup-directory"
+
+docker compose stop n8n n8n-runners qdrant
+
+# Run these create commands only when the original volumes are absent.
+docker volume create self-hosted-ai-starter-kit_n8n_storage
+docker volume create self-hosted-ai-starter-kit_qdrant_storage
+
+docker run --rm \
+  -v self-hosted-ai-starter-kit_n8n_storage:/target \
+  -v "$backup":/backup:ro \
+  postgres:18.6-alpine3.24 \
+  tar -C /target -xzf /backup/n8n_storage.tgz
+
+docker run --rm \
+  -v self-hosted-ai-starter-kit_qdrant_storage:/target \
+  -v "$backup":/backup:ro \
+  postgres:18.6-alpine3.24 \
+  tar -C /target -xzf /backup/qdrant_storage.tgz
+
+docker compose up -d n8n n8n-runners qdrant
+```
 
 ## PostgreSQL 18 layout
 
