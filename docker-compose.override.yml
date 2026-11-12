@@ -1,0 +1,162 @@
+# Bindet die Dienste nur an localhost. Ohne das lauschen n8n und Qdrant auf
+# allen Schnittstellen und waeren im Firmennetz erreichbar.
+# !override ersetzt die Portliste, statt sie zu ergaenzen.
+volumes:
+  sandbox-tls:
+  postgres18_storage:
+
+services:
+  postgres:
+    image: postgres:${POSTGRES_VERSION}
+    environment:
+      PGDATA: /var/lib/postgresql/18/docker
+    volumes: !override
+      - postgres18_storage:/var/lib/postgresql
+
+  n8n:
+    image: n8nio/n8n:${N8N_VERSION}
+    ports: !override
+      - "127.0.0.1:5678:5678"
+    environment:
+      N8N_RUNNERS_MODE: external
+      N8N_RUNNERS_BROKER_LISTEN_ADDRESS: 0.0.0.0
+      N8N_RUNNERS_AUTH_TOKEN: ${N8N_RUNNERS_AUTH_TOKEN}
+      N8N_NATIVE_PYTHON_RUNNER: "true"
+    depends_on:
+      sandbox-api:
+        condition: service_healthy
+      ollama-adapter:
+        condition: service_healthy
+
+  n8n-import:
+    image: n8nio/n8n:${N8N_VERSION}
+
+  # Fuehrt JavaScript- und Python-Code ausserhalb des n8n-Hauptprozesses aus.
+  # Der Broker-Port bleibt ausschliesslich im internen Compose-Netz.
+  n8n-runners:
+    image: n8nio/runners:${N8N_VERSION}
+    restart: unless-stopped
+    environment:
+      N8N_RUNNERS_TASK_BROKER_URI: http://n8n:5679
+      N8N_RUNNERS_AUTH_TOKEN: ${N8N_RUNNERS_AUTH_TOKEN}
+      N8N_RUNNERS_AUTO_SHUTDOWN_TIMEOUT: "15"
+    networks: ["demo"]
+    depends_on:
+      n8n:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5680/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  # Interner OpenAI-Kompatibilitaetsadapter fuer mehrstufige Ollama-Tool-Calls.
+  # Er repariert nur Nachrichten-Metadaten und protokolliert keine Inhalte.
+  ollama-adapter:
+    image: node:22-alpine@sha256:0e1754758c2df4cfa3e68d59e2e1b7374bb7fd9ea6328eaaacf15cc934af8202
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    command: ["node", "/app/server.mjs"]
+    environment:
+      PORT: "11435"
+      OLLAMA_BASE_URL: "http://host.docker.internal:11434"
+      REASONING_EFFORT: "low"
+    volumes:
+      - ./ollama-adapter/server.mjs:/app/server.mjs:ro
+    tmpfs:
+      - /tmp
+    networks: ["demo"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:11435/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  qdrant:
+    image: qdrant/qdrant:v1.20.0
+    ports: !override
+      - "127.0.0.1:6333:6333"
+
+  # Erzeugt einmalig die gegenseitigen TLS-Zertifikate fuer API und Runner.
+  sandbox-certs:
+    image: ghcr.io/n8n-io/n8n-sandbox-service-api:${N8N_SANDBOX_VERSION}
+    user: "0:0"
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        bootstrap-mtls.sh --out-dir /tls --api-san sandbox-api
+        --control-san-prefix sandbox-runner --world-readable &&
+        chown -R sandbox-api:sandbox-api /tls/api && chmod -R a+rX /tls
+    environment:
+      NUM_RUNNERS: "1"
+    volumes:
+      - sandbox-tls:/tls
+    networks: ["demo"]
+
+  # Interne Steuerungsebene. Absichtlich ohne Portfreigabe zum Mac oder Netz.
+  sandbox-api:
+    image: ghcr.io/n8n-io/n8n-sandbox-service-api:${N8N_SANDBOX_VERSION}
+    restart: unless-stopped
+    depends_on:
+      sandbox-certs:
+        condition: service_completed_successfully
+    environment:
+      SANDBOX_API_KEYS: ${SANDBOX_API_KEYS}
+      SANDBOX_API_RUNNER_REGISTRATION_TOKEN: ${SANDBOX_API_RUNNER_REGISTRATION_TOKEN}
+      SANDBOX_API_RUNNER_API_KEY: ${SANDBOX_API_RUNNER_API_KEY}
+      SANDBOX_API_GRPC_TLS_CERT_FILE: /tls/api/grpc-server.crt
+      SANDBOX_API_GRPC_TLS_KEY_FILE: /tls/api/grpc-server.key
+      SANDBOX_API_GRPC_TLS_CLIENT_CA_FILE: /tls/api/ca.crt
+      SANDBOX_API_RUNNER_CONTROL_GRPC_TLS_CA_FILE: /tls/api/ca.crt
+      SANDBOX_API_RUNNER_CONTROL_GRPC_TLS_CERT_FILE: /tls/api/control-grpc-api-client.crt
+      SANDBOX_API_RUNNER_CONTROL_GRPC_TLS_KEY_FILE: /tls/api/control-grpc-api-client.key
+      SANDBOX_API_RUNNER_CONTROL_GRPC_TLS_SERVER_NAME: sandbox-runner-1
+    volumes:
+      - sandbox-tls:/tls:ro
+    networks: ["demo"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  # Privilegierter Docker-in-Docker-Runner. Niemals Ports veroeffentlichen.
+  sandbox-runner-1:
+    image: ghcr.io/n8n-io/n8n-sandbox-service-runner-dind:${N8N_SANDBOX_VERSION}
+    privileged: true
+    restart: unless-stopped
+    depends_on:
+      sandbox-api:
+        condition: service_healthy
+    environment:
+      SANDBOX_RUNNER_API_KEYS: ${SANDBOX_RUNNER_API_KEYS}
+      SANDBOX_RUNNER_REGISTRATION_TOKEN: ${SANDBOX_RUNNER_REGISTRATION_TOKEN}
+      SANDBOX_RUNNER_API_GRPC_ADDR: sandbox-api:9090
+      SANDBOX_RUNNER_HTTP_BASE_URL: https://sandbox-runner-1:8080
+      SANDBOX_RUNNER_CONTROL_GRPC_LISTEN_ADDR: ":9091"
+      SANDBOX_RUNNER_CONTROL_GRPC_ADVERTISE_ADDR: sandbox-runner-1:9091
+      SANDBOX_RUNNER_ID: runner-1
+      SANDBOX_RUNNER_DOCKER_SANDBOX_IMAGE: ghcr.io/n8n-io/n8n-sandbox-service-sandbox:${N8N_SANDBOX_VERSION}
+      SANDBOX_RUNNER_REGISTRATION_GRPC_CA_FILE: /tls/runner/ca.crt
+      SANDBOX_RUNNER_REGISTRATION_GRPC_CERT_FILE: /tls/runner/grpc-client.crt
+      SANDBOX_RUNNER_REGISTRATION_GRPC_KEY_FILE: /tls/runner/grpc-client.key
+      SANDBOX_RUNNER_REGISTRATION_GRPC_SERVER_NAME: sandbox-api
+      SANDBOX_RUNNER_CONTROL_GRPC_TLS_CERT_FILE: /tls/runner/control-grpc-server.crt
+      SANDBOX_RUNNER_CONTROL_GRPC_TLS_KEY_FILE: /tls/runner/control-grpc-server.key
+      SANDBOX_RUNNER_CONTROL_GRPC_TLS_CLIENT_CA_FILE: /tls/runner/ca.crt
+    volumes:
+      - sandbox-tls:/tls:ro
+    networks: ["demo"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "--no-check-certificate", "https://localhost:8080/readyz"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 20s
