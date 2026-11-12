@@ -1,0 +1,29 @@
+name: redisinsight
+services:
+  redisinsight:
+    image: redis/redisinsight:3.0.2
+    volumes:
+      - ${VOLUMES_PATH:-../../../.volumes}/storage/redis-insight/data:/data
+    environment:
+      RI_REDIS_HOST: redis
+      RI_REDIS_PORT: 6379
+      RI_REDIS_ALIAS: redis
+      RI_LOG_LEVEL: info
+    networks:
+      - n8n-starter-public
+      - n8n-starter-private
+    healthcheck:
+      test: [ "CMD", "wget", "--spider", "-q", "http://127.0.0.1:5540/api/health" ]
+      start_interval: 3s
+      start_period: 30s
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    labels:
+      - traefik.enable=true
+
+networks:
+  n8n-starter-public:
+    external: true
+  n8n-starter-private:
+    external: true

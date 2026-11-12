@@ -1,0 +1,54 @@
+# yaml-language-server: $schema=https://www.schemastore.org/traefik-v3.json
+
+# Global configuration
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
+# Ping configuration
+ping:
+  entryPoint: "ping"
+
+# Logging
+log:
+  level: INFO
+  format: common
+  filePath: /var/log/traefik/traefik.log
+
+# Access logs
+accessLog:
+  addInternals: true
+  format: common
+  filePath: /var/log/traefik/access.log
+
+# API and Dashboard
+api:
+  dashboard: true
+  insecure: false
+
+# Entry points
+entryPoints:
+  ping:
+    address: ":8082"
+
+  web:
+    address: ":80/tcp"
+    asDefault: true
+    http:
+      encodedCharacters:
+        allowEncodedSlash: true
+      middlewares:
+        - default@file
+
+# Providers
+providers:
+  file:
+    directory: /config/
+    watch: true
+
+  docker:
+    endpoint: "tcp://docker-socket-proxy:2375"
+    exposedByDefault: false
+    network: n8n-starter-public
+    watch: true
+    defaultRule: Host(`{{ index .Labels "com.docker.compose.service"}}.{{ env "DOMAIN" }}`)

@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Model catalogue",
+  "description": "The models of the stack, one entry per model with a block per AI_ENGINE that serves it; the CLI validates the same shape in packages/cli/src/schemas/models.ts, see ../../SPEC.md",
+  "type": "object",
+  "properties": {
+    "$schema": { "type": "string" },
+    "models": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/model" }
+    }
+  },
+  "required": [ "models" ],
+  "additionalProperties": false,
+  "$defs": {
+    "model": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+          "maxLength": 58,
+          "description": "The AI_MODELS value and the DNS label of the model's docker names (`<engine>-<id>`: Tilt resource, compose project, container, hostname), e.g. qwen3-5-0-8b"
+        },
+        "label": {
+          "type": "string",
+          "description": "The model name shown by `models select`, e.g. Qwen3.5 0.8B"
+        },
+        "ollama": { "$ref": "#/$defs/ollama" },
+        "vllm": { "$ref": "#/$defs/vllm" }
+      },
+      "required": [ "id", "label" ],
+      "anyOf": [ { "required": [ "ollama" ] }, { "required": [ "vllm" ] } ],
+      "additionalProperties": false
+    },
+    "serving": {
+      "type": "object",
+      "properties": {
+        "memory": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "The approximate memory in GB for weights and context, shown by `models select` as `~6 GB RAM` (VRAM on a gpu runtime)"
+        },
+        "note": {
+          "type": "string",
+          "description": "A short hint shown by `models select` after the memory, e.g. what the model needs on a runtime"
+        },
+        "runtimes": {
+          "type": "array",
+          "items": { "enum": [ "cpu-arm64", "cpu-x86-64", "gpu-nvidia", "gpu-amd" ] },
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "The AI_RUNTIME values the engine runs the model on, every runtime when omitted"
+        }
+      }
+    },
+    "ollama": {
+      "allOf": [ { "$ref": "#/$defs/serving" } ],
+      "properties": {
+        "model": {
+          "type": "string",
+          "description": "The ollama tag pulled on start, e.g. qwen3.5:0.8b"
+        }
+      },
+      "required": [ "model" ],
+      "unevaluatedProperties": false
+    },
+    "vllm": {
+      "allOf": [ { "$ref": "#/$defs/serving" } ],
+      "properties": {
+        "model": {
+          "type": "string",
+          "description": "The Hugging Face model id, e.g. Qwen/Qwen3.5-0.8B"
+        },
+        "args": {
+          "type": "string",
+          "description": "Model specific `vllm serve` arguments (context length, tool-call and reasoning parsers); runtime specific ones live in the compose file"
+        }
+      },
+      "required": [ "model", "args" ],
+      "unevaluatedProperties": false
+    }
+  }
+}

@@ -1,0 +1,67 @@
+# litellm: the AI_GATEWAY in front of the model servers, one OpenAI compatible endpoint and key for every model, see ../../../SPEC.md
+x-base: &base
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges=true
+
+name: litellm
+services:
+  litellm:
+    image: docker.litellm.ai/berriai/litellm:${LITELLM_VERSION:?}
+    depends_on:
+      litellm-db:
+        condition: service_healthy
+    configs:
+      - source: litellm-config
+        target: /app/config.yaml
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?}
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:?}
+      DATABASE_URL: postgresql://${LITELLM_DB_USER:-litellm}:${LITELLM_DB_PASSWORD:?}@litellm-db:5432/${LITELLM_DB_NAME:-litellm}
+      # models added in the UI are stored in the database, next to the generated list of the config
+      STORE_MODEL_IN_DB: "True"
+      # the bearer token of the vllm containers, the generated model list reads it as os.environ/VLLM_API_KEY (see ../../../SPEC.md)
+      VLLM_API_KEY: ${VLLM_API_KEY:?}
+    networks:
+      - n8n-starter-public
+      - n8n-starter-private
+    command: [ "--config", "/app/config.yaml", "--port", "4000" ]
+    healthcheck:
+      test: [ "CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/readiness')" ]
+      start_interval: 5s
+      start_period: 3m
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    labels:
+      - traefik.enable=true
+    <<: *base
+
+  litellm-db:
+    image: postgres:16.15
+    volumes:
+      - ${VOLUMES_PATH:-../../../.volumes}/models/litellm/postgres:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: ${LITELLM_DB_USER:-litellm}
+      POSTGRES_PASSWORD: ${LITELLM_DB_PASSWORD:?}
+      POSTGRES_DB: ${LITELLM_DB_NAME:-litellm}
+    networks:
+      - n8n-starter-private
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${LITELLM_DB_USER:-litellm} -d ${LITELLM_DB_NAME:-litellm}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    <<: *base
+
+networks:
+  n8n-starter-public:
+    external: true
+  n8n-starter-private:
+    external: true
+
+configs:
+  # the model list of the proxy: empty by hand (add models in the UI), `n8n-starter tilt resources` replaces it from ../models.json and labels the service with its hash (see ../../../SPEC.md)
+  litellm-config:
+    content: |
+      model_list: []
