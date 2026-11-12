@@ -1,0 +1,25 @@
+name: postgres
+services:
+  postgres:
+    image: postgres:17
+    volumes:
+      - ${VOLUMES_PATH:-../../../.volumes}/storage/postgres/postgres:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${POSTGRES_DB:-n8n}
+    ports:
+      - '0.0.0.0:5432:5432'
+    networks:
+      - n8n-starter-private
+    restart: on-failure
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -h localhost -U ${POSTGRES_USER:?} -d ${POSTGRES_DB:-n8n}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    hostname: postgres
+
+networks:
+  n8n-starter-private:
+    external: true

@@ -1,0 +1,69 @@
+# N8N_VARIANT=dev and base of the variant cascade: one container, sqlite, internal task runner, see ../../SPEC.md
+x-base: &base
+  security_opt:
+    - no-new-privileges=true
+
+x-n8n: &n8n
+  image: docker.n8n.io/n8nio/n8n:${N8N_VERSION:?}
+
+x-n8n-env: &n8n-env
+  GENERIC_TIMEZONE: ${TZ:-Europe/Berlin}
+  TZ: ${TZ:-Europe/Berlin}
+  N8N_DEPLOYMENT_ARTIFACT: docker-compose
+  N8N_LOG_LEVEL: ${N8N_LOG_LEVEL:-info}
+  N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: ${N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS:-true}
+  N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?}
+  N8N_USER_MANAGEMENT_JWT_SECRET: ${N8N_USER_MANAGEMENT_JWT_SECRET:?}
+
+x-n8n-env-hosting: &n8n-env-hosting
+  N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+  N8N_HOST: ${DOMAIN:-n8n.localhost}
+  N8N_WEBHOOK_URL: ${N8N_PROTOCOL:-http}://${DOMAIN:-n8n.localhost}
+  N8N_PORT: 5678
+  N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-false}
+  N8N_PROXY_HOPS: ${N8N_PROXY_HOPS:-1}
+
+# the internal runner is JavaScript only, Python needs the external runner of ./docker-compose.build.yml, see ../../SPEC.md
+x-n8n-env-runners-internal: &n8n-env-runners-internal
+  N8N_RUNNERS_MODE: internal
+  NODE_FUNCTION_ALLOW_BUILTIN: ${NODE_FUNCTION_ALLOW_BUILTIN:-crypto,buffer,url,util,path,events,stream,zlib,assert}
+  NODE_FUNCTION_ALLOW_EXTERNAL: ${NODE_FUNCTION_ALLOW_EXTERNAL:-moment,luxon,lodash,nanoid}
+
+# the database file lives in the .n8n volume, see ../../SPEC.md
+x-n8n-env-sqlite: &n8n-env-sqlite
+  DB_TYPE: sqlite
+
+x-n8n-health: &n8n-health
+  healthcheck:
+    test: [ "CMD", "wget", "--spider", "-q", "http://localhost:5678/healthz/readiness" ]
+    start_interval: 3s
+    start_period: 30s
+    interval: 10s
+    timeout: 5s
+    retries: 5
+
+name: n8n
+services:
+  n8n:
+    volumes:
+      - ${VOLUMES_PATH:-../../.volumes}/n8n/data:/home/node/.n8n
+    environment:
+      <<: [ *n8n-env, *n8n-env-hosting, *n8n-env-sqlite, *n8n-env-runners-internal ]
+    networks:
+      - n8n-starter-public
+      - n8n-starter-private
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      # routed at the bare DOMAIN instead of the default `<service>.<DOMAIN>` rule, see ../../SPEC.md
+      - traefik.http.services.n8n.loadbalancer.server.port=5678
+      - traefik.http.routers.n8n.service=n8n
+      - traefik.http.routers.n8n.rule=Host(`${DOMAIN:-n8n.localhost}`)
+      - traefik.http.routers.n8n.entrypoints=web
+    <<: [ *base, *n8n, *n8n-health ]
+
+networks:
+  n8n-starter-public:
+    external: true
+  n8n-starter-private:
+    external: true

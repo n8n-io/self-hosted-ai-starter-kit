@@ -1,0 +1,29 @@
+---
+name: traefik
+services:
+  traefik:
+    image: traefik:v3.6.6
+    volumes:
+      - ./traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./config/:/config/:ro
+      - ${VOLUMES_PATH:-../../../.volumes}/proxy/traefik/logs:/var/log/traefik
+    environment:
+      - TZ=${TZ:-Europe/Berlin}
+      - DOMAIN=${DOMAIN:-n8n.localhost}
+    ports:
+      - '127.0.0.1:80:80'
+    networks:
+      - n8n-starter-public
+      - n8n-starter-private
+    healthcheck:
+      test: [ "CMD", "wget", "--spider", "-q", "http://127.0.0.1:8082/ping" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  n8n-starter-public:
+    external: true
+  n8n-starter-private:
+    external: true

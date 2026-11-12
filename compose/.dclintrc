@@ -1,0 +1,6 @@
+{
+  "$schema": "https://raw.githubusercontent.com/zavoloklom/docker-compose-linter/refs/heads/main/schemas/linter-config.schema.json",
+  "rules": {
+    "no-version-field": 0
+  }
+}

@@ -1,0 +1,88 @@
+# vllm: one container per model of AI_MODELS, one service per AI_RUNTIME profile, see ../../../SPEC.md
+x-vllm: &vllm
+  # also the hostname on n8n-starter-private: the id of the model's entry in ../models.json, set by `n8n-starter tilt resources` (see ../../../SPEC.md)
+  container_name: vllm-${VLLM_MODEL_ID:-model}
+  volumes:
+    - ${VOLUMES_PATH:-../../../.volumes}/models/vllm/huggingface:/root/.cache/huggingface
+  environment:
+    # required at container start, Tilt sets both from ../models.json (see ../../../SPEC.md)
+    MODEL: ${VLLM_MODEL:-}
+    # model specific `vllm serve` args, runtime specific ones live in `command`
+    MODEL_ARGS: ${VLLM_MODEL_ARGS:-}
+    # flags of this machine from ./.env, appended last so they override the runtime and the model flags (see ../../../SPEC.md)
+    EXTRA_ARGS: ${VLLM_EXTRA_ARGS:-}
+    HF_TOKEN: ${HF_TOKEN:-}
+    # KV cache size in GiB on the cpu runtimes (ignored by the gpu runtimes), the weights load on top (see ../../../SPEC.md)
+    VLLM_CPU_KVCACHE_SPACE: ${VLLM_CPU_KVCACHE_SPACE:-2}
+    # the key of the /v1 endpoints (vllm's own variable name), /health stays open for the healthcheck
+    VLLM_API_KEY: ${VLLM_API_KEY:?}
+  networks:
+    - n8n-starter-private
+  restart: unless-stopped
+  entrypoint: [ "/bin/sh", "-c", 'exec vllm serve "$${MODEL:?MODEL is required: set VLLM_MODEL by hand or AI_MODELS in the root .env}" $$MODEL_ARGS "$$@" $$EXTRA_ARGS', "vllm" ]
+  healthcheck:
+    test: [ "CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" ]
+    start_interval: 10s
+    start_period: 15m
+    interval: 30s
+    timeout: 10s
+    retries: 3
+
+x-vllm-cpu: &vllm-cpu
+  <<: *vllm
+  command:
+    - --dtype=bfloat16
+    # keep vision but skip its start-up profiling, which takes longer on cpu than the healthcheck allows (see ../../../SPEC.md)
+    - --skip-mm-profiling
+  cap_add:
+    - SYS_NICE
+  security_opt:
+    - no-new-privileges=true
+    - seccomp=unconfined
+  shm_size: 4gb
+
+name: vllm
+services:
+  vllm-cpu-arm64:
+    image: vllm/vllm-openai-cpu:${VLLM_VERSION:?}-arm64
+    <<: *vllm-cpu
+    profiles: [ "cpu-arm64" ]
+
+  vllm-cpu-x86-64:
+    image: vllm/vllm-openai-cpu:${VLLM_VERSION:?}-x86_64
+    <<: *vllm-cpu
+    profiles: [ "cpu-x86-64" ]
+
+  vllm-gpu-amd:
+    image: vllm/vllm-openai-rocm:${VLLM_VERSION:?}
+    <<: *vllm
+    cap_add:
+      - SYS_PTRACE
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+    ipc: host
+    profiles: [ "gpu-amd" ]
+    security_opt:
+      - seccomp=unconfined
+
+  vllm-gpu-nvidia:
+    image: vllm/vllm-openai:${VLLM_VERSION:?}
+    <<: *vllm
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    ipc: host
+    profiles: [ "gpu-nvidia" ]
+    security_opt:
+      - no-new-privileges=true
+
+networks:
+  n8n-starter-private:
+    external: true

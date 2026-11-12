@@ -1,0 +1,79 @@
+{
+    "vsicons.customIconFolderPath": "assets/icons",
+    "vsicons.associations.folders": [
+        {
+            "icon": "docker",
+            "extensions": ["compose"],
+            "format": "svg"
+        },
+        {
+            "icon": "db",
+            "extensions": [".volumes"],
+            "format": "svg"
+        },
+        {
+            "icon": "server",
+            "extensions": ["proxy"],
+            "format": "svg"
+        },
+        {
+            "icon": "config",
+            "extensions": ["meta"],
+            "format": "svg"
+        },
+        {
+            "icon": "n8n",
+            "extensions": ["n8n"],
+            "format": "svg"
+        }
+    ],
+    "vsicons.associations.files": [
+        {
+            "icon": "docker",
+            "extensions": [".dclintrc"],
+            "filename": true,
+            "format": "svg"
+        }
+    ],
+    "explorer.compactFolders": true,
+    "explorer.fileNesting.enabled": true,
+    "explorer.fileNesting.expand": false,
+    "explorer.fileNesting.patterns": {
+        "package.json": "pnpm-lock.yaml, pnpm-workspace.yaml, .npmrc, .dclintrc*, .env.secrets.schema.json, tsconfig*.json",
+        "Tiltfile": "tilt_config.json, .tiltignore, tilt_modules",
+        "models.json": "models.schema.json",
+        ".env": ".env.*",
+        ".gitignore": ".gitattributes, .dockerignore, .editorconfig",
+        "AGENTS.md": "CLAUDE.md, .mcp.json",
+        "README.md": "LICENSE*, CONTRIBUTING*, CHANGELOG*"
+    },
+    "cSpell.words": [
+        "dclint",
+        "dotenv",
+        "getenv",
+        "healthcheck",
+        "HSTS",
+        "huggingface",
+        "litellm",
+        "Nemotron",
+        "nvfp",
+        "ollama",
+        "qdrant",
+        "Qwen",
+        "Qwen",
+        "redirections",
+        "Referer",
+        "Tiltfile",
+        "tokenomics",
+        "vllm",
+        "websecure"
+    ],
+    "yaml.customTags": [
+        "!override scalar",
+        "!override sequence",
+        "!override mapping",
+        "!reset scalar",
+        "!reset sequence",
+        "!reset mapping"
+    ]
+}

@@ -1,0 +1,63 @@
+name: garage
+services:
+  garage:
+    image: dxflrs/garage:v2.1.0
+    volumes:
+      - ./garage.toml:/etc/garage.toml
+      - ${VOLUMES_PATH:-../../../.volumes}/storage/garage/meta:/var/lib/garage/meta
+      - ${VOLUMES_PATH:-../../../.volumes}/storage/garage/data:/var/lib/garage/data
+    networks:
+      - n8n-starter-public
+    # ports:
+    #   - '3900:3900'
+    #   - '3901:3901'
+    #   - '3902:3902'
+    #   - '3903:3903'
+    # the image holds nothing but the garage binary, see ../../../SPEC.md
+    healthcheck:
+      test: [ "CMD", "/garage", "status" ]
+      start_interval: 3s
+      start_period: 30s
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    labels:
+      - traefik.enable=true
+      # S3 API
+      - traefik.http.services.garage-s3.loadbalancer.server.port=3900
+      - traefik.http.routers.garage-s3.service=garage-s3
+      - traefik.http.routers.garage-s3.rule=Host(`s3.${DOMAIN:-n8n.localhost}`)
+      - traefik.http.routers.garage-s3.entrypoints=web
+      # WEB API for static bucket file serving
+      - traefik.http.services.garage-web.loadbalancer.server.port=3902
+      - traefik.http.routers.garage-web.service=garage-web
+      - traefik.http.routers.garage-web.rule=Host(`s3web.${DOMAIN:-n8n.localhost}`)
+      - traefik.http.routers.garage-web.entrypoints=web
+
+  garage-webui:
+    image: khairul169/garage-webui:1.1.0
+    volumes:
+      - ./garage.toml:/etc/garage.toml:ro
+    environment:
+      API_BASE_URL: "http://garage:3903"
+      S3_ENDPOINT_URL: "http://garage:3900"
+    networks:
+      - n8n-starter-public
+    healthcheck:
+      test: [ "CMD", "curl", "--fail", "--silent", "--output", "/dev/null", "http://127.0.0.1:3909" ]
+      start_interval: 3s
+      start_period: 15s
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    labels:
+      - traefik.enable=true
+      # S3 WEB UI
+      - traefik.http.services.garage-webui.loadbalancer.server.port=3909
+      - traefik.http.routers.garage-webui.service=garage-webui
+      - traefik.http.routers.garage-webui.rule=Host(`s3ui.${DOMAIN:-n8n.localhost}`)
+      - traefik.http.routers.garage-webui.entrypoints=web
+
+networks:
+  n8n-starter-public:
+    external: true

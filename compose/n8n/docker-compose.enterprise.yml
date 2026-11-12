@@ -1,0 +1,43 @@
+# N8N_VARIANT=enterprise: licensed features on top of ./docker-compose.community.yml, see ../../SPEC.md
+x-n8n-env-license: &n8n-env-license
+  N8N_LICENSE_TENANT_ID: ${N8N_LICENSE_TENANT_ID:-1001}
+  N8N_LICENSE_ACTIVATION_KEY: ${N8N_LICENSE_ACTIVATION_KEY:?}
+
+name: n8n
+services:
+  n8n:
+    environment:
+      <<: [ *n8n-env-license ]
+    extends:
+      file: ./docker-compose.community.yml
+      service: n8n
+
+  n8n-runner:
+    extends:
+      file: ./docker-compose.community.yml
+      service: n8n-runner
+
+  n8n-webhook:
+    environment:
+      <<: [ *n8n-env-license ]
+    extends:
+      file: ./docker-compose.community.yml
+      service: n8n-webhook
+
+  n8n-worker:
+    environment:
+      <<: [ *n8n-env-license ]
+    extends:
+      file: ./docker-compose.community.yml
+      service: n8n-worker
+
+  n8n-worker-runner:
+    extends:
+      file: ./docker-compose.community.yml
+      service: n8n-worker-runner
+
+networks:
+  n8n-starter-public:
+    external: true
+  n8n-starter-private:
+    external: true

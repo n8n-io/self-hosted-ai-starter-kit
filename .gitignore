@@ -1,1 +1,74 @@
+# n8n resources
+.n8n*
+.volumes
+
+# tmp
+.tmp
+
+# verdaccio
+docker/verdaccio/store
+
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+dist/
+build/
+out/
+.next/
+.nuxt/
+
+# Environment variables
 .env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage
+coverage/
+.nyc_output/
+
+# Cache
+.npm
+.eslintcache
+.parcel-cache
+.cache/
+.turbo/
+
+# TypeScript
+*.tsbuildinfo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# Package manager locks (keep only one — uncomment the one you don't use)
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+
+# Vault dev-instance keys written by hand next to the compose file, never committed
+.archive/compose/vault/TMP.md
+
+# Scratch notes and plans, never committed
+tmp/

@@ -1,0 +1,6 @@
+http:
+  middlewares:
+    dashboard-path:
+      replacePathRegex:
+        regex: "^/dashboard(/|$)(.*)"
+        replacement: "/dashboard/$2"

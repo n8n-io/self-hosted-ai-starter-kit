@@ -1,0 +1,18 @@
+{
+  "name": "n8n-service-catalogue",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The docker compose service catalogue of the n8n self-hosted-ai-starter-kit.",
+  "author": "n8n",
+  "license": "Apache-2.0",
+  "scripts": {
+    "lint": "dclint . --recursive --max-warnings 0 && pnpm run lint:env && pnpm run lint:healthcheck",
+    "lint:env": "! grep -rnE --exclude-dir=node_modules '(^|[^$])\\$(\\{[A-Za-z_][A-Za-z0-9_]*\\}|[A-Za-z_])' --include='docker-compose*.yml' .",
+    "lint:healthcheck": "rc=0; for f in $(find . -name 'docker-compose*.yml' -not -path '*/node_modules/*' | sort); do docker compose -f \"$f\" --profile '*' config --no-interpolate --format json | jq -e --arg f \"$f\" '[.services | to_entries[] | select(.value.healthcheck.disable == true or ((.value.healthcheck.test // []) | length == 0 or . == [\"NONE\"])) | .key] | if length == 0 then true else \"\\($f): no healthcheck: \\(join(\", \"))\\n\" | halt_error(1) end' >/dev/null || rc=1; done; exit $rc",
+    "lint:fix": "dclint . --fix --recursive",
+    "lint:help": "dclint --help"
+  },
+  "devDependencies": {
+    "dclint": "^3.1.0"
+  }
+}

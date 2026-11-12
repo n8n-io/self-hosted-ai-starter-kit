@@ -1,0 +1,28 @@
+name: qdrant
+services:
+  qdrant:
+    image: qdrant/qdrant:${QDRANT_VERSION:?}
+    container_name: qdrant
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    networks:
+      - n8n-starter-private
+    restart: unless-stopped
+    # the image has neither curl nor wget, so bash talks HTTP itself, see ../../../SPEC.md
+    healthcheck:
+      test: [ "CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333 && printf 'GET /readyz HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q 'HTTP/1.1 200' <&3" ]
+      start_interval: 3s
+      start_period: 30s
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    hostname: qdrant
+
+
+networks:
+  n8n-starter-private:
+    external: true
+
+volumes:
+  qdrant_storage:
+

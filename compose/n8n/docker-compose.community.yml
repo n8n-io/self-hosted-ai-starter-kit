@@ -1,0 +1,76 @@
+# N8N_VARIANT=community: queue mode on top of ./docker-compose.build.yml, see ../../SPEC.md
+x-n8n-env-queue: &n8n-env-queue
+  EXECUTIONS_MODE: queue
+  QUEUE_BULL_REDIS_HOST: redis
+  QUEUE_BULL_REDIS_PORT: 6379
+  QUEUE_HEALTH_CHECK_ACTIVE: true
+  OFFLOAD_MANUAL_EXECUTIONS_TO_WORKERS: ${OFFLOAD_MANUAL_EXECUTIONS_TO_WORKERS:-true}
+
+# main hands production webhooks to the webhook processors at hooks.<DOMAIN>, see ../../SPEC.md
+x-n8n-env-webhook-processor: &n8n-env-webhook-processor
+  N8N_WEBHOOK_URL: ${N8N_PROTOCOL:-http}://hooks.${DOMAIN:-n8n.localhost}
+  N8N_DISABLE_PRODUCTION_MAIN_PROCESS: ${N8N_DISABLE_PRODUCTION_MAIN_PROCESS:-true}
+
+name: n8n
+services:
+  n8n:
+    environment:
+      <<: [ *n8n-env-queue, *n8n-env-webhook-processor ]
+    labels:
+      # the test paths of hooks.<DOMAIN> stay on main, see ../../SPEC.md
+      - traefik.http.routers.n8n-hooks-test.service=n8n
+      - traefik.http.routers.n8n-hooks-test.rule=Host(`hooks.${DOMAIN:-n8n.localhost}`) && (PathPrefix(`/webhook-test/`) || PathPrefix(`/form-test/`) || PathPrefix(`/mcp-test/`))
+      - traefik.http.routers.n8n-hooks-test.entrypoints=web
+    extends:
+      file: ./docker-compose.build.yml
+      service: n8n
+
+  n8n-runner:
+    extends:
+      file: ./docker-compose.build.yml
+      service: n8n-runner
+
+  n8n-webhook:
+    depends_on:
+      n8n:
+        condition: service_healthy
+    volumes: !reset []
+    command: webhook
+    labels: !override
+      - traefik.enable=true
+      # production webhooks at hooks.<DOMAIN>, see ../../SPEC.md
+      - traefik.http.services.n8n-webhook.loadbalancer.server.port=5678
+      - traefik.http.routers.n8n-webhook.service=n8n-webhook
+      - traefik.http.routers.n8n-webhook.rule=Host(`hooks.${DOMAIN:-n8n.localhost}`)
+      - traefik.http.routers.n8n-webhook.entrypoints=web
+    deploy:
+      replicas: ${N8N_WEBHOOK_REPLICAS:-1}
+    extends: n8n
+
+  n8n-worker:
+    depends_on:
+      n8n:
+        condition: service_healthy
+    volumes: !reset []
+    environment:
+      QUEUE_WORKER_CONCURRENCY: ${QUEUE_WORKER_CONCURRENCY:-10}
+    networks: !override
+      - n8n-starter-private
+    command: worker
+    labels: !reset []
+    extends: n8n
+
+  n8n-worker-runner:
+    depends_on: !override
+      n8n-worker:
+        condition: service_healthy
+        restart: true
+    environment:
+      N8N_RUNNERS_TASK_BROKER_URI: http://n8n-worker:5679
+    extends: n8n-runner
+
+networks:
+  n8n-starter-public:
+    external: true
+  n8n-starter-private:
+    external: true
