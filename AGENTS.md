@@ -38,12 +38,12 @@ pnpm 10 workspace (`packages/*` and `compose`), Node 24.
 - The root scripts and the Tiltfile run `packages/cli/dist/index.mjs`: run `pnpm run build` after every CLI source change.
 - A value that lives in several files changes in all of them in one go: see the [mirrors](.agents/skills/compose-catalogue/references/mirrors.md). The first list entry is the default everywhere, except `AI_GATEWAY`, which is empty.
 - Update SPEC.md in the same change when a rule, a default or a mirrored value changes, and the template comments, Tiltfile comments, `packages/cli/README.md` and README.md when they describe what changed.
-- Compose: images pinned to exact versions; only the external networks `n8n-starter-public` (traefik-routed) and `n8n-starter-private`; expose through the label `traefik.enable=true`, not host ports; a healthcheck on every service; `${VAR:?}` only for secrets and pinned versions, `${VAR:-default}` otherwise, never a bare `${VAR}`; a secret is an empty key in `.env.template` declared in the `.env.secrets.json` beside it, never a value.
+- Compose: images pinned to exact versions; only the external networks `n8n-starter-public` (traefik-routed) and `n8n-starter-private`; expose through the label `traefik.enable=true`, not host ports; a healthcheck on every service; `${VAR:?}` only for secrets and pinned versions, `${VAR:-default}` otherwise, never a bare `${VAR}`; a secret is an empty key in `.env.template` declared in the `.env.json` beside it, never a value.
 - No model name in a compose file: `tilt resources` builds the model overrides from `models.json`. A catalogue `id` is a DNS label and docker names are `<engine>-<id>`; never derive or normalise a name.
 - The Tilt topology lives in `packages/cli/src/commands/tilt.ts`: the Tiltfile only loops over that plan and never creates infrastructure. `setup` never overwrites an existing `.env` value or network.
 - `verify --json`, `tilt resources`, `models read` and `secrets read` write their result to stdout and nothing else: the Tiltfile and pipes parse it.
 - Never write or explain an n8n setting from memory: confirm it through the `n8n-docs` MCP server ([.mcp.json](.mcp.json)) and cite the page.
-- Do not commit: the maintainer commits. `.env` files, `.volumes/` and `dist/` are gitignored.
+- Do not commit: the maintainer commits. `.env`, `.env.secrets`, `.volumes/` and `dist/` are gitignored.
 - Reference other files by a path relative to the referencing file.
 - Before reporting a change as done, run the gates of the `validate` skill and report each result as it was.
 

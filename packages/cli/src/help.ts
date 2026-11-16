@@ -21,9 +21,9 @@ export interface CommandHelp {
 }
 
 export const COMMAND_HELP = {
-  setup: { usage: 'setup', description: 'Generate .env files from .env.template files (AI_RUNTIME of a new root .env from the detected platform), fill their secrets and create the docker networks' },
+  setup: { usage: 'setup', description: 'Generate .env files from .env.template files (AI_RUNTIME of a new root .env from the detected platform), fill their secrets as the .env.json manifests declare (those no container reads into .env.secrets) and create the docker networks' },
   verify: { usage: 'verify [--json]', description: 'Check the node, docker and docker compose versions and that every .env file, every secret and the docker networks exist (exit code 1 if not), warn when AI_RUNTIME does not match the detected platform; --json one report { ok, success, info, warnings, errors, hints }' },
-  reset: { usage: 'reset', description: 'Delete all generated .env files' },
+  reset: { usage: 'reset', description: 'Delete all generated .env and .env.secrets files' },
   config: {
     usage: 'config [KEY] [value]',
     description: 'Edit the root .env: no KEY asks which key, KEY prompts that key only, KEY value writes it without a prompt; AI_RUNTIME marks the detected runtime and warns about a mismatch, AI_MODELS runs models select',
@@ -39,10 +39,10 @@ export const COMMAND_HELP = {
   },
   secrets: {
     usage: 'secrets <read|set>',
-    description: 'Read and set the secrets of the .env files declared in the .env.secrets.json manifests',
+    description: 'Read and set the secrets of the .env and .env.secrets files declared in the .env.json manifests',
     subcommands: [
-      { name: 'read', usage: 'secrets read [filter] [--json]', description: 'Print the secrets of the .env files as KEY=value, filtered by a part of a directory or key; an exact key prints only its value, --json an array of { file, key, value, source }' },
-      { name: 'set', usage: 'secrets set KEY [value]', description: 'Set one secret of the .env.secrets.json manifests: KEY alone asks for it with a masked prompt, KEY value writes without a prompt' },
+      { name: 'read', usage: 'secrets read [filter] [--json]', description: 'Print the secrets as KEY=value under the file that holds them, with their related keys such as the email of a login, filtered by a part of a directory or key; an exact key prints only its value, --json an array of { file, key, value, source, related? }' },
+      { name: 'set', usage: 'secrets set KEY [value]', description: 'Set one secret of the .env.json manifests, with its links and the values derived from it: KEY alone asks for it with a masked prompt, KEY value writes without a prompt' },
     ],
   },
   tilt: {

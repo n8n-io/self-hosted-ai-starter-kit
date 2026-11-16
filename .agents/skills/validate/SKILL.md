@@ -12,7 +12,7 @@ Run every gate that matches what changed, from the repository root, and report e
 | Changed | Gates |
 | --- | --- |
 | any `docker-compose*.yml` | lint; compose config for every changed file, and for an n8n variant file also for every file that extends it |
-| `.env.template`, `.env.secrets.json` | lint; test; compose config for the file beside it; for a new template `pnpm run setup && pnpm run verify`; for a changed secret a `reset`, `setup`, `verify` cycle on a scratch copy |
+| `.env.template`, `.env.json` | lint; test; compose config for the file beside it; for a new template `pnpm run setup && pnpm run verify`; for a changed secret a `reset`, `setup`, `verify` cycle on a scratch copy |
 | `compose/models/models.json`, `models.schema.json` | test; `pnpm run models read <id>`; Tiltfile evaluation with the id in `AI_MODELS` |
 | `compose/models/<engine>/docker-compose.yml` | lint; compose config with the profile of every runtime touched |
 | `compose/proxy/traefik/**` | lint; compose config for the traefik file |
@@ -48,7 +48,7 @@ tilt alpha tiltfile-result -v > /dev/null  # the Tiltfile, starting nothing: exi
 - The Tiltfile evaluation needs the built CLI and a complete environment, because it runs the `verify` gate. Its result is about 30 KB of JSON on stdout, which the redirect drops; its log and the reason for a failure are on stderr.
 - `dotenv()` in the Tiltfile overrides exported variables. To evaluate another variant, engine or model, change the root `.env` (`pnpm run config N8N_VARIANT build`) and restore the previous value afterwards.
 - A running Tilt session watches the root `.env` and reloads the live stack on that edit. `tilt get uiresources -o name` succeeds only while a session runs: when it does, ask before changing the root `.env`.
-- `setup` and `verify` are safe on the user's checkout: `setup` only creates what is missing. `reset` deletes every generated `.env`, including secrets the data in `.volumes/` depends on: run a `reset`, `setup`, `verify` cycle on a scratch copy of the repository only.
+- `setup` and `verify` are safe on the user's checkout: `setup` only creates what is missing and keeps links and derived values (the n8n owner password hash) in step with their source. `reset` deletes every generated `.env` and `.env.secrets`, including secrets the data in `.volumes/` depends on: run a `reset`, `setup`, `verify` cycle on a scratch copy of the repository only.
 - `pnpm run dev` is interactive and starts containers. It is not a gate: run it only when the user asks for it.
 
 ## Report

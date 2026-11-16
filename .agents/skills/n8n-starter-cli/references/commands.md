@@ -8,7 +8,7 @@ Every command takes `rootDir = process.cwd()` (the root scripts run from the rep
 
 - `findFiles(rootDir, '.env.template')`, copy each to `.env` beside it with `COPYFILE_EXCL` (`EEXIST` means `skipped`, never overwrites).
 - When a root template exists, `applyDetectedRuntime`: `detectPlatform`, an info line `Detected …`; a root `.env` created in this run gets the detected `AI_RUNTIME` when the template value differs, a skipped one only a `runtimeMismatch` warning.
-- `fillSecrets`: every unfilled `generate` key of every manifest gets a random value, then every `link` is set to its source; logs `Generated`/`Linked` lines. Then a warning per `prompt` key the root `.env` requires but is unset (`checkSecrets` with `readRootConfigIfValid`).
+- `fillSecrets`: every unfilled random `generate` key of every manifest gets a value, in its `.env` or, with `file` `.env.secrets`, in that file beside it (created for its owner only); then every derived value (`staleDerived`: a `bcrypt` generator, rewritten only while empty or no longer the hash of its input) and every `link` is set to its source; logs `Generated`/`Linked` lines and one info line per `.env.secrets` written that names `secrets read <directory>`. Then a warning per `prompt` key the root `.env` requires but is unset (`checkSecrets` with `readRootConfigIfValid`).
 - `ensureDockerNetworks(['n8n-starter-public', 'n8n-starter-private'])`: creates only the missing ones, `--driver bridge`. Then a summary line.
 - Exit 1 when docker is unreachable (the `.env` files are still created) or a manifest is invalid.
 
@@ -16,7 +16,7 @@ Every command takes `rootDir = process.cwd()` (the root scripts run from the rep
 
 - `checkRequirements`: node, the docker daemon and docker compose against `REQUIREMENTS`; too old or not queryable fails.
 - `verifyEnvFiles`: a `.env` next to every template.
-- `checkSecrets` over `readSecretState` and the root config: `missing`, `mismatch` and `required` fail, `unset` is info, `ok` success; an invalid manifest is `secretsError`.
+- `checkSecrets` over `readSecretState` and the root config: `missing`, `mismatch` (a link that differs from its source, a derived value that does not match its input) and `required` fail, `unset` is info, `ok` success; an invalid manifest is `secretsError`. A check names the file that holds the key, the `.env` or the `.env.secrets`.
 - `verifyDockerNetworks`.
 - Unless docker failed: `detectPlatform` and `runtimeMismatch` against the root config (`platform`, `runtimeWarning` of the result; `ok` ignores both).
 - `formatVerifyResult` buckets the lines into `success`, `info`, `warnings`, `errors`: `Found` / `Missing` per item, one line per secret through `formatSecretCheck`, `Detected …` as info, the mismatch as a warning without a hint. It adds the `pnpm run setup` hint only when a file, a generated or linked secret or a network is missing, and the README Prerequisites hint only when a tool version fails.
@@ -57,18 +57,18 @@ Every command takes `rootDir = process.cwd()` (the root scripts run from the rep
 
 ## secrets read [filter] [--json]
 
-- `readSecretState`; an exact key (case-insensitive) prints only its values, otherwise `listSecrets(state, filter)` (substring of the directory or key) printed as the relative `.env` path followed by `KEY=value` lines, groups separated by a blank line.
-- With `{ json: true }` one array of `{ file, key, value, source }` in the same order (`value` null while the key is absent, an exact key narrows the array). `console.log` once, nothing else on stdout.
-- Exit 1 naming the file when a matched `.env` is missing, when nothing matches, or on an invalid manifest; 1 listing `read, set` on a missing or unknown sub-command.
+- `readSecretState`; an exact key (case-insensitive) prints only its values, otherwise `listSecrets(state, filter)` (substring of the directory or key) without the derived values, printed as the relative path of the file that holds the secrets (`.env` or `.env.secrets`) followed by `KEY=value` lines, groups separated by a blank line. The `related` keys of a secret are printed above it once per group (`relatedValue`: the `.env`, else the live or commented value of the template).
+- With `{ json: true }` one array of `{ file, key, value, source, related? }` in the same order (`value` null while the key is absent, `related` only on an entry that declares it, an exact key narrows the array). `console.log` once, nothing else on stdout.
+- Exit 1 naming the file when a matched `.env` or `.env.secrets` is missing, when nothing matches, or on an invalid manifest; 1 listing `read, set` on a missing or unknown sub-command.
 
 ## secrets set KEY [value]
 
-- `readSecretState`; `KEY` must be a `generate` or `prompt` key (a link is refused naming its source key, an unknown key lists the keys).
-- `value` given: written as is (empty rejected). Otherwise one `password` prompt with the entry's `description`; a cancel writes nothing. A filled `rotation: never` key warns first.
-- `setSecret` writes the key and every link of it, logging `set`/`linked` per file, never the value.
-- Exit 1 on a missing key, an unknown or link key, an empty value, a missing `.env` or an invalid manifest.
+- `readSecretState`; `KEY` must be a `generate` or `prompt` key that is not derived (a link is refused naming its source key, a derived key naming its input, an unknown key lists the keys).
+- `value` given: written as `formatEnvValue` stores it (empty rejected, and a value with a single quote, a backslash or a line break: `valueProblem`). Otherwise one `password` prompt with the entry's `description`; a cancel writes nothing. A filled `rotation: never` key warns first.
+- `setSecret` writes the key into its file, then every value derived from it (skipped while the hash still fits) and every link, logging `set`/`derived`/`linked` per file, never the value.
+- Exit 1 on a missing key, an unknown, link or derived key, an empty or unstorable value, a missing `.env` or an invalid manifest.
 
 ## reset
 
-- `findFiles(rootDir, '.env')`, list them, warn about the filled `generate` keys with `rotation` `manual` or `never` (a manifest problem is ignored here), `confirm` (default `false`), `rm` each.
+- `findEnvFiles`: `findFiles` for `.env` and for `.env.secrets`, list them, warn about the filled `generate` keys with `rotation` `manual` or `never` (a manifest problem is ignored here), `confirm` (default `false`), `rm` each.
 - Exit 0; a cancel deletes nothing.

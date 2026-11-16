@@ -15,6 +15,13 @@ Paths are relative to `packages/cli/` unless they start at the repository root. 
 2. `src/commands/config.ts`: the key in `CONFIG_KEYS` (template order) and `CONFIG_KEY_DESCRIPTIONS` (the template comment), an entry in `CHOICES` for an enum key or its own prompt function (like `promptDomain`), and the branch that picks it. A value given on the command line is validated by `configSchema.shape[key]`, so a rule beyond the shape of one key belongs in the schema.
 3. The root `.env.template` (a comment line above the key, an `Options:` comment for enums), the `KEY:` note of `COMMAND_HELP.config` in `src/help.ts`, the banner line in `print_env()` of the Tiltfile (the key reaches Tilt through the `config` of the plan, which extends `configSchema`), the Configuration block of SPEC.md, `tests/config.test.ts` (`VALID_CONFIG`, the template-defaults and the key-mirror tests).
 
+## Add a generator
+
+1. `src/schemas/secrets.ts`: a `.strict()` member of `generatorSchema` with its `type` literal, and the type in `GENERATOR_TYPES`. A generator with an `input` is derived: it follows that key.
+2. `src/utils/generators.ts`: its case in `derive` and `isDerivedFrom` (or its own function beside `generateRandom` when it needs no input, called from `fillSecrets`).
+3. `compose/.env.schema.json`: the definition and its `$ref` in `generator.oneOf`, in the order of `GENERATOR_TYPES` (`tests/secrets.test.ts` compares both).
+4. Tests in `tests/secrets.test.ts`; the `generate` bullet of the Secrets section of SPEC.md; the manifest section of the env-and-secrets reference of the compose-catalogue skill.
+
 ## Add a catalogue field
 
 1. `src/schemas/models.ts` (a model field or a block field, keep `.strict()`), `compose/models/models.schema.json`, `ModelRecord` and `listModels()` in `src/utils/models.ts` so `models read` prints it, and `modelOptions()` when the field belongs in the hint or affects `disabled`.

@@ -39,7 +39,7 @@
     "explorer.fileNesting.enabled": true,
     "explorer.fileNesting.expand": false,
     "explorer.fileNesting.patterns": {
-        "package.json": "pnpm-lock.yaml, pnpm-workspace.yaml, .npmrc, .dclintrc*, .env.secrets.schema.json, tsconfig*.json",
+        "package.json": "pnpm-lock.yaml, pnpm-workspace.yaml, .npmrc, .dclintrc*, .env.schema.json, tsconfig*.json",
         "Tiltfile": "tilt_config.json, .tiltignore, tilt_modules",
         "models.json": "models.schema.json",
         ".env": ".env.*",

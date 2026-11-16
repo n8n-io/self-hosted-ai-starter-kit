@@ -102,6 +102,6 @@ for p in plan['projects']:
       infer_links=r['infer_links'],
       auto_init=r['auto_init'],
     )
-    # a project with a .env.secrets.json: a button per resource prints its secrets into the resource log (see ./SPEC.md)
+    # a project with a .env.json: a button per resource prints its secrets into the resource log (see ./SPEC.md)
     if 'secrets' in p:
       cmd_button('%s-secrets' % r['name'], resource=r['name'], argv=['node', CLI, 'secrets', 'read', p['secrets']], icon_name='key', text='secrets')

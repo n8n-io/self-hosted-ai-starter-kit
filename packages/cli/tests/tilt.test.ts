@@ -303,12 +303,12 @@ test('tilt resources prints one JSON document and nothing else', async () => {
   expect(process.exitCode).not.toBe(1)
 })
 
-test('tilt resources marks the projects with a .env.secrets.json beside their compose file', async () => {
+test('tilt resources marks the projects with a .env.json beside their compose file', async () => {
   await writeFile(join(rootDir, '.env'), ENV_CONTENT)
   await writeCatalogue()
   for (const dir of ['compose/n8n', 'compose/models/vllm']) {
     await mkdir(join(rootDir, dir), { recursive: true })
-    await writeFile(join(rootDir, dir, '.env.secrets.json'), '{}')
+    await writeFile(join(rootDir, dir, '.env.json'), '{}')
   }
   setLogLevel('error')
 

@@ -31,8 +31,8 @@ A reload re-renders every project and recreates only the services whose rendered
 - Optional services are `auto_init: false` (ollama only while `AI_MODELS` is empty).
 - Models (`modelProjects()`): ollama is one project `ollama` with the container variable `MODELS`; vllm one project per model, `vllm-<id>` with `MODEL`, `MODEL_ARGS` and `container_name`. The profile service `<engine>-<runtime>` is exposed under the resource `name` (`ollama` or `vllm-<id>`). The id is the `id` field of the catalogue entry; `vllmContainerName()` in `src/utils/models.ts` is the one place that prefixes it.
 - The gateway (`gatewayProjects()`) gets its model list like an engine gets its models, as an inline override: the `content` of the compose config `litellm-config`, one `model_list` entry per id of `AI_MODELS` (JSON, read as YAML). Compose and Tilt compare the service, not the content of a config, so the override also sets the label `n8n-starter.config-hash` (`GATEWAY_CONFIG_HASH_LABEL`) on the `litellm` service: without it a changed list would not recreate the container.
-- Every project watches the `.env` beside its entry file, because Tilt does not watch a compose project's own `.env` by itself. For n8n the parents of the cascade (`N8N_VARIANT_CASCADE`) are watched too, so editing the base reloads while a variant is active.
-- A project whose directory holds a `.env.secrets.json` carries that directory as `secrets` (`secretDirectories()`), which gives its resources the secrets button: never hard-code a button in the Tiltfile.
+- Every project watches the `.env` beside its entry file, because Tilt does not watch a compose project's own `.env` by itself. A `.env.secrets` is not watched: the CLI rewrites the derived value in the `.env` whenever it writes one. For n8n the parents of the cascade (`N8N_VARIANT_CASCADE`) are watched too, so editing the base reloads while a variant is active.
+- A project whose directory holds a `.env.json` carries that directory as `secrets` (`secretDirectories()`), which gives its resources the secrets button: never hard-code a button in the Tiltfile.
 
 ## Recipe: change the Tilt plan
 

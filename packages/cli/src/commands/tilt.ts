@@ -196,7 +196,7 @@ export function tiltResources(config: Config, catalogue: ModelsCatalogue, secret
   return tiltResourcesSchema.parse({ config: { ...config, AI_MODELS: models }, projects: withSecrets })
 }
 
-/** The directories that hold a .env.secrets.json, relative to rootDir with forward slashes, as the plan names its compose files */
+/** The directories that hold a .env.json, relative to rootDir with forward slashes, as the plan names its compose files */
 export async function secretDirectories(rootDir: string): Promise<string[]> {
   return (await findFiles(rootDir, MANIFEST_FILENAME)).map(file => relative(rootDir, dirname(file)).split(sep).join('/'))
 }

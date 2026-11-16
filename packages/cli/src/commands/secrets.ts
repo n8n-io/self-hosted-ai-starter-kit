@@ -1,24 +1,29 @@
 import type { Config } from '../schemas/config'
 import type { GenerateSecret, LinkSecret, PromptSecret, SecretEntry, SecretRequired } from '../schemas/secrets'
-import { randomBytes } from 'node:crypto'
+import type { DerivedGenerator } from '../utils/generators'
 import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
 import { isCancel, password } from '@clack/prompts'
 import { z } from 'zod'
 import { secretsManifestSchema } from '../schemas/secrets'
-import { parseEnvContent, updateEnvContent } from '../utils/env'
+import { formatEnvValue, parseEnvContent, parseEnvDefaults, updateEnvContent } from '../utils/env'
 import { findFiles } from '../utils/files'
 import { keyValue, runCommand } from '../utils/format'
+import { derive, generateRandom, isDerived, isDerivedFrom } from '../utils/generators'
 import { logger } from '../utils/logger'
 import { readRootConfig } from './tilt'
 
-export const MANIFEST_FILENAME = '.env.secrets.json'
+export const MANIFEST_FILENAME = '.env.json'
+/** Beside a .env: the secrets no container reads, kept for humans and as the input of derived values (`file` of a manifest entry) */
+export const SECRETS_FILENAME = '.env.secrets'
 const TEMPLATE_FILENAME = '.env.template'
 const ENV_FILENAME = '.env'
+/** The first line of a .env.secrets the CLI creates */
+const SECRETS_HEADER = `# secrets no container reads, written by ${runCommand('setup')} and ${runCommand('secrets set')}, see ./${MANIFEST_FILENAME}\n`
 
 export const SECRETS_SUBCOMMANDS = ['read', 'set'] as const
 
-/** One key of a .env.secrets.json, with the directory whose .env.template and .env hold it */
+/** One key of a .env.json, with the directory whose .env or .env.secrets holds it */
 export interface DeclaredSecret {
   dir: string
   key: string
@@ -27,13 +32,23 @@ export interface DeclaredSecret {
 
 export type DeclaredLink = DeclaredSecret & { entry: LinkSecret }
 
-/** A directory with a manifest: its .env (content undefined until `setup` created it) and its .env.template values */
+/** A generate secret built from another key of its manifest, such as the bcrypt hash of a password */
+export type DeclaredDerived = DeclaredSecret & { entry: GenerateSecret & { generator: DerivedGenerator } }
+
+/**
+ * A directory with a manifest: its .env (content undefined until `setup` created it), its .env.secrets (content
+ * undefined until a secret is written there), its .env.template values and the defaults the template shows commented out
+ */
 export interface SecretDirectory {
   dir: string
   envPath: string
   envContent?: string
   env: Record<string, string>
+  secretsPath: string
+  secretsContent?: string
+  secrets: Record<string, string>
   template: Record<string, string>
+  defaults: Record<string, string>
 }
 
 export interface SecretState {
@@ -45,11 +60,14 @@ export interface SecretState {
 export type SecretStatus = 'ok' | 'unset' | 'missing' | 'mismatch' | 'required'
 
 export interface SecretCheck {
+  /** The file that holds the key: the .env, or the .env.secrets beside it */
   envPath: string
   key: string
   status: SecretStatus
-  /** The .env and key a link copies from */
+  /** The file and key a link copies from or a derived value is built from */
   source?: { envPath: string, key: string }
+  /** Set on a derived value, whose mismatch is no difference but a hash that does not fit its input */
+  derived?: boolean
   /** The root .env condition a required prompt secret is missing for, such as N8N_VARIANT=enterprise */
   condition?: string
 }
@@ -68,10 +86,25 @@ export interface SecretValue {
   key: string
   value: string | undefined
   source: SecretEntry['source']
+  /** Set on a derived value, which `secrets read` lists only when it is named */
+  derived?: boolean
+  /** The keys the entry names as `related`, with their value of the .env or the default of the template */
+  related?: Record<string, string | undefined>
 }
+
+/** The queued values per file path */
+type Updates = Map<string, Record<string, string>>
 
 function isLink(secret: DeclaredSecret): secret is DeclaredLink {
   return secret.entry.source === 'link'
+}
+
+export function isDerivedSecret(secret: DeclaredSecret): secret is DeclaredDerived {
+  return secret.entry.source === 'generate' && isDerived(secret.entry.generator)
+}
+
+function inSecretsFile(entry: SecretEntry): boolean {
+  return entry.source === 'generate' && entry.file === SECRETS_FILENAME
 }
 
 async function readOptionalFile(path: string): Promise<string | undefined> {
@@ -84,15 +117,36 @@ async function readOptionalFile(path: string): Promise<string | undefined> {
   }
 }
 
+/** The file a declared secret lives in: the .env compose reads, or the .env.secrets beside it */
+export function secretPath(state: SecretState, secret: DeclaredSecret): string {
+  const directory = state.directories.get(secret.dir)!
+  return inSecretsFile(secret.entry) ? directory.secretsPath : directory.envPath
+}
+
+function secretValues(state: SecretState, secret: DeclaredSecret): Record<string, string> {
+  const directory = state.directories.get(secret.dir)!
+  return inSecretsFile(secret.entry) ? directory.secrets : directory.env
+}
+
+export function secretValue(state: SecretState, secret: DeclaredSecret): string | undefined {
+  return secretValues(state, secret)[secret.key]
+}
+
 /** The declaration a link copies from; readSecretManifests guarantees it exists and is not a link itself */
 export function linkSource(link: DeclaredLink, declared: DeclaredSecret[]): DeclaredSecret {
   const dir = resolve(link.dir, link.entry.from)
   return declared.find(candidate => candidate.dir === dir && candidate.key === link.entry.key)!
 }
 
+/** The declaration a derived value is built from; readSecretManifests guarantees it is a random generate entry of the same manifest */
+export function derivedInput(derived: DeclaredDerived, declared: DeclaredSecret[]): DeclaredSecret {
+  return declared.find(candidate => candidate.dir === derived.dir && candidate.key === derived.entry.generator.input)!
+}
+
 /**
- * Every key of every .env.secrets.json under rootDir, validated, with every link resolved to a generate
- * or prompt entry of another manifest. Throws naming the manifest on the first problem.
+ * Every key of every .env.json under rootDir, validated, with every link resolved to a generate or prompt entry
+ * of another manifest and every generator input to a random generate entry of the same one. Throws naming the
+ * manifest on the first problem.
  */
 export async function readSecretManifests(rootDir: string): Promise<DeclaredSecret[]> {
   const declared: DeclaredSecret[] = []
@@ -110,20 +164,28 @@ export async function readSecretManifests(rootDir: string): Promise<DeclaredSecr
       declared.push({ dir: dirname(file), key, entry })
   }
   for (const secret of declared) {
-    if (!isLink(secret))
-      continue
-    const target = resolve(secret.dir, secret.entry.from)
-    const source = declared.find(candidate => candidate.dir === target && candidate.key === secret.entry.key)
-    const link = `${join(relative(rootDir, secret.dir), MANIFEST_FILENAME)}: ${secret.key} links to ${secret.entry.key} of ${relative(rootDir, target) || '.'}`
-    if (source === undefined)
-      throw new Error(`Invalid ${link}, which no ${MANIFEST_FILENAME} declares`)
-    if (isLink(source))
-      throw new Error(`Invalid ${link}, which is a link itself`)
+    const manifest = join(relative(rootDir, secret.dir), MANIFEST_FILENAME)
+    if (isLink(secret)) {
+      const target = resolve(secret.dir, secret.entry.from)
+      const source = declared.find(candidate => candidate.dir === target && candidate.key === secret.entry.key)
+      const link = `${manifest}: ${secret.key} links to ${secret.entry.key} of ${relative(rootDir, target) || '.'}`
+      if (source === undefined)
+        throw new Error(`Invalid ${link}, which no ${MANIFEST_FILENAME} declares`)
+      if (isLink(source))
+        throw new Error(`Invalid ${link}, which is a link itself`)
+    } else if (isDerivedSecret(secret)) {
+      const input = derivedInput(secret, declared) as DeclaredSecret | undefined
+      const derived = `${manifest}: ${secret.key} is derived from ${secret.entry.generator.input}`
+      if (input === undefined)
+        throw new Error(`Invalid ${derived}, which the manifest does not declare`)
+      if (input.entry.source !== 'generate' || isDerived(input.entry.generator))
+        throw new Error(`Invalid ${derived}, which is not a random generate entry`)
+    }
   }
   return declared
 }
 
-/** The manifests with the .env and .env.template values of their directories */
+/** The manifests with the .env, .env.secrets and .env.template values of their directories */
 export async function readSecretState(rootDir: string): Promise<SecretState> {
   const declared = await readSecretManifests(rootDir)
   const directories = new Map<string, SecretDirectory>()
@@ -133,7 +195,19 @@ export async function readSecretState(rootDir: string): Promise<SecretState> {
       throw new Error(`No ${TEMPLATE_FILENAME} next to ${join(relative(rootDir, dir), MANIFEST_FILENAME)}`)
     const envPath = join(dir, ENV_FILENAME)
     const envContent = await readOptionalFile(envPath)
-    directories.set(dir, { dir, envPath, envContent, env: envContent === undefined ? {} : parseEnvContent(envContent), template: parseEnvContent(template) })
+    const secretsPath = join(dir, SECRETS_FILENAME)
+    const secretsContent = await readOptionalFile(secretsPath)
+    directories.set(dir, {
+      dir,
+      envPath,
+      envContent,
+      env: envContent === undefined ? {} : parseEnvContent(envContent),
+      secretsPath,
+      secretsContent,
+      secrets: secretsContent === undefined ? {} : parseEnvContent(secretsContent),
+      template: parseEnvContent(template),
+      defaults: parseEnvDefaults(template),
+    })
   }
   return { rootDir, declared, directories }
 }
@@ -143,8 +217,10 @@ export function isUnfilled(value: string | undefined, templateValue: string | un
   return value === undefined || value === '' || value === templateValue
 }
 
-export function generateSecret(entry: GenerateSecret): string {
-  return entry.prefix + randomBytes(entry.bytes).toString(entry.encoding)
+/** isUnfilled for a declared secret in the file it lives in; a .env.secrets key has no template value */
+export function isSecretUnfilled(state: SecretState, secret: DeclaredSecret): boolean {
+  const templateValue = inSecretsFile(secret.entry) ? undefined : state.directories.get(secret.dir)!.template[secret.key]
+  return isUnfilled(secretValue(state, secret), templateValue)
 }
 
 /** The root .env condition a prompt secret is required under right now, such as `N8N_VARIANT=enterprise`, or undefined while it is optional */
@@ -163,23 +239,24 @@ export function requiredBy(entry: PromptSecret, config: Config): string | undefi
 export function checkSecrets(state: SecretState, config?: Config): SecretCheck[] {
   const checks: SecretCheck[] = []
   for (const secret of state.declared) {
-    const directory = state.directories.get(secret.dir)!
-    if (directory.envContent === undefined)
+    if (state.directories.get(secret.dir)!.envContent === undefined)
       continue
-    const { envPath, env, template } = directory
     const { key, entry } = secret
-    const unfilled = isUnfilled(env[key], template[key])
-    if (entry.source === 'generate') {
+    const envPath = secretPath(state, secret)
+    const unfilled = isSecretUnfilled(state, secret)
+    if (isDerivedSecret(secret)) {
+      const input = derivedInput(secret, state.declared)
+      const fits = isSecretUnfilled(state, input) || isDerivedFrom(secret.entry.generator, secretValue(state, input)!, secretValue(state, secret) ?? '')
+      checks.push({ envPath, key, status: unfilled ? 'missing' : fits ? 'ok' : 'mismatch', source: { envPath: secretPath(state, input), key: input.key }, derived: true })
+    } else if (entry.source === 'generate') {
       checks.push({ envPath, key, status: unfilled ? 'missing' : 'ok' })
-    } else if (entry.source === 'link') {
-      const source = linkSource({ ...secret, entry }, state.declared)
-      const sourceDirectory = state.directories.get(source.dir)!
-      const sourceValue = sourceDirectory.env[source.key]
-      const sourceFilled = !isUnfilled(sourceValue, sourceDirectory.template[source.key])
-      const status = unfilled ? 'missing' : sourceFilled && env[key] !== sourceValue ? 'mismatch' : 'ok'
-      checks.push({ envPath, key, status, source: { envPath: sourceDirectory.envPath, key: source.key } })
+    } else if (isLink(secret)) {
+      const source = linkSource(secret, state.declared)
+      const sourceFilled = !isSecretUnfilled(state, source)
+      const status = unfilled ? 'missing' : sourceFilled && secretValue(state, secret) !== secretValue(state, source) ? 'mismatch' : 'ok'
+      checks.push({ envPath, key, status, source: { envPath: secretPath(state, source), key: source.key } })
     } else {
-      const condition = config === undefined ? undefined : requiredBy(entry, config)
+      const condition = config === undefined ? undefined : requiredBy(entry as PromptSecret, config)
       const status = !unfilled ? 'ok' : condition === undefined ? 'unset' : 'required'
       checks.push({ envPath, key, status, ...(condition === undefined ? {} : { condition }) })
     }
@@ -194,7 +271,7 @@ export function formatSecretCheck(rootDir: string, check: SecretCheck): string {
     case 'missing':
       return `Missing secret ${check.key} in ${path}`
     case 'mismatch':
-      return `${check.key} in ${path} differs from ${check.source!.key} in ${relative(rootDir, check.source!.envPath)}`
+      return `${check.key} in ${path} ${check.derived ? 'does not match' : 'differs from'} ${check.source!.key} in ${relative(rootDir, check.source!.envPath)}`
     case 'required':
       return `${check.key} in ${path} is required for ${check.condition}, run ${runCommand(`secrets set ${check.key}`)}`
     case 'unset':
@@ -204,53 +281,89 @@ export function formatSecretCheck(rootDir: string, check: SecretCheck): string {
   }
 }
 
-/** Queues a value for its .env and makes it visible to the passes that follow */
-function queue(updates: Map<string, Record<string, string>>, directory: SecretDirectory, key: string, value: string) {
-  directory.env[key] = value
-  updates.set(directory.dir, { ...updates.get(directory.dir), [key]: value })
+/** Queues a value for the file its secret lives in and makes it visible to the passes that follow */
+function queue(updates: Updates, state: SecretState, secret: DeclaredSecret, value: string) {
+  secretValues(state, secret)[secret.key] = value
+  const path = secretPath(state, secret)
+  updates.set(path, { ...updates.get(path), [secret.key]: value })
 }
 
-/** Writes the queued values into their .env files, comments and other keys preserved, and keeps the state in sync */
-async function applyUpdates(state: SecretState, updates: Map<string, Record<string, string>>) {
-  for (const [dir, values] of updates) {
-    const directory = state.directories.get(dir)!
-    directory.envContent = updateEnvContent(directory.envContent!, values)
-    await writeFile(directory.envPath, directory.envContent)
+/**
+ * Writes the queued values into their files, comments and other keys preserved, and keeps the state in sync;
+ * a .env.secrets is created on its first value, readable by its owner only
+ */
+async function applyUpdates(state: SecretState, updates: Updates) {
+  for (const [path, values] of updates) {
+    const directory = state.directories.get(dirname(path))!
+    if (path === directory.secretsPath) {
+      directory.secretsContent = updateEnvContent(directory.secretsContent ?? SECRETS_HEADER, values)
+      await writeFile(path, directory.secretsContent, { mode: 0o600 })
+    } else {
+      directory.envContent = updateEnvContent(directory.envContent!, values)
+      await writeFile(path, directory.envContent)
+    }
   }
 }
 
 /**
- * Fills the .env files: every unfilled generate secret gets a random value once, then every link is set to
- * its source (always, so a source set by hand propagates). Prompt secrets, filled values and directories
- * without a .env are left alone, so re-running changes nothing (see ../../../../SPEC.md).
+ * The value a derived secret needs now, or undefined while its input is unfilled or it already fits: a salted
+ * hash is new on every run, so it is only rewritten when it is empty or no longer the hash of its input
+ */
+function staleDerived(state: SecretState, secret: DeclaredDerived): string | undefined {
+  const input = derivedInput(secret, state.declared)
+  if (isSecretUnfilled(state, input))
+    return undefined
+  const inputValue = secretValue(state, input)!
+  if (!isSecretUnfilled(state, secret) && isDerivedFrom(secret.entry.generator, inputValue, secretValue(state, secret)!))
+    return undefined
+  return derive(secret.entry.generator, inputValue)
+}
+
+/**
+ * Fills the .env and .env.secrets files: every unfilled random secret gets a value once, then every derived
+ * value is set to what its input gives and every link to its source (always, so an input or a source set by
+ * hand propagates). Prompt secrets, filled values and directories without a .env are left alone, so re-running
+ * changes nothing (see ../../../../SPEC.md).
  */
 export async function fillSecrets(rootDir: string): Promise<SecretWriteResult[]> {
   const state = await readSecretState(rootDir)
-  const updates = new Map<string, Record<string, string>>()
+  const updates: Updates = new Map()
   const results: SecretWriteResult[] = []
+  const hasEnv = (secret: DeclaredSecret) => state.directories.get(secret.dir)!.envContent !== undefined
   for (const secret of state.declared) {
-    const directory = state.directories.get(secret.dir)!
-    if (secret.entry.source !== 'generate' || directory.envContent === undefined)
+    if (secret.entry.source !== 'generate' || isDerived(secret.entry.generator) || !hasEnv(secret))
       continue
-    if (isUnfilled(directory.env[secret.key], directory.template[secret.key])) {
-      queue(updates, directory, secret.key, generateSecret(secret.entry))
-      results.push({ envPath: directory.envPath, key: secret.key, status: 'generated' })
+    if (isSecretUnfilled(state, secret)) {
+      queue(updates, state, secret, generateRandom(secret.entry.generator))
+      results.push({ envPath: secretPath(state, secret), key: secret.key, status: 'generated' })
     }
   }
   for (const secret of state.declared) {
-    const directory = state.directories.get(secret.dir)!
-    if (!isLink(secret) || directory.envContent === undefined)
+    if (!isDerivedSecret(secret) || !hasEnv(secret))
+      continue
+    const value = staleDerived(state, secret)
+    if (value === undefined)
+      continue
+    queue(updates, state, secret, value)
+    results.push({ envPath: secretPath(state, secret), key: secret.key, status: 'generated' })
+  }
+  for (const secret of state.declared) {
+    if (!isLink(secret) || !hasEnv(secret))
       continue
     const source = linkSource(secret, state.declared)
-    const sourceDirectory = state.directories.get(source.dir)!
-    const value = sourceDirectory.env[source.key]
-    if (value === undefined || isUnfilled(value, sourceDirectory.template[source.key]) || directory.env[secret.key] === value)
+    const value = secretValue(state, source)
+    if (value === undefined || isSecretUnfilled(state, source) || secretValue(state, secret) === value)
       continue
-    queue(updates, directory, secret.key, value)
-    results.push({ envPath: directory.envPath, key: secret.key, status: 'linked' })
+    queue(updates, state, secret, value)
+    results.push({ envPath: secretPath(state, secret), key: secret.key, status: 'linked' })
   }
   await applyUpdates(state, updates)
   return results
+}
+
+/** The value of a related key: what the .env sets, else the live value or the commented default of the template */
+function relatedValue(directory: SecretDirectory, key: string): string | undefined {
+  return directory.env[key] || directory.template[key] || directory.defaults[key] || undefined
 }
 
 /** The declared secrets with their current values, keeping those whose directory or key contains `filter` (case-insensitive) */
@@ -260,32 +373,57 @@ export function listSecrets(state: SecretState, filter = ''): SecretValue[] {
     .filter(secret => relative(state.rootDir, secret.dir).toLowerCase().includes(needle) || secret.key.toLowerCase().includes(needle))
     .map((secret) => {
       const directory = state.directories.get(secret.dir)!
-      return { envPath: directory.envPath, key: secret.key, value: directory.env[secret.key], source: secret.entry.source }
+      const related = secret.entry.source === 'link' ? undefined : secret.entry.related
+      return {
+        envPath: secretPath(state, secret),
+        key: secret.key,
+        value: secretValue(state, secret),
+        source: secret.entry.source,
+        ...(isDerivedSecret(secret) ? { derived: true } : {}),
+        ...(related === undefined ? {} : { related: Object.fromEntries(related.map(key => [key, relatedValue(directory, key)])) }),
+      }
     })
 }
 
-/** Writes `value` to every directory declaring `key` as generate or prompt, then to every link of it */
+/** A key `secrets set` writes: a link follows its source and a derived value its input */
+function isSettable(secret: DeclaredSecret): boolean {
+  return !isLink(secret) && !isDerivedSecret(secret)
+}
+
+/** Writes `value` to every directory declaring `key` as a settable secret, then to what is derived from it and to every link */
 export async function setSecret(state: SecretState, key: string, value: string): Promise<SecretWriteResult[]> {
-  const targets = state.declared.filter(secret => secret.key === key && !isLink(secret))
+  const targets = state.declared.filter(secret => secret.key === key && isSettable(secret))
   if (targets.length === 0)
     throw new Error(`Unknown secret "${key}"`)
-  const updates = new Map<string, Record<string, string>>()
+  const updates: Updates = new Map()
   const results: SecretWriteResult[] = []
+  const hasEnv = (secret: DeclaredSecret) => state.directories.get(secret.dir)!.envContent !== undefined
   for (const target of targets) {
-    const directory = state.directories.get(target.dir)!
-    if (directory.envContent === undefined)
-      throw new Error(`No ${relative(state.rootDir, directory.envPath)} file found. Run ${runCommand('setup')} first.`)
-    queue(updates, directory, key, value)
-    results.push({ envPath: directory.envPath, key, status: 'set' })
+    if (!hasEnv(target))
+      throw new Error(`No ${relative(state.rootDir, state.directories.get(target.dir)!.envPath)} file found. Run ${runCommand('setup')} first.`)
+    queue(updates, state, target, value)
+    results.push({ envPath: secretPath(state, target), key, status: 'set' })
+  }
+  const written = [...targets]
+  for (const secret of state.declared) {
+    if (!isDerivedSecret(secret) || !targets.includes(derivedInput(secret, state.declared)) || !hasEnv(secret))
+      continue
+    const derived = staleDerived(state, secret)
+    if (derived === undefined)
+      continue
+    queue(updates, state, secret, derived)
+    written.push(secret)
+    results.push({ envPath: secretPath(state, secret), key: secret.key, status: 'generated' })
   }
   for (const secret of state.declared) {
-    if (!isLink(secret) || !targets.includes(linkSource(secret, state.declared)))
+    if (!isLink(secret) || !hasEnv(secret))
       continue
-    const directory = state.directories.get(secret.dir)!
-    if (directory.envContent === undefined || directory.env[secret.key] === value)
+    const source = linkSource(secret, state.declared)
+    const sourceValue = secretValue(state, source)
+    if (!written.includes(source) || sourceValue === undefined || secretValue(state, secret) === sourceValue)
       continue
-    queue(updates, directory, secret.key, value)
-    results.push({ envPath: directory.envPath, key: secret.key, status: 'linked' })
+    queue(updates, state, secret, sourceValue)
+    results.push({ envPath: secretPath(state, secret), key: secret.key, status: 'linked' })
   }
   await applyUpdates(state, updates)
   return results
@@ -301,22 +439,32 @@ export async function readRootConfigIfValid(rootDir: string): Promise<Config | u
 }
 
 /**
- * `secrets read [filter] [--json]`: the declared secrets and their values on stdout, nothing else; grouped
- * by .env with the keys in cyan on a tty, only the value when the filter is an exact key (so it can be piped),
- * or with `json` one array of `{ file, key, value, source }` (`value` null while the key is absent from the .env)
+ * `secrets read [filter] [--json]`: the declared secrets and their values on stdout, nothing else; grouped by
+ * the file that holds them with the keys in cyan on a tty and the `related` keys of a secret above it, only the
+ * value when the filter is an exact key (so it can be piped), or with `json` one array of
+ * `{ file, key, value, source, related? }` (`value` null while the key is absent from its file). A derived value
+ * is listed only when it is named: a hash is of no use to a reader.
  */
 async function read(rootDir: string, filter: string | undefined, json: boolean): Promise<void> {
   const state = await readSecretState(rootDir)
   const exact = filter !== undefined && state.declared.some(secret => secret.key === filter.toUpperCase()) ? filter.toUpperCase() : undefined
-  const matches = exact === undefined ? listSecrets(state, filter) : listSecrets(state, exact).filter(secret => secret.key === exact)
+  const matches = exact === undefined ? listSecrets(state, filter).filter(secret => !secret.derived) : listSecrets(state, exact).filter(secret => secret.key === exact)
   if (matches.length === 0)
     throw new Error(filter === undefined ? `No ${MANIFEST_FILENAME} found in ${rootDir}` : `No secret matches "${filter}", run ${runCommand('secrets read')} for the list`)
-  for (const envPath of new Set(matches.map(match => match.envPath))) {
-    if (state.directories.get(dirname(envPath))!.envContent === undefined)
-      throw new Error(`No ${relative(rootDir, envPath)} file found. Run ${runCommand('setup')} first.`)
+  for (const path of new Set(matches.map(match => match.envPath))) {
+    const directory = state.directories.get(dirname(path))!
+    const missing = directory.envContent === undefined ? directory.envPath : path === directory.secretsPath && directory.secretsContent === undefined ? path : undefined
+    if (missing !== undefined)
+      throw new Error(`No ${relative(rootDir, missing)} file found. Run ${runCommand('setup')} first.`)
   }
   if (json) {
-    console.log(JSON.stringify(matches.map(({ envPath, key, value, source }) => ({ file: relative(rootDir, envPath), key, value: value ?? null, source })), null, 2))
+    console.log(JSON.stringify(matches.map(({ envPath, key, value, source, related }) => ({
+      file: relative(rootDir, envPath),
+      key,
+      value: value ?? null,
+      source,
+      ...(related === undefined ? {} : { related: Object.fromEntries(Object.entries(related).map(([name, current]) => [name, current ?? null])) }),
+    })), null, 2))
     return
   }
   if (exact !== undefined) {
@@ -324,42 +472,63 @@ async function read(rootDir: string, filter: string | undefined, json: boolean):
       console.log(match.value ?? '')
     return
   }
-  const lines: string[] = []
-  let current: string | undefined
-  for (const match of matches) {
-    if (match.envPath !== current) {
-      if (current !== undefined)
-        lines.push('')
-      lines.push(relative(rootDir, match.envPath))
-      current = match.envPath
+  const groups = new Map<string, SecretValue[]>()
+  for (const match of matches)
+    groups.set(match.envPath, [...(groups.get(match.envPath) ?? []), match])
+  const blocks = [...groups].map(([path, group]) => {
+    const lines = [relative(rootDir, path)]
+    const printed = new Set<string>()
+    for (const match of group) {
+      for (const [name, current] of Object.entries(match.related ?? {})) {
+        if (!printed.has(name))
+          lines.push(keyValue(name, current ?? ''))
+        printed.add(name)
+      }
+      lines.push(keyValue(match.key, match.value ?? ''))
     }
-    lines.push(keyValue(match.key, match.value ?? ''))
+    return lines.join('\n')
+  })
+  console.log(blocks.join('\n\n'))
+}
+
+/** Why a value cannot be written as a secret, or undefined; never holds the value */
+function valueProblem(value: string): string | undefined {
+  if (value.length === 0)
+    return 'the value must not be empty'
+  try {
+    formatEnvValue(value)
+    return undefined
+  } catch (error) {
+    return (error as Error).message
   }
-  console.log(lines.join('\n'))
 }
 
 /**
  * `secrets set KEY [value]`: writes one generate or prompt secret, asked for with a masked prompt when no
- * value is given, then copies it to its links. A link key is refused with a pointer to its source.
+ * value is given, then what is derived from it and its links. A link or a derived key is refused with a
+ * pointer to the key it follows.
  */
 async function set(rootDir: string, key: string | undefined, value: string | undefined): Promise<void> {
   logger.intro('n8n-starter secrets set')
 
   const state = await readSecretState(rootDir)
-  const names = [...new Set(state.declared.filter(secret => !isLink(secret)).map(secret => secret.key))].join(', ')
+  const names = [...new Set(state.declared.filter(isSettable).map(secret => secret.key))].join(', ')
   if (key === undefined) {
     logger.error(`Missing secret key. Expected one of: ${names}`)
     process.exitCode = 1
     return
   }
-  const targets = state.declared.filter(secret => secret.key === key && !isLink(secret))
+  const targets = state.declared.filter(secret => secret.key === key && isSettable(secret))
   if (targets.length === 0) {
-    const link = state.declared.find(secret => secret.key === key && isLink(secret)) as DeclaredLink | undefined
-    if (link === undefined) {
+    const other = state.declared.find(secret => secret.key === key)
+    if (other === undefined) {
       logger.error(`Unknown secret "${key}". Expected one of: ${names}`)
+    } else if (isLink(other)) {
+      const source = linkSource(other, state.declared)
+      logger.error(`${key} is a copy of ${source.key} in ${relative(rootDir, secretPath(state, source))}, run ${runCommand(`secrets set ${source.key}`)}`)
     } else {
-      const source = linkSource(link, state.declared)
-      logger.error(`${key} is a copy of ${source.key} in ${relative(rootDir, join(source.dir, ENV_FILENAME))}, run ${runCommand(`secrets set ${source.key}`)}`)
+      const input = derivedInput(other as DeclaredDerived, state.declared)
+      logger.error(`${key} is derived from ${input.key} in ${relative(rootDir, secretPath(state, input))}, run ${runCommand(`secrets set ${input.key}`)}`)
     }
     process.exitCode = 1
     return
@@ -377,27 +546,31 @@ async function set(rootDir: string, key: string | undefined, value: string | und
   if (resolved === undefined) {
     const entered = await password({
       message: (targets[0]!.entry as GenerateSecret | PromptSecret).description,
-      validate: entered => (entered ?? '').length > 0 ? undefined : 'The value must not be empty',
+      validate: (entered) => {
+        const problem = valueProblem(entered ?? '')
+        return problem === undefined ? undefined : problem[0]!.toUpperCase() + problem.slice(1)
+      },
     })
     if (isCancel(entered)) {
       logger.cancel('Secret not changed.')
       return
     }
     resolved = entered
-  } else if (resolved === '') {
-    logger.error(`Invalid ${key}: the value must not be empty`)
+  }
+  const problem = valueProblem(resolved)
+  if (problem !== undefined) {
+    logger.error(`Invalid ${key}: ${problem}`)
     process.exitCode = 1
     return
   }
 
   for (const target of targets) {
-    const directory = state.directories.get(target.dir)!
-    if (target.entry.source === 'generate' && target.entry.rotation === 'never' && !isUnfilled(directory.env[key], directory.template[key]))
-      logger.warn(`${key} in ${relative(rootDir, directory.envPath)} is already set and the data in .volumes/ depends on it`)
+    if (target.entry.source === 'generate' && target.entry.rotation === 'never' && !isSecretUnfilled(state, target))
+      logger.warn(`${key} in ${relative(rootDir, secretPath(state, target))} is already set and the data in .volumes/ depends on it`)
   }
 
   for (const { envPath, key: written, status } of await setSecret(state, key, resolved))
-    logger.success(`${written} ${status === 'set' ? 'set' : 'linked'} in ${relative(rootDir, envPath)}`)
+    logger.success(`${written} ${status === 'linked' ? 'linked' : status === 'generated' ? 'derived' : 'set'} in ${relative(rootDir, envPath)}`)
   logger.outro('Secret written.')
 }
 

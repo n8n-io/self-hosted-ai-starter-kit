@@ -34,7 +34,7 @@ One entry per model: `id` (the `AI_MODELS` value and the DNS label of the docker
 ## The gateway (`AI_GATEWAY`, today `litellm`)
 
 - The compose file declares the config `litellm-config` with an empty `model_list`, mounted at `/app/config.yaml`; the plan replaces its `content` (`gatewayProjects()`, [tilt](../../tilt/SKILL.md) skill). Never a model name in the compose file.
-- It holds the key of every engine it calls as a `link` in its `.env.secrets.json` (`VLLM_API_KEY` of `compose/models/vllm`).
+- It holds the key of every engine it calls as a `link` in its `.env.json` (`VLLM_API_KEY` of `compose/models/vllm`).
 
 ## Recipes
 
@@ -49,7 +49,7 @@ Each ends with the gates of the [validate](../../validate/SKILL.md) skill for th
 
 ### Add a gateway
 
-1. Add `compose/models/<gateway>/docker-compose.yml` like any service (recipe "add a service", steps 1 to 3), with the model list as a top-level `configs` entry whose `content` an override can replace, and a link in its `.env.secrets.json` for every engine key it needs.
+1. Add `compose/models/<gateway>/docker-compose.yml` like any service (recipe "add a service", steps 1 to 3), with the model list as a top-level `configs` entry whose `content` an override can replace, and a link in its `.env.json` for every engine key it needs.
 2. Mirrors: `AI_GATEWAYS` in `packages/cli/src/schemas/config.ts` (empty stays the default), the `Options:` comment of `AI_GATEWAY` in the root `.env.template`, `GATEWAYS` in `packages/cli/src/utils/models.ts` (endpoint and key), SPEC.md (configuration block, gateway table).
 3. `gatewayProjects()` in `packages/cli/src/commands/tilt.ts`: the project, enabled by its `AI_GATEWAY` value, with the model list built from the catalogue, and a case in `tests/tilt.test.ts`.
 4. Check: the Tiltfile evaluates with the gateway set in the root `.env`.

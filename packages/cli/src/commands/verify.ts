@@ -31,7 +31,7 @@ export interface VerifyResult {
   envFiles: EnvFileCheck[]
   /** Every declared secret of a .env that exists (see ./secrets.ts); empty when a manifest is invalid */
   secrets: SecretCheck[]
-  /** Set when a .env.secrets.json is missing its template, invalid or links to nothing. */
+  /** Set when a .env.json is missing its template, invalid or links to nothing. */
   secretsError?: string
   networks: DockerNetworkCheck[]
   /** Set when the docker CLI could not be queried at all. */

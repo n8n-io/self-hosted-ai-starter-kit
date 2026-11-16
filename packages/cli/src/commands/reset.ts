@@ -4,23 +4,21 @@ import { confirm, isCancel } from '@clack/prompts'
 import { findFiles } from '../utils/files'
 import { runCommand } from '../utils/format'
 import { logger } from '../utils/logger'
-import { isUnfilled, readSecretState } from './secrets'
+import { isSecretUnfilled, readSecretState, secretPath, SECRETS_FILENAME } from './secrets'
 
 const ENV_FILENAME = '.env'
 
+/** Every file `setup` generated: the .env files and the .env.secrets beside them, also one left without its .env */
 export async function findEnvFiles(rootDir: string): Promise<string[]> {
-  return findFiles(rootDir, ENV_FILENAME)
+  return [...await findFiles(rootDir, ENV_FILENAME), ...await findFiles(rootDir, SECRETS_FILENAME)].sort()
 }
 
 /** The generated secrets the data in .volumes/ depends on (rotation manual or never, see ./secrets.ts), as `KEY (path)` */
 async function boundSecrets(rootDir: string): Promise<string[]> {
   const state = await readSecretState(rootDir)
   return state.declared
-    .filter((secret) => {
-      const directory = state.directories.get(secret.dir)!
-      return secret.entry.source === 'generate' && secret.entry.rotation !== 'free' && !isUnfilled(directory.env[secret.key], directory.template[secret.key])
-    })
-    .map(secret => `${secret.key} (${relative(rootDir, state.directories.get(secret.dir)!.envPath)})`)
+    .filter(secret => secret.entry.source === 'generate' && secret.entry.rotation !== 'free' && !isSecretUnfilled(state, secret))
+    .map(secret => `${secret.key} (${relative(rootDir, secretPath(state, secret))})`)
 }
 
 export async function reset(rootDir = process.cwd()) {
@@ -29,11 +27,11 @@ export async function reset(rootDir = process.cwd()) {
   const envFiles = await findEnvFiles(rootDir)
 
   if (envFiles.length === 0) {
-    logger.outro(`No ${ENV_FILENAME} files found. Nothing to delete.`)
+    logger.outro('No generated files found. Nothing to delete.')
     return
   }
 
-  logger.warn(`The following ${ENV_FILENAME} file(s) will be deleted:`)
+  logger.warn('The following generated file(s) will be deleted:')
   for (const file of envFiles)
     logger.info(relative(rootDir, file))
 
@@ -45,7 +43,7 @@ export async function reset(rootDir = process.cwd()) {
   } catch {}
 
   const confirmed = await confirm({
-    message: `Delete ${envFiles.length} ${ENV_FILENAME} file(s)?`,
+    message: `Delete ${envFiles.length} generated file(s)?`,
     initialValue: false,
   })
 

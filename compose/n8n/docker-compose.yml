@@ -23,6 +23,14 @@ x-n8n-env-hosting: &n8n-env-hosting
   N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-false}
   N8N_PROXY_HOPS: ${N8N_PROXY_HOPS:-1}
 
+# the instance owner n8n applies on every start, the hash is derived by `pnpm run setup`, see ../../SPEC.md
+x-n8n-env-owner: &n8n-env-owner
+  N8N_INSTANCE_OWNER_MANAGED_BY_ENV: ${N8N_INSTANCE_OWNER_MANAGED_BY_ENV:-true}
+  N8N_INSTANCE_OWNER_EMAIL: ${N8N_INSTANCE_OWNER_EMAIL:-owner@example.com}
+  N8N_INSTANCE_OWNER_FIRST_NAME: ${N8N_INSTANCE_OWNER_FIRST_NAME:-Instance}
+  N8N_INSTANCE_OWNER_LAST_NAME: ${N8N_INSTANCE_OWNER_LAST_NAME:-Owner}
+  N8N_INSTANCE_OWNER_PASSWORD_HASH: ${N8N_INSTANCE_OWNER_PASSWORD_HASH:?}
+
 # the internal runner is JavaScript only, Python needs the external runner of ./docker-compose.build.yml, see ../../SPEC.md
 x-n8n-env-runners-internal: &n8n-env-runners-internal
   N8N_RUNNERS_MODE: internal
@@ -48,7 +56,7 @@ services:
     volumes:
       - ${VOLUMES_PATH:-../../.volumes}/n8n/data:/home/node/.n8n
     environment:
-      <<: [ *n8n-env, *n8n-env-hosting, *n8n-env-sqlite, *n8n-env-runners-internal ]
+      <<: [ *n8n-env, *n8n-env-hosting, *n8n-env-owner, *n8n-env-sqlite, *n8n-env-runners-internal ]
     networks:
       - n8n-starter-public
       - n8n-starter-private

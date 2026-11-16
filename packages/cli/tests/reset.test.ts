@@ -64,6 +64,22 @@ test('deletes all .env files when confirmed', async () => {
   expect(existsSync(template)).toBe(true)
 })
 
+test('finds and deletes the .env.secrets beside a .env too, also one left without its .env, and keeps the manifests', async () => {
+  const env = await addEnvFile('compose/n8n')
+  const secrets = await addEnvFile('compose/n8n', '.env.secrets')
+  const orphan = await addEnvFile('compose/postgres', '.env.secrets')
+  const manifest = await addEnvFile('compose/n8n', '.env.json')
+  confirmMock.mockResolvedValue(true)
+
+  expect(await findEnvFiles(rootDir)).toEqual([env, secrets, orphan])
+  await reset(rootDir)
+
+  expect(clack.log.info).toHaveBeenCalledWith('compose/n8n/.env.secrets')
+  expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ message: 'Delete 3 generated file(s)?' }))
+  expect([env, secrets, orphan].map(file => existsSync(file))).toEqual([false, false, false])
+  expect(existsSync(manifest)).toBe(true)
+})
+
 test('keeps all files when the confirmation is declined', async () => {
   const envFile = await addEnvFile('compose/n8n')
   confirmMock.mockResolvedValue(false)
@@ -93,7 +109,7 @@ test('warns about the generated secrets the data in .volumes/ depends on before 
   await mkdir(dir, { recursive: true })
   await writeFile(join(dir, '.env.template'), 'N8N_ENCRYPTION_KEY=\nN8N_USER_MANAGEMENT_JWT_SECRET=\n')
   await writeFile(join(dir, '.env'), 'N8N_ENCRYPTION_KEY=abc\nN8N_USER_MANAGEMENT_JWT_SECRET=def\n')
-  await writeFile(join(dir, '.env.secrets.json'), JSON.stringify({ secrets: {
+  await writeFile(join(dir, '.env.json'), JSON.stringify({ secrets: {
     N8N_ENCRYPTION_KEY: { source: 'generate', rotation: 'never', description: 'enc' },
     N8N_USER_MANAGEMENT_JWT_SECRET: { source: 'generate', description: 'jwt' },
   } }))

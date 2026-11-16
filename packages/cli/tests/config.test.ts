@@ -6,7 +6,7 @@ import { stripVTControlCharacters } from 'node:util'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { AI_ENGINES, AI_GATEWAYS, AI_RUNTIMES, aiGatewaySchema, configSchema, domainSchema, N8N_VARIANTS } from '../src/schemas/config'
 import type { DockerRunner } from '../src/utils/docker'
-import { parseEnvContent, updateEnvContent } from '../src/utils/env'
+import { formatEnvValue, parseEnvContent, parseEnvDefaults, updateEnvContent } from '../src/utils/env'
 import { setLogLevel } from '../src/utils/logger'
 import { DOCKER_INFO_FORMAT } from '../src/utils/platform'
 
@@ -189,6 +189,29 @@ test('updateEnvContent replaces values while preserving comments and appends mis
   expect(updated).toContain('AI_RUNTIME=gpu-nvidia')
   expect(updated).toContain('DOMAIN=n8n.localhost')
   expect(updated.endsWith('NEW_KEY=value\n')).toBe(true)
+})
+
+test('updateEnvContent leaves plain values as they are and single-quotes what compose or node would misread', () => {
+  // everything the CLI wrote so far: random values, prefixes, host names, id lists, versions, an empty value
+  for (const plain of ['0f9a', 'sk-Ab_9-x', 'n8n.localhost', 'qwen3-5-0-8b,qwen3-5-2b', '2.46.6', 'owner@example.com', ''])
+    expect(formatEnvValue(plain)).toBe(plain)
+
+  const hash = '$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy'
+  const updated = updateEnvContent('HASH=\nPASSWORD=\n', { HASH: hash, PASSWORD: 'pa#ss "word" $1' })
+
+  // docker compose takes a single-quoted value literally, an unquoted $ would be interpolated
+  expect(updated).toBe(`HASH='${hash}'\nPASSWORD='pa#ss "word" $1'\n`)
+  expect(parseEnvContent(updated)).toEqual({ HASH: hash, PASSWORD: 'pa#ss "word" $1' })
+})
+
+test.each([['a single quote', 'it\'s'], ['a backslash', 'a\\b'], ['a line break', 'a\nb']])('updateEnvContent refuses a value with %s without naming it', (_, value) => {
+  expect(() => updateEnvContent('KEY=\n', { KEY: value })).toThrow('the value must not hold a single quote, a backslash or a line break')
+})
+
+test('parseEnvDefaults reads the knobs a template shows commented out, not its comments or live keys', () => {
+  const template = '# required\nVERSION=1\nSECRET=\n\n# optional, defaults live in ./docker-compose.yml\n# hosting, Options: http or https\n# N8N_PROTOCOL=http\n# OWNER_EMAIL=owner@example.com\n# EMPTY=\n'
+
+  expect(parseEnvDefaults(template)).toEqual({ N8N_PROTOCOL: 'http', OWNER_EMAIL: 'owner@example.com', EMPTY: '' })
 })
 
 test('config without arguments asks which key, prompts only that key and writes it', async () => {
@@ -495,7 +518,7 @@ test('config warns about a human secret the new value requires and points at sec
   await mkdir(dir, { recursive: true })
   await writeFile(join(dir, '.env.template'), 'N8N_LICENSE_ACTIVATION_KEY=\n')
   await writeFile(join(dir, '.env'), 'N8N_LICENSE_ACTIVATION_KEY=\n')
-  await writeFile(join(dir, '.env.secrets.json'), JSON.stringify({ secrets: { N8N_LICENSE_ACTIVATION_KEY: { source: 'prompt', description: 'license', required: { N8N_VARIANT: ['enterprise'] } } } }))
+  await writeFile(join(dir, '.env.json'), JSON.stringify({ secrets: { N8N_LICENSE_ACTIVATION_KEY: { source: 'prompt', description: 'license', required: { N8N_VARIANT: ['enterprise'] } } } }))
 
   await config(rootDir, ['N8N_VARIANT', 'enterprise'])
 

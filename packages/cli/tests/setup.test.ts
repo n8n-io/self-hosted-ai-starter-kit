@@ -146,9 +146,9 @@ test('setup fails with a non-zero exit code when docker is unavailable', async (
 
 test('setup fills the secrets of the .env files once and copies the links', async () => {
   const postgres = await addTemplate('compose/storage/postgres', 'POSTGRES_USER=changeUser\nPOSTGRES_PASSWORD=\n')
-  await writeFile(join(postgres, '.env.secrets.json'), JSON.stringify({ secrets: { POSTGRES_PASSWORD: { source: 'generate', description: 'db' } } }))
+  await writeFile(join(postgres, '.env.json'), JSON.stringify({ secrets: { POSTGRES_PASSWORD: { source: 'generate', description: 'db' } } }))
   const n8n = await addTemplate('compose/n8n', 'N8N_VERSION=1\nDB_POSTGRESDB_PASSWORD=\n')
-  await writeFile(join(n8n, '.env.secrets.json'), JSON.stringify({ secrets: { DB_POSTGRESDB_PASSWORD: { source: 'link', from: '../storage/postgres', key: 'POSTGRES_PASSWORD' } } }))
+  await writeFile(join(n8n, '.env.json'), JSON.stringify({ secrets: { DB_POSTGRESDB_PASSWORD: { source: 'link', from: '../storage/postgres', key: 'POSTGRES_PASSWORD' } } }))
   const run = fakeDocker()
 
   await setup(rootDir, { run, ...HOST })
@@ -158,6 +158,28 @@ test('setup fills the secrets of the .env files once and copies the links', asyn
   expect(await readFile(join(postgres, '.env'), 'utf-8')).toMatch(/^POSTGRES_USER=changeUser\nPOSTGRES_PASSWORD=[0-9a-f]{64}\n$/)
   expect(first).toBe(`N8N_VERSION=1\nDB_POSTGRESDB_PASSWORD=${(await readFile(join(postgres, '.env'), 'utf-8')).match(/PASSWORD=(.*)/)![1]}\n`)
   expect(await readFile(join(n8n, '.env'), 'utf-8')).toBe(first)
+})
+
+test('setup keeps a password beside the .env, derives its hash and says where to read it', async () => {
+  const app = await addTemplate('compose/app', 'OWNER_PASSWORD_HASH=\n')
+  await writeFile(join(app, '.env.json'), JSON.stringify({ secrets: {
+    OWNER_PASSWORD: { source: 'generate', file: '.env.secrets', description: 'password' },
+    OWNER_PASSWORD_HASH: { source: 'generate', generator: { type: 'bcrypt', input: 'OWNER_PASSWORD', rounds: 4 }, description: 'hash' },
+  } }))
+  const run = fakeDocker()
+
+  await setup(rootDir, { run, ...HOST })
+  const first = [await readFile(join(app, '.env'), 'utf-8'), await readFile(join(app, '.env.secrets'), 'utf-8')]
+  vi.mocked(clack.log.success).mockClear()
+  await setup(rootDir, { run, ...HOST })
+
+  expect(first[0]).toMatch(/^OWNER_PASSWORD_HASH='\$2[aby]\$04\$[./A-Za-z0-9]{53}'\n$/)
+  expect(first[1]).toMatch(/\nOWNER_PASSWORD=[0-9a-f]{64}\n$/)
+  expect(clack.log.info).toHaveBeenCalledWith('compose/app/.env.secrets holds secrets no container reads, print them with `pnpm run secrets read compose/app`')
+  expect(clack.outro).toHaveBeenCalledWith(expect.stringContaining('2 secret(s) generated, 0 linked.'))
+  // the second run generates nothing: the hash still fits its password
+  expect([await readFile(join(app, '.env'), 'utf-8'), await readFile(join(app, '.env.secrets'), 'utf-8')]).toEqual(first)
+  expect(vi.mocked(clack.log.success).mock.calls.flat().join()).not.toContain('Generated')
 })
 
 test('setup writes the detected runtime into the root .env it created', async () => {

@@ -45,9 +45,9 @@ const ROOT_ENV = 'DOMAIN=n8n.localhost\nN8N_VARIANT=dev\nAI_RUNTIME=cpu-arm64\nA
 async function addSecrets(variant = 'dev') {
   await writeFile(join(rootDir, '.env'), ROOT_ENV.replace('N8N_VARIANT=dev', `N8N_VARIANT=${variant}`))
   const postgres = await addTemplate('compose/storage/postgres', true, 'POSTGRES_PASSWORD=\n')
-  await writeFile(join(postgres, '.env.secrets.json'), JSON.stringify({ secrets: { POSTGRES_PASSWORD: { source: 'generate', description: 'db' } } }))
+  await writeFile(join(postgres, '.env.json'), JSON.stringify({ secrets: { POSTGRES_PASSWORD: { source: 'generate', description: 'db' } } }))
   const n8n = await addTemplate('compose/n8n', true, 'N8N_LICENSE_ACTIVATION_KEY=\nDB_POSTGRESDB_PASSWORD=\n')
-  await writeFile(join(n8n, '.env.secrets.json'), JSON.stringify({ secrets: {
+  await writeFile(join(n8n, '.env.json'), JSON.stringify({ secrets: {
     DB_POSTGRESDB_PASSWORD: { source: 'link', from: '../storage/postgres', key: 'POSTGRES_PASSWORD' },
     N8N_LICENSE_ACTIVATION_KEY: { source: 'prompt', description: 'license', required: { N8N_VARIANT: ['enterprise'] } },
   } }))
@@ -275,13 +275,13 @@ test('fails on a human secret the current root .env requires', async () => {
 
 test('fails on an invalid manifest naming the file', async () => {
   const dir = await addTemplate('compose/n8n', true)
-  await writeFile(join(dir, '.env.secrets.json'), JSON.stringify({ secrets: { KEY: { source: 'nope' } } }))
+  await writeFile(join(dir, '.env.json'), JSON.stringify({ secrets: { KEY: { source: 'nope' } } }))
   const run = fakeDocker(['n8n-starter-public', 'n8n-starter-private'])
 
   const result = await verifyEnvironment(rootDir, { run, ...HOST })
 
   expect(result.ok).toBe(false)
-  expect(result.secretsError).toContain(join(dir, '.env.secrets.json'))
+  expect(result.secretsError).toContain(join(dir, '.env.json'))
 })
 
 test('verify logs only the failed secret checks at the error level', async () => {

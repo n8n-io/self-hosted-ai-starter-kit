@@ -30,7 +30,7 @@ export const tiltProjectSchema = z.object({
   profiles: z.array(z.enum(AI_RUNTIMES)),
   /** An inline compose override of the files, passed through encode_yaml() (the model injection) */
   override: z.record(z.string(), z.unknown()).optional(),
-  /** The `secrets read` filter of the project, its directory, when a .env.secrets.json sits beside the entry file: every resource gets a secrets button */
+  /** The `secrets read` filter of the project, its directory, when a .env.json sits beside the entry file: every resource gets a secrets button */
   secrets: z.string().min(1).optional(),
   resources: z.array(tiltResourceSchema).min(1),
 }).strict()

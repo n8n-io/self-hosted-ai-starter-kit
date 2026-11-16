@@ -3,14 +3,15 @@ import type { PlatformOptions } from '../utils/platform'
 import type { SecretWriteResult } from './secrets'
 import { constants } from 'node:fs'
 import { copyFile, readFile, writeFile } from 'node:fs/promises'
-import { dirname, join, relative } from 'node:path'
+import { basename, dirname, join, relative } from 'node:path'
 import { aiRuntimeSchema } from '../schemas/config'
 import { ensureDockerNetworks } from '../utils/docker'
 import { parseEnvContent, updateEnvContent } from '../utils/env'
 import { findFiles } from '../utils/files'
+import { runCommand } from '../utils/format'
 import { logger } from '../utils/logger'
 import { detectPlatform, formatPlatform, runtimeMismatch } from '../utils/platform'
-import { checkSecrets, fillSecrets, formatSecretCheck, readRootConfigIfValid, readSecretState } from './secrets'
+import { checkSecrets, fillSecrets, formatSecretCheck, readRootConfigIfValid, readSecretState, SECRETS_FILENAME } from './secrets'
 
 const TEMPLATE_FILENAME = '.env.template'
 const ENV_FILENAME = '.env'
@@ -104,13 +105,17 @@ export async function setup(rootDir = process.cwd(), docker: PlatformOptions = {
   if (root !== undefined)
     await applyDetectedRuntime(root, docker)
 
-  // the secrets of the .env files just created or still unfilled, see ../../../../SPEC.md; a human secret
-  // the current root .env requires (the enterprise license) is pointed at, never prompted for here
+  // the secrets of the .env files just created or still unfilled and of the .env.secrets beside them, see
+  // ../../../../SPEC.md; a human secret the current root .env requires (the enterprise license) is pointed at,
+  // never prompted for here
   let secrets: SecretWriteResult[] = []
   try {
     secrets = await fillSecrets(rootDir)
     for (const { envPath, key, status } of secrets)
       logger.success(`${status === 'generated' ? 'Generated' : 'Linked'} ${key} in ${relative(rootDir, envPath)}`)
+    // a secret kept beside the .env is for a human, a login for example: say where to read it
+    for (const dir of new Set(secrets.filter(secret => basename(secret.envPath) === SECRETS_FILENAME).map(secret => relative(rootDir, dirname(secret.envPath)))))
+      logger.info(`${join(dir, SECRETS_FILENAME)} holds secrets no container reads, print them with ${runCommand(`secrets read ${dir}`)}`)
     const config = await readRootConfigIfValid(rootDir)
     for (const check of checkSecrets(await readSecretState(rootDir), config)) {
       if (check.status === 'required')
