@@ -49,7 +49,7 @@ pnpm 10 workspace (`packages/*` and `compose`), Node 24.
 
 ## Skills
 
-Task guidance lives in `.agents/skills/<name>/SKILL.md`. Load the matching skill before starting; an agent that does not discover that directory reads the file itself. Skills cite the SPEC.md section behind a rule: read it before changing that rule. SPEC.md wins over a skill: fix the skill when they disagree. `.claude/skills/` is the frozen pre-migration copy: do not load or edit it.
+Task guidance lives in `.agents/skills/<name>/SKILL.md`. Load the matching skill before starting; an agent that does not discover that directory reads the file itself. Skills cite the SPEC.md section behind a rule: read it before changing that rule. SPEC.md wins over a skill: fix the skill when they disagree. `.claude/skills/` holds a symlink per skill for Claude Code.
 
 | Skill | Load it when |
 | --- | --- |

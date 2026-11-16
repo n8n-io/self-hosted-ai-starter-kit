@@ -50,6 +50,7 @@ All root scripts are thin wrappers, see [package.json](./package.json):
 ├── assets/                   # Images, icons (the vscode-icons custom folder icons) and other static assets
 ├── .mcp.json                 # Project MCP servers for coding agents: the n8n documentation (n8n-docs)
 ├── .agents/skills/           # Agent skills: compose-catalogue, n8n-starter-cli, tilt, n8n-upgrade, validate, troubleshoot, n8n-docs (product lookups)
+├── .claude/skills/           # One symlink per skill into .agents/skills/, for Claude Code, which only scans this directory
 ├── .volumes/                 # Bind-mounted runtime data, mirrors the compose/ layout, gitignored, default of VOLUMES_PATH
 ├── compose/                  # Docker compose service catalogue, one directory per service
 │   ├── package.json          # n8n-service-catalogue: the lint scripts, .dclintrc beside it

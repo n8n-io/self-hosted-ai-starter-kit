@@ -20,7 +20,7 @@ Run every gate that matches what changed, from the repository root, and report e
 | the Tilt plan (`src/commands/tilt.ts`, `src/schemas/tilt.ts`) or the `Tiltfile` | typecheck; build; test; the plan; Tiltfile evaluation |
 | a new variant, runtime, engine or gateway value | every row above that applies; `pnpm run config <KEY> <value>` accepts it (restore the root `.env` afterwards) |
 | an n8n setting in `compose/n8n/` | the compose rows, and the setting confirmed through the [n8n-docs](../n8n-docs/SKILL.md) skill with the page cited |
-| `SPEC.md`, `README.md`, `AGENTS.md`, a skill | links resolve from the referencing file; every command named exists in `package.json`; `wc -lc AGENTS.md` within its budget; skill frontmatter is still `name` plus a one-line `description` |
+| `SPEC.md`, `README.md`, `AGENTS.md`, a skill | links resolve from the referencing file; every command named exists in `package.json`; `wc -lc AGENTS.md` within its budget; skill frontmatter is still `name` plus a one-line `description`; every skill has its symlink in `.claude/skills/` |
 
 ## The commands
 
