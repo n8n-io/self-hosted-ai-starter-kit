@@ -49,7 +49,7 @@ All root scripts are thin wrappers, see [package.json](./package.json):
 ├── .vscode/                  # Workspace settings: icons, file nesting, YAML custom tags, recommended extensions, mcp.json
 ├── assets/                   # Images, icons (the vscode-icons custom folder icons) and other static assets
 ├── .mcp.json                 # Project MCP servers for coding agents: the n8n documentation (n8n-docs)
-├── .claude/skills/           # Agent skills: develop (repository workflow and rule sheets), n8n-docs (product lookups)
+├── .agents/skills/           # Agent skills: compose-catalogue, n8n-starter-cli, tilt, n8n-upgrade, validate, troubleshoot, n8n-docs (product lookups)
 ├── .volumes/                 # Bind-mounted runtime data, mirrors the compose/ layout, gitignored, default of VOLUMES_PATH
 ├── compose/                  # Docker compose service catalogue, one directory per service
 │   ├── package.json          # n8n-service-catalogue: the lint scripts, .dclintrc beside it
@@ -80,7 +80,7 @@ Groups are named after their role from n8n's point of view: `proxy` is the edge,
 
 ### `compose/n8n/` variants
 
-`N8N_VARIANT` picks one self-contained compose file (mapped in the [Tiltfile](./Tiltfile)). Each file extends the previous one with compose `extends`, so service configuration is written once:
+`N8N_VARIANT` picks one self-contained compose file (mapped by `N8N_VARIANT_CASCADE` in [tilt.ts](./packages/cli/src/commands/tilt.ts)). Each file extends the previous one with compose `extends`, so service configuration is written once:
 
 | Variant | File | Adds |
 | --- | --- | --- |
@@ -103,14 +103,14 @@ Rules of the cascade:
 
 ### `compose/models/` engines and the model catalogue
 
-`AI_ENGINE` picks the engine (`ollama` or `vllm`), `AI_RUNTIME` the compose profile and `AI_MODELS` the models that start with the stack (mapped in the [Tiltfile](./Tiltfile)):
+`AI_ENGINE` picks the engine (`ollama` or `vllm`), `AI_RUNTIME` the compose profile and `AI_MODELS` the models that start with the stack (mapped by `modelProjects()` in [tilt.ts](./packages/cli/src/commands/tilt.ts)):
 
 | File | Role |
 | --- | --- |
 | [models.json](./compose/models/models.json) | the catalogue: one `models` list with one entry per model, validated by the CLI with [models.ts](./packages/cli/src/schemas/models.ts) and in editors with [models.schema.json](./compose/models/models.schema.json). An entry has an `id` (the `AI_MODELS` value; a plain DNS label of at most 58 characters, since the docker names of the model are `<engine>-<id>` and must fit a 63-character label), a `label` shown by `models select`, and a block per engine that serves it (`ollama`, `vllm`; at least one) with the engine's `model` name (an ollama tag such as `qwen3.5:0.8b`, a Hugging Face id such as `Qwen/Qwen3.5-0.8B`), vllm `args`, a `memory` shown by `models select` (an estimate in GB stored as a number; the CLI prints it as `~6 GB RAM`, or VRAM on a gpu runtime), an optional `note` shown after the memory, and an optional `runtimes` list when that engine runs the model only on some hardware |
 | `<engine>/docker-compose.yml` | the engine: one service per `AI_RUNTIME` named `<engine>-<runtime>` (`ollama-cpu-arm64`, `vllm-gpu-nvidia`, …), each in the compose profile of the same name, all sharing an `x-<engine>` anchor. No model name lives in a compose file, `tilt resources` passes them in from the catalogue |
 
-The engines deploy differently, and the Tiltfile mirrors that:
+The engines deploy differently, and the Tilt plan mirrors that:
 
 | Engine | Containers | Tilt resources | Reachable at |
 | --- | --- | --- | --- |
@@ -222,7 +222,7 @@ DOMAIN=n8n.localhost
 * `VOLUMES_PATH` is optional and defaults to the repo's `.volumes/` from every compose file. It is the single knob to move all runtime data elsewhere, e.g. `VOLUMES_PATH=/Volumes/ext/n8n pnpm run dev`. An exported variable wins over a per-service `.env`, and because every compose project inherits it, it must always point at a `.volumes`-style root, not at a service folder.
 * Secret keys are empty in the templates and filled by `setup` as the `.env.secrets.json` next to the template declares (see [Secrets](#secrets)).
 * In `compose/n8n/.env` ([template](./compose/n8n/.env.template)), the sections named after a variant in their header list the keys only that variant uses: the postgres keys, the runner token `N8N_RUNNERS_AUTH_TOKEN` and the Python allowlists are only used from the `build` variant up (`dev` runs on SQLite with the internal runner), the license keys only by the `enterprise` variant, and `OFFLOAD_MANUAL_EXECUTIONS_TO_WORKERS` / `QUEUE_WORKER_CONCURRENCY` / `N8N_WEBHOOK_REPLICAS` / `N8N_DISABLE_PRODUCTION_MAIN_PROCESS` only in queue mode (`community`, `enterprise`).
-* `DOMAIN` defaults to `n8n.localhost` in every compose file that uses it (traefik, n8n, garage) and in the Tiltfile. Tilt exports the root `.env`, and a shell variable wins over the `.env` next to a compose file, which wins over the compose default, so the root `.env` steers every project while `docker compose` by hand needs nothing.
+* `DOMAIN` defaults to `n8n.localhost` in every compose file that uses it (traefik, n8n, garage) and in the root [.env.template](./.env.template). Tilt exports the root `.env`, and a shell variable wins over the `.env` next to a compose file, which wins over the compose default, so the root `.env` steers every project while `docker compose` by hand needs nothing.
 * Tilt and the CLI are conveniences, never requirements. Any service runs with plain `docker compose up` from its directory once the two docker networks exist (`docker network create n8n-starter-public` and `n8n-starter-private`), its `.env.template` is copied to `.env` with the empty secret keys filled by hand and the services it talks to are up; `pnpm run setup` does the first two for every service at once.
 
 ### Secrets

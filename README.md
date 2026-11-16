@@ -240,9 +240,9 @@ OLLAMA_PULL_MODELS=qwen3.5:0.8b docker compose --profile cpu-arm64 up
 
 ### Working with coding agents
 
-[AGENTS.md](./AGENTS.md) holds the context and guardrails for coding agents, and the `develop` skill in [.claude/skills/develop/](./.claude/skills/develop/) routes implementation tasks to the detailed rules for the compose catalogue and the CLI.
+[AGENTS.md](./AGENTS.md) holds the always-on context for coding agents: the layout, the commands and the rules that apply to every change. Task guidance lives in the skills under [.agents/skills/](./.agents/skills/): `compose-catalogue`, `n8n-starter-cli` and `tilt` for changes, `n8n-upgrade` for version bumps, `validate` for the checks before a change is reported, `troubleshoot` for the running stack and `n8n-docs` for product lookups. Agents that scan `.agents/skills/` discover them by themselves; the others follow the skill index in AGENTS.md.
 
-[.mcp.json](./.mcp.json) (Claude Code) and [.vscode/mcp.json](./.vscode/mcp.json) (VS Code) register the [n8n documentation MCP server](https://docs.n8n.io/connect/connect-to-n8n-docs-mcp-server.md) as `n8n-docs`, so agents look n8n settings and features up in the official docs instead of guessing; Claude Code asks once to approve the project server. The `n8n-docs` skill in [.claude/skills/n8n-docs/](./.claude/skills/n8n-docs/) holds the lookup routine and a reference sheet for the n8n public API, the n8n CLI and the instance MCP server.
+[.mcp.json](./.mcp.json) (Claude Code) and [.vscode/mcp.json](./.vscode/mcp.json) (VS Code) register the [n8n documentation MCP server](https://docs.n8n.io/connect/connect-to-n8n-docs-mcp-server.md) as `n8n-docs`, so agents look n8n settings and features up in the official docs instead of guessing; Claude Code asks once to approve the project server. The `n8n-docs` skill in [.agents/skills/n8n-docs/](./.agents/skills/n8n-docs/) holds the lookup routine and a reference sheet for the n8n public API, the n8n CLI and the instance MCP server.
 
 ## Tips and tricks
 
