@@ -436,7 +436,7 @@ test('config AI_RUNTIME warns when docker is not running and still writes the va
   await config(rootDir, ['AI_RUNTIME', 'cpu-arm64'], { run, arch: 'arm64', os: 'linux', totalmem: 32 * 1024 ** 3, exists: async () => false })
 
   expect(parseEnvContent(await readFile(envPath, 'utf-8')).AI_RUNTIME).toBe('cpu-arm64')
-  expect(logWarnMock).toHaveBeenCalledWith(expect.stringContaining('Docker is not running or not reachable'))
+  expect(logWarnMock).toHaveBeenCalledWith(expect.stringContaining('No usable answer from `docker info`'))
 })
 
 test('config never asks docker for a key other than AI_RUNTIME', async () => {

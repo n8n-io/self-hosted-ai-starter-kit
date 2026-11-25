@@ -143,13 +143,14 @@ export function formatPlatform({ host, docker, gpu, memory }: Platform): string 
 }
 
 /**
- * The warning for a detection that could not reach the daemon: the host stands in, so the docker memory and
- * the nvidia runtime are unknown and the suggestion may be wrong; nothing when the daemon answered
+ * The warning for a detection without the daemon's answer, whether `docker info` failed (docker down or
+ * unreachable) or printed a line parseDockerInfo rejects: the host stands in, so the docker memory and the
+ * nvidia runtime are unknown and the suggestion may be wrong; nothing when the daemon answered
  */
 export function dockerDownWarning(platform: Platform): string | undefined {
   if (platform.docker !== undefined)
     return undefined
-  return 'Docker is not running or not reachable: the detection falls back to the host, without the docker memory or an nvidia gpu. Start Docker for an accurate suggestion.'
+  return 'No usable answer from `docker info` (Docker is not running, not reachable, or printed something unexpected): the detection falls back to the host, without the docker memory or an nvidia gpu.'
 }
 
 /**

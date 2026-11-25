@@ -1,8 +1,8 @@
 import type { DockerNetworkResult } from '../utils/docker'
-import type { PlatformOptions } from '../utils/platform'
+import type { Platform, PlatformOptions } from '../utils/platform'
 import type { SecretWriteResult } from './secrets'
 import { constants } from 'node:fs'
-import { copyFile, readFile, writeFile } from 'node:fs/promises'
+import { access, copyFile, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, relative } from 'node:path'
 import { aiRuntimeSchema } from '../schemas/config'
 import { ensureDockerNetworks } from '../utils/docker'
@@ -10,7 +10,7 @@ import { parseEnvContent, updateEnvContent } from '../utils/env'
 import { findFiles } from '../utils/files'
 import { runCommand } from '../utils/format'
 import { logger } from '../utils/logger'
-import { detectPlatform, formatPlatform, runtimeMismatch } from '../utils/platform'
+import { detectPlatform, dockerDownWarning, formatPlatform, runtimeMismatch } from '../utils/platform'
 import { checkDockerVersion } from '../utils/requirements'
 import { checkSecrets, fillSecrets, formatSecretCheck, readRootConfigIfValid, readSecretState } from './secrets'
 
@@ -61,9 +61,7 @@ export async function generateEnvFiles(rootDir: string): Promise<EnvFileResult[]
  * created itself; an existing root .env is never touched, a mismatch there is a warning. Returns the written
  * runtime, if any.
  */
-export async function applyDetectedRuntime(root: EnvFileResult, docker: PlatformOptions = {}): Promise<string | undefined> {
-  const platform = await detectPlatform(docker)
-  logger.info(`Detected ${formatPlatform(platform)}`)
+export async function applyDetectedRuntime(root: EnvFileResult, platform: Platform): Promise<string | undefined> {
   if (platform.runtime === undefined)
     return undefined
   const content = await readFile(root.envPath, 'utf-8')
@@ -84,6 +82,16 @@ export async function applyDetectedRuntime(root: EnvFileResult, docker: Platform
   return undefined
 }
 
+/** Whether the root template exists, the one setup runs the platform detection for */
+async function hasRootTemplate(rootDir: string): Promise<boolean> {
+  try {
+    await access(join(rootDir, TEMPLATE_FILENAME))
+    return true
+  } catch {
+    return false
+  }
+}
+
 export async function setup(rootDir = process.cwd(), docker: PlatformOptions = {}) {
   logger.intro('n8n-starter setup')
 
@@ -96,6 +104,20 @@ export async function setup(rootDir = process.cwd(), docker: PlatformOptions = {
     process.exitCode = 1
     logger.outro('Nothing was changed.')
     return
+  }
+
+  // the root .env takes its runtime from the daemon: detect before writing, so a daemon that stops answering
+  // never leaves a host-only guess in a new root .env that a later setup would not overwrite
+  let platform: Platform | undefined
+  if (await hasRootTemplate(rootDir)) {
+    platform = await detectPlatform(docker)
+    logger.info(`Detected ${formatPlatform(platform)}`)
+    if (platform.docker === undefined) {
+      logger.error(`${dockerDownWarning(platform)} Run ${runCommand('setup')} again once it does.`)
+      process.exitCode = 1
+      logger.outro('Nothing was changed.')
+      return
+    }
   }
 
   const results = await generateEnvFiles(rootDir)
@@ -114,8 +136,8 @@ export async function setup(rootDir = process.cwd(), docker: PlatformOptions = {
 
   // before the secrets, whose `required` conditions read the root .env
   const root = results.find(result => result.envPath === join(rootDir, ENV_FILENAME))
-  if (root !== undefined)
-    await applyDetectedRuntime(root, docker)
+  if (root !== undefined && platform !== undefined)
+    await applyDetectedRuntime(root, platform)
 
   // the secrets of the .env files just created or still unfilled, see ../../../../SPEC.md; a human secret
   // the current root .env requires (the enterprise license) is pointed at, never prompted for here

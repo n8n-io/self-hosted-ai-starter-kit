@@ -235,6 +235,28 @@ test('setup stops before writing anything when docker is down or too old', async
   process.exitCode = previousExitCode
 })
 
+test('setup stops before writing anything when the daemon passes the version check but docker info gives no usable answer', async () => {
+  await addTemplate('.', ROOT_TEMPLATE)
+  await addTemplate('compose/n8n')
+  const previousExitCode = process.exitCode
+  const calls: string[][] = []
+  const run: DockerRunner = async (args) => {
+    calls.push(args)
+    if (args[0] === 'version')
+      return DAEMON_VERSION
+    throw new Error('Cannot connect to the Docker daemon')
+  }
+
+  await setup(rootDir, { run, ...HOST })
+
+  await expect(readFile(join(rootDir, '.env'), 'utf-8')).rejects.toThrow()
+  await expect(readFile(join(rootDir, 'compose/n8n/.env'), 'utf-8')).rejects.toThrow()
+  expect(calls.map(args => args[0])).toEqual(['version', 'info'])
+  expect(clack.log.error).toHaveBeenCalledWith(expect.stringContaining('No usable answer from `docker info`'))
+  expect(process.exitCode).toBe(1)
+  process.exitCode = previousExitCode
+})
+
 test('setup does not detect the platform without a root template and never touches a root .env without AI_RUNTIME', async () => {
   await addTemplate('compose/n8n')
   const calls: string[][] = []

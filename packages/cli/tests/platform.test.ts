@@ -95,7 +95,9 @@ test('formats the platform in one line and names the mismatch with its fix', asy
   expect(formatPlatform(nvidia)).toBe('docker x86_64, 16 cpus, 63 GB memory (Ubuntu 24.04.1 LTS), host linux/x64 64 GB, nvidia gpu')
   expect(formatPlatform(down)).toBe('no docker info, host darwin/arm64 24 GB, no gpu')
   expect(dockerDownWarning(orbstack)).toBeUndefined()
-  expect(dockerDownWarning(down)).toContain('Docker is not running or not reachable')
+  expect(dockerDownWarning(down)).toContain('No usable answer from `docker info`')
+  // a daemon that answered with a line parseDockerInfo rejects gets the same warning, worded to fit it
+  expect(dockerDownWarning(await detectPlatform({ run: async () => 'nope', ...HOST }))).toContain('printed something unexpected')
 
   expect(runtimeMismatch(orbstack, 'cpu-arm64')).toBeUndefined()
   expect(runtimeMismatch(orbstack, 'cpu-x86-64')).toBe('AI_RUNTIME=cpu-x86-64 does not match the detected platform (docker aarch64, 6 cpus, 14 GB memory (OrbStack), host darwin/arm64 24 GB, no gpu), run `pnpm run config AI_RUNTIME cpu-arm64`')
