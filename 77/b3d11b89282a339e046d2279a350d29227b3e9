@@ -1,0 +1,31 @@
+packages/cli/tests/platform.test.ts
+  s_144c945641828f::t_bf64396470ba1f 98-100
+packages/cli/src/commands/setup.ts
+  s_144c945641828f::t_974a69dc30fd56 2,5,13,64,85-94,109-122,139-140
+packages/cli/src/utils/platform.ts
+  s_144c945641828f::t_974a69dc30fd56 146-148,153
+packages/cli/tests/config.test.ts
+  s_144c945641828f::t_bf64396470ba1f 439
+SPEC.md
+  s_144c945641828f::t_bf64396470ba1f 148,267
+packages/cli/tests/setup.test.ts
+  s_144c945641828f::t_bf64396470ba1f 238-259
+packages/cli/README.md
+  s_144c945641828f::t_88c751b600801f 76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "77b3d11b89282a339e046d2279a350d29227b3e9",
+  "prompts": {},
+  "sessions": {
+    "s_144c945641828f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "567dc4f5-e1b4-4c31-a8a5-994339fc894a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
