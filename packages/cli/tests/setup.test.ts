@@ -16,12 +16,15 @@ vi.mock('@clack/prompts', () => ({
 
 const ROOT_TEMPLATE = '# The hardware supported ai runtime\nAI_RUNTIME=cpu-arm64\nAI_ENGINE=ollama\nAI_MODELS=\nN8N_VARIANT=dev\nDOMAIN=n8n.localhost\n'
 const X86_LINE = 'x86_64|33566629888|12|Docker Desktop|io.containerd.runc.v2,runc,\n'
+const DAEMON_VERSION = '27.0.3\n'
 /** Fixed host values so the detection does not depend on the machine running the tests */
 const HOST = { arch: 'x64', os: 'linux' as const, totalmem: 64 * 1024 ** 3, exists: async () => false }
 
 /** Both networks present, the daemon an x86 one unless `info` says otherwise */
 function fakeDocker({ networks = ['n8n-starter-public', 'n8n-starter-private'], info = X86_LINE } = {}): DockerRunner {
   return async (args) => {
+    if (args[0] === 'version')
+      return DAEMON_VERSION
     if (args[1] === 'ls')
       return networks.map(name => `${name}\n`).join('')
     if (args[0] === 'info')
@@ -116,6 +119,8 @@ test('setup creates the n8n docker networks that are missing', async () => {
   await addTemplate('compose/n8n')
   const created: string[] = []
   const run: DockerRunner = async (args) => {
+    if (args[0] === 'version')
+      return DAEMON_VERSION
     if (args[1] === 'ls')
       return 'bridge\nn8n-starter-private\n'
     if (args[1] === 'create') {
@@ -205,19 +210,28 @@ test('setup keeps the template runtime when it already fits, and picks a gpu run
   expect(clack.log.success).toHaveBeenCalledWith('AI_RUNTIME=gpu-nvidia (detected)')
 })
 
-test('setup falls back to the host architecture for a new root .env when docker is down', async () => {
+test('setup stops before writing anything when docker is down or too old', async () => {
   await addTemplate('.', ROOT_TEMPLATE)
-  const run: DockerRunner = async () => {
+  const previousExitCode = process.exitCode
+  const down: DockerRunner = async () => {
     throw new Error('Cannot connect to the Docker daemon')
   }
-  const previousExitCode = process.exitCode
 
-  await setup(rootDir, { run, ...HOST })
+  await setup(rootDir, { run: down, ...HOST })
 
-  expect(parseEnvContent(await readFile(join(rootDir, '.env'), 'utf-8')).AI_RUNTIME).toBe('cpu-x86-64')
-  expect(clack.log.info).toHaveBeenCalledWith('Detected no docker info, host linux/x64 64 GB, no gpu')
-  // the networks still fail the run
+  await expect(readFile(join(rootDir, '.env'), 'utf-8')).rejects.toThrow()
+  expect(clack.log.error).toHaveBeenCalledWith('Docker is not running or not reachable (Cannot connect to the Docker daemon). Start Docker and run `pnpm run setup` again.')
   expect(process.exitCode).toBe(1)
+
+  const calls: string[][] = []
+  await setup(rootDir, { run: async (args) => {
+    calls.push(args)
+    return '20.10.0\n'
+  }, ...HOST })
+
+  await expect(readFile(join(rootDir, '.env'), 'utf-8')).rejects.toThrow()
+  expect(calls.map(args => args[0])).toEqual(['version'])
+  expect(clack.log.error).toHaveBeenCalledWith('Docker 20.10.0 is older than the minimum 25.0.0. Update Docker and run `pnpm run setup` again.')
   process.exitCode = previousExitCode
 })
 
@@ -226,14 +240,16 @@ test('setup does not detect the platform without a root template and never touch
   const calls: string[][] = []
   const run: DockerRunner = async (args) => {
     calls.push(args)
+    if (args[0] === 'version')
+      return DAEMON_VERSION
     return args[1] === 'ls' ? 'n8n-starter-public\nn8n-starter-private\n' : X86_LINE
   }
 
   await setup(rootDir, { run, ...HOST })
-  expect(calls.map(args => args[0])).toEqual(['network'])
+  expect(calls.map(args => args[0])).toEqual(['version', 'network'])
 
   await addTemplate('.', 'KEY=value\n')
   await setup(rootDir, { run, ...HOST })
   expect(await readFile(join(rootDir, '.env'), 'utf-8')).toBe('KEY=value\n')
-  expect(calls.map(args => args[0])).toEqual(['network', 'info', 'network'])
+  expect(calls.map(args => args[0])).toEqual(['version', 'network', 'version', 'info', 'network'])
 })

@@ -10,7 +10,7 @@ import { parseEnvContent, updateEnvContent } from '../utils/env'
 import { runCommand } from '../utils/format'
 import { logger } from '../utils/logger'
 import { currentEngineRuntime, currentGateway, logGatewayEndpoint, logModelEndpoints, parseModelList, readModelsCatalogue, unsupportedModels } from '../utils/models'
-import { detectPlatform, formatPlatform, runtimeMismatch } from '../utils/platform'
+import { detectPlatform, dockerDownWarning, formatPlatform, runtimeMismatch } from '../utils/platform'
 import { models } from './models'
 import { checkSecrets, formatSecretCheck, readSecretState } from './secrets'
 
@@ -142,6 +142,9 @@ export async function config(rootDir = process.cwd(), [requestedKey, value]: str
   if (key === 'AI_RUNTIME') {
     platform = await detectPlatform(docker)
     logger.info(`Detected ${formatPlatform(platform)}`)
+    const down = dockerDownWarning(platform)
+    if (down !== undefined)
+      logger.warn(down)
   }
 
   let resolved: string | undefined

@@ -426,6 +426,19 @@ test('config AI_RUNTIME marks the detected runtime in the prompt and keeps the c
   expect(logWarnMock).not.toHaveBeenCalled()
 })
 
+test('config AI_RUNTIME warns when docker is not running and still writes the value', async () => {
+  const envPath = await writeEnv()
+  await writeCatalogue(rootDir)
+  const run: DockerRunner = async () => {
+    throw new Error('Cannot connect to the Docker daemon')
+  }
+
+  await config(rootDir, ['AI_RUNTIME', 'cpu-arm64'], { run, arch: 'arm64', os: 'linux', totalmem: 32 * 1024 ** 3, exists: async () => false })
+
+  expect(parseEnvContent(await readFile(envPath, 'utf-8')).AI_RUNTIME).toBe('cpu-arm64')
+  expect(logWarnMock).toHaveBeenCalledWith(expect.stringContaining('Docker is not running or not reachable'))
+})
+
 test('config never asks docker for a key other than AI_RUNTIME', async () => {
   await writeEnv()
   await writeCatalogue(rootDir)

@@ -143,6 +143,16 @@ export function formatPlatform({ host, docker, gpu, memory }: Platform): string 
 }
 
 /**
+ * The warning for a detection that could not reach the daemon: the host stands in, so the docker memory and
+ * the nvidia runtime are unknown and the suggestion may be wrong; nothing when the daemon answered
+ */
+export function dockerDownWarning(platform: Platform): string | undefined {
+  if (platform.docker !== undefined)
+    return undefined
+  return 'Docker is not running or not reachable: the detection falls back to the host, without the docker memory or an nvidia gpu. Start Docker for an accurate suggestion.'
+}
+
+/**
  * The warning for an AI_RUNTIME that is not the one the platform suggests, naming the config command that
  * sets it; nothing when they agree or nothing was suggested. A warning only: cpu-x86-64 on Apple silicon
  * (emulation) and a cpu runtime on a gpu machine are legitimate choices (see ../../../../SPEC.md).

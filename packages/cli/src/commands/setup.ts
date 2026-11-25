@@ -8,8 +8,10 @@ import { aiRuntimeSchema } from '../schemas/config'
 import { ensureDockerNetworks } from '../utils/docker'
 import { parseEnvContent, updateEnvContent } from '../utils/env'
 import { findFiles } from '../utils/files'
+import { runCommand } from '../utils/format'
 import { logger } from '../utils/logger'
 import { detectPlatform, formatPlatform, runtimeMismatch } from '../utils/platform'
+import { checkDockerVersion } from '../utils/requirements'
 import { checkSecrets, fillSecrets, formatSecretCheck, readRootConfigIfValid, readSecretState } from './secrets'
 
 const TEMPLATE_FILENAME = '.env.template'
@@ -84,6 +86,17 @@ export async function applyDetectedRuntime(root: EnvFileResult, docker: Platform
 
 export async function setup(rootDir = process.cwd(), docker: PlatformOptions = {}) {
   logger.intro('n8n-starter setup')
+
+  // every step below needs the daemon (the runtime detection, the networks): stop before writing anything
+  const daemon = await checkDockerVersion(docker)
+  if (!daemon.ok) {
+    logger.error(daemon.installed === undefined
+      ? `Docker is not running or not reachable (${daemon.error}). Start Docker and run ${runCommand('setup')} again.`
+      : `Docker ${daemon.installed} is older than the minimum ${daemon.minimum}. Update Docker and run ${runCommand('setup')} again.`)
+    process.exitCode = 1
+    logger.outro('Nothing was changed.')
+    return
+  }
 
   const results = await generateEnvFiles(rootDir)
 

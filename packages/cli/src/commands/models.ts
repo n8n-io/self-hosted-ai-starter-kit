@@ -8,7 +8,7 @@ import { parseEnvContent, updateEnvContent } from '../utils/env'
 import { logger } from '../utils/logger'
 import { keyValue, runCommand } from '../utils/format'
 import { currentEngineRuntime, currentGateway, formatModelList, listModels, logGatewayEndpoint, logModelEndpoints, modelOptions, modelsCatalogueFile, parseModelList, readModelsCatalogue, unsupportedModels } from '../utils/models'
-import { detectPlatform, formatPlatform } from '../utils/platform'
+import { detectPlatform, dockerDownWarning, formatPlatform } from '../utils/platform'
 
 const ENV_FILENAME = '.env'
 
@@ -27,6 +27,9 @@ async function promptModels(catalogue: ModelsCatalogue, current: Current, docker
   const { engine, runtime } = currentEngineRuntime(current)
   const platform = await detectPlatform(docker)
   logger.info(`Detected ${formatPlatform(platform)}`)
+  const down = dockerDownWarning(platform)
+  if (down !== undefined)
+    logger.warn(down)
   const options = modelOptions(catalogue, engine, runtime, { memory: platform.memory })
   if (options.every(option => option.disabled)) {
     logger.info(`No model of ${engine} runs on ${runtime}, AI_MODELS stays empty`)
