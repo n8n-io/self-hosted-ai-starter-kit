@@ -1,114 +1,88 @@
 # Self-hosted AI Starter Kit - Vision & Contribution Guidelines
 
-Awesome that you're interested in contributing to the Self-hosted AI Starter
-Kit! These specific guidelines are in addition to the general [n8n
-contribution
-guidelines](https://github.com/n8n-io/n8n/blob/master/CONTRIBUTING.md).
+Awesome that you're interested in contributing to the Self-hosted AI Starter Kit! These specific guidelines are in addition to the general [n8n contribution guidelines](https://github.com/n8n-io/n8n/blob/master/CONTRIBUTING.md). The rules every change follows live in [SPEC.md](./SPEC.md); this page explains what belongs in the kit and why.
 
 ## Vision Statement
 
-The Self-hosted AI Starter Kit is designed to be **the fastest path from zero
-to working AI workflows** for developers and organizations who want to
-experiment with local, private AI solutions. It provides a curated,
-pre-configured foundation that "just works" out of the box, enabling users to
-focus on building AI workflows rather than wrestling with infrastructure
-setup.
+The Self-hosted AI Starter Kit is **a complete, curated n8n and local AI stack that runs on your own machine with one command**. It goes from a single n8n container to the deployments n8n runs in practice (postgres, external task runners, queue mode with workers and webhook processors, the enterprise edition), next to local models served by Ollama or vLLM and the storage and services those setups need. Everything is a pinned, linted Docker Compose project, so what you learn and build locally carries over to a real deployment.
 
 ## Core Principles
 
-### 1. Simplicity Over Completeness
+### 1. Simple by Default, Complete on Demand
 
-The starter kit should prioritize ease of use and quick setup over
-comprehensive feature coverage. It's better to do fewer things well than to
-attempt to solve every possible use case.
+The default is the smallest useful stack: the `dev` variant (one n8n container on SQLite) with Ollama as the model engine. Everything else is one setting or one click away: `pnpm run config` switches the n8n variant, hardware runtime, model engine and gateway, and services that are not needed right away (pgAdmin, Redis Insight, Qdrant, Garage) are registered in Tilt but only start when you start them. Adding a service must not make the default path longer.
 
-### 2. Learning-Focused, Not Production-Ready
+### 2. Production-Shaped, Not Production-Hardened
 
-This is explicitly a **learning and experimentation platform**. Users should
-be able to go from `git clone` to working AI workflows in minutes, not hours.
-Production-grade concerns like high availability, advanced security, and
-scalability are intentionally out of scope.
+The n8n variants mirror n8n's own deployment options, so you can learn queue mode, task runners or the enterprise features locally before you need them. The compose files follow the same rules a production host would (pinned images, healthchecks, generated secrets, no host ports) and run without Tilt. The kit itself is still a local environment: it serves plain HTTP on `*.n8n.localhost` and does not set out to secure, back up or scale an internet-facing instance.
 
-### 3. Opinionated but Extensible
+### 3. Curated, Not Exhaustive
 
-We make opinionated choices about the core stack (n8n + Ollama + Qdrant +
-PostgreSQL) to reduce decision paralysis, while providing clear paths for
-users to extend and customize as they learn.
+Each role has one opinionated default: n8n, Ollama, PostgreSQL, Redis, Qdrant, Traefik. An alternative is added only when it covers a case the default cannot, the way vLLM covers high-throughput GPU serving and LiteLLM gives every model one OpenAI-compatible endpoint. It's better to do fewer things well than to attempt to solve every possible use case.
 
 ### 4. Privacy-First Local Development
 
-Everything should work completely offline and locally by default. External
-dependencies should be minimal and optional.
+Everything runs locally and offline once the images and models are pulled. No hosted service is required by default; anything that calls out (a license key, a cloud model provider) is opt-in.
+
+### 5. One Source of Truth, Tooling Over Instructions
+
+Rules live in [SPEC.md](./SPEC.md), configuration in `.env` files generated from their templates, and the [n8n-starter CLI](./packages/cli/README.md) does the setup (`setup`, `config`, `models`, `secrets`, `verify`) instead of a list of manual steps. If a task needs a paragraph of instructions, it probably belongs in the CLI.
 
 ## What Belongs in the Starter Kit
 
-### Core Components
+### The Service Catalogue
 
-- **n8n**: The workflow automation platform
-- **Ollama**: Local LLM inference
-- **Qdrant**: Vector database for embeddings
-- **PostgreSQL**: Persistent data storage
-- **Basic networking**: Simple Docker networking to connect components
+Grouped like the [compose/](./compose/) directory:
 
-### Essential Configuration
+- **n8n**: the `dev`, `build`, `community` and `enterprise` variants and the services they need, such as task runners, workers and webhook processors
+- **models**: Ollama and vLLM, the shared [model catalogue](./compose/models/models.json) and the hardware runtimes (Apple silicon, x86 CPUs, NVIDIA and AMD GPUs), plus a gateway in front of them
+- **storage**: the databases, caches and object storage the n8n variants use, with their admin UIs
+- **services**: the supporting services AI workflows build on, such as the Qdrant vector store
+- **proxy**: Traefik and the read-only docker socket proxy that route `<service>.n8n.localhost`
 
-This includes:
-- Pre-configured environment variables with sensible defaults
-- Basic Docker Compose profiles for different hardware (CPU, GPU-Nvidia, GPU-AMD)
-- Minimal volume mounts for data persistence
-- Sample workflow demonstrating the core capabilities
+### Tooling and Developer Experience
+
+- The `n8n-starter` CLI: setup, configuration, the model catalogue, secrets and the read-only `verify` check
+- Tilt orchestration of the whole catalogue, with services started on demand
+- Lint rules that keep every compose file pinned, healthchecked and free of literal secrets
 
 ### Getting Started Materials
 
-This includes:
-- Clear installation instructions for different platforms
-- A demo workflow showcasing AI capabilities
-- Basic documentation for accessing local files
-- Links to relevant n8n documentation and templates
+- Clear installation instructions for different platforms and hardware
+- Documentation for each service in its own `README.md`, with links to the upstream and n8n documentation
 
 ## What Doesn't Belong in the Starter Kit
 
-### Production Infrastructure
+### Hardening for the Public Internet
 
-Including:
-- Reverse proxies
-- SSL/TLS termination
-- Load balancers
-- Advanced monitoring and logging
+- Exposing an instance to the internet and the security work that comes with it
 - Backup and recovery systems
-- Container orchestration beyond basic Docker Compose
+- High availability and scaling beyond what the n8n variants demonstrate
+- Monitoring and logging stacks
 
-### Advanced Networking
+### Other Orchestrators and Deployment Targets
 
-Including:
-- Custom network configurations
-- VPN integrations
-- Multiple environment setups
-- Advanced security hardening
+- Kubernetes, Helm, Docker Swarm or other orchestrators: the kit is Docker Compose, run by Tilt
+- Cloud-specific deployment templates
 
-### Alternative Technology Stacks
+### Overlapping Alternatives
 
-Including:
-- Different vector databases
+- A second service for a role that already has one, without a case the existing one cannot cover (another vector store, another database for the core setup, another proxy)
 - Alternative workflow platforms
-- Multiple LLM backends beyond Ollama
-- Different databases for the core setup
 
-### Enterprise Features
+### Features n8n Already Provides
 
-Including:
-- Authentication systems
-- Multi-tenancy
-- Advanced access controls
-- Compliance tooling
+- Authentication, user management or access control in front of n8n
+- Multi-tenancy layers
 
-## PR specific requirements
+## PR Specific Requirements
 
-- Small PRs Only:
+- Small PRs only:
   - Focus on a single feature or fix per PR.
-- Typo-Only PRs:
+- Typo-only PRs:
   - Typos are not sufficient justification for a PR and will be rejected.
+- Follow [SPEC.md](./SPEC.md) and update it in the same PR when a rule, a default or a mirrored value changes.
+- Run the checks before opening a PR: `pnpm run lint` after any compose change; `pnpm --filter n8n-starter-cli run typecheck`, `pnpm -r run build` and `pnpm -r run test` after any CLI change.
+- Cite the [n8n documentation](https://docs.n8n.io) for every n8n setting you add or change.
 
-
-Remember: **It's better to be an excellent starting point than a mediocre
-everything-solution.**
+Remember: **It's better to be an excellent starting point than a mediocre everything-solution.**
