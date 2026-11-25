@@ -1,0 +1,20 @@
+CONTRIBUTING.md
+  s_144c945641828f::t_338a67e5449116 13
+  s_144c945641828f::t_00365d9827ad7e 3,7,11,15,17,19,21,25-29,33,35,37-41,43-47,51-52,56,58,60-61,63,65-66,68,70,73,75-76,78,80,82,84-86,88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "83ae3553ad9564d6c427e4e998a4302eb47d1729",
+  "prompts": {},
+  "sessions": {
+    "s_144c945641828f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "567dc4f5-e1b4-4c31-a8a5-994339fc894a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
