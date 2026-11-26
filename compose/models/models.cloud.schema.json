@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "n8n Assistant model catalogue",
-  "description": "The cloud models `pnpm run config N8N_ASSISTANT` offers, nested under their provider; the first model of the first provider is the default of N8N_INSTANCE_AI_MODEL in ../n8n/docker-compose.yml. The CLI validates the same shape in packages/cli/src/schemas/assistant.ts, see ../../SPEC.md",
+  "title": "Cloud model catalogue",
+  "description": "Cloud provider models only, nested under their provider: what `pnpm run config N8N_ASSISTANT` offers for the n8n Assistant (the models served locally live in models.json); the first model of the first provider is the default of N8N_INSTANCE_AI_MODEL in ../n8n/docker-compose.yml. The CLI validates the same shape in packages/cli/src/schemas/assistant.ts, see ../../SPEC.md",
   "type": "object",
   "properties": {
     "$schema": { "type": "string" },

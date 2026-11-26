@@ -18,7 +18,7 @@ x-n8n-env: &n8n-env
 # the n8n Assistant, on with N8N_ASSISTANT=true of the root .env: every key is optional, so n8n runs without it (see ../../SPEC.md)
 x-n8n-env-assistant: &n8n-env-assistant
   N8N_INSTANCE_AI_ENABLED: ${N8N_ASSISTANT:-false}
-  # the first model of ../models/models.assistant.json: an empty value would replace the default of n8n, `pnpm run config N8N_ASSISTANT` writes the model
+  # the first model of ../models/models.cloud.json: an empty value would replace the default of n8n, `pnpm run config N8N_ASSISTANT` writes the model
   N8N_INSTANCE_AI_MODEL: ${N8N_INSTANCE_AI_MODEL:-anthropic/claude-opus-5-5}
   N8N_INSTANCE_AI_MODEL_URL: ${N8N_INSTANCE_AI_MODEL_URL:-}
   N8N_INSTANCE_AI_MODEL_API_KEY: ${N8N_INSTANCE_AI_MODEL_API_KEY:-}

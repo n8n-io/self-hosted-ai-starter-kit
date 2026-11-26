@@ -14,7 +14,7 @@ Run every gate that matches what changed, from the repository root, and report e
 | any `docker-compose*.yml` | lint; compose config for every changed file, and for an n8n variant file also for every file that extends it |
 | `.env.template`, `.env.json` | lint; test; compose config for the file beside it; for a new template `pnpm run setup && pnpm run verify`; for a changed secret a `reset`, `setup`, `verify` cycle on a scratch copy |
 | `compose/models/models.json`, `models.schema.json` | test; `pnpm run models read <id>`; Tiltfile evaluation with the id in `AI_MODELS` |
-| `compose/models/models.assistant.json`, `models.assistant.schema.json` | test (it compares the first model with the default of `compose/n8n/docker-compose.yml` and its template); compose config for the n8n base file when that default changed |
+| `compose/models/models.cloud.json`, `models.cloud.schema.json` | test (it compares the first model with the default of `compose/n8n/docker-compose.yml` and its template); compose config for the n8n base file when that default changed |
 | `compose/models/<engine>/docker-compose.yml` | lint; compose config with the profile of every runtime touched |
 | `compose/proxy/traefik/**` | lint; compose config for the traefik file |
 | `packages/cli/src`, `packages/cli/tests` | typecheck; build; test; the built command |
@@ -42,7 +42,7 @@ tilt alpha tiltfile-result -v > /dev/null  # the Tiltfile, starting nothing: exi
 
 - `config --quiet` catches interpolation and `extends` errors without printing. Never print a rendered config: it contains the secrets of the `.env` beside the file. It reads that `.env`, so a fresh checkout needs `pnpm run setup` first.
 - A required variable the `.env` leaves empty stops that check with `required variable … is missing a value`. `setup` never fills a human secret, so the enterprise file needs it set for the check alone: `N8N_LICENSE_ACTIVATION_KEY=x docker compose -f compose/n8n/docker-compose.enterprise.yml config --quiet`. The model variables of the engine files (`VLLM_MODEL`, `OLLAMA_PULL_MODELS`) default to empty and need nothing.
-- `pnpm run lint` is the `lint` script of `compose/package.json`: dclint with `--max-warnings 0`, so every warning fails the gate (rules in `compose/.dclintrc`); then `lint:env`, which fails on a bare `${VAR}` or `$VAR`; then `lint:healthcheck`, which fails, naming file and services, on a service without a healthcheck (it needs `docker compose` and `jq`, no `.env` and no daemon).
+- `pnpm run lint` is the `lint` script of `compose/package.json`: dclint with `--max-warnings 0`, so every warning fails the gate (rules in `compose/.dclintrc`); then `lint:env`, which fails on a bare `${VAR}` or `$VAR`; then `lint:healthcheck`, which fails, naming file and services, on a service without a healthcheck, except one that another service of the file waits for with `service_completed_successfully` (it needs `docker compose` and `jq`, no `.env` and no daemon).
 - `pnpm run lint:fix` may rewrite unrelated compose files: revert those with `git checkout -- <file>`, after checking that the file held no other uncommitted change.
 - Build before exercising the bundle, and run the typecheck locally: CI runs lint, build and test only.
 - The CLI writes its log lines to stdout, errors included: discarding stdout of a CLI command hides why it failed, hence the capture above.

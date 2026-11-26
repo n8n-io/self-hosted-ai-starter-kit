@@ -40,6 +40,7 @@ services:
     <<: [ *base, *sandbox-api ]
 
   # runs once: the mutual TLS material of the API and its runner, issued for the service names sandbox-api and sandbox-runner-1, which therefore must not change
+  # no healthcheck: docker reports a stopped container that has one as unhealthy, and Tilt then shows the finished run as failed (see ../../../SPEC.md)
   sandbox-certs:
     volumes:
       - ${VOLUMES_PATH:-../../../.volumes}/n8n/assistant/tls:/tls
@@ -50,11 +51,6 @@ services:
       - bootstrap-mtls.sh --out-dir /tls --api-san sandbox-api --control-san-prefix sandbox-runner --world-readable && chown -R sandbox-api:sandbox-api /tls/api && chmod -R a+rX /tls
     entrypoint: [ "sh", "-c" ]
     restart: "no"
-    healthcheck:
-      test: [ "CMD-SHELL", "test -f /tls/api/ca.crt" ]
-      interval: 5s
-      timeout: 3s
-      retries: 3
     user: "0:0"
     <<: [ *base, *sandbox-api ]
 

@@ -112,7 +112,7 @@ function assistantCandidates(catalogue: ModelsCatalogue, current: Current): Mode
 
 /**
  * The prompts of an activation: a cloud provider or a model of AI_MODELS, then the provider and one of its
- * recommended models (see ../../../../compose/models/models.assistant.json), or one of the activated models.
+ * recommended models (see ../../../../compose/models/models.cloud.json), or one of the activated models.
  * The current model stays preselected; self-hosted is disabled while AI_MODELS lists no model of the engine.
  */
 async function promptAssistantModel(models: ModelsCatalogue, providers: AssistantCatalogue, current: Current, rootDir: string): Promise<AssistantSelection | undefined> {

@@ -122,7 +122,7 @@ pnpm run config N8N_ASSISTANT true qwen3-5-4b
 pnpm run config N8N_ASSISTANT false
 ```
 
-- The toggle lives in the root `.env`. The model is written into `compose/n8n/.env` as `N8N_INSTANCE_AI_MODEL` and, for a model of `AI_MODELS`, `N8N_INSTANCE_AI_MODEL_URL` with the endpoint of the engine. The cloud models offered come from [compose/models/models.assistant.json](./compose/models/models.assistant.json); any other `provider/model` is accepted with a warning.
+- The toggle lives in the root `.env`. The model is written into `compose/n8n/.env` as `N8N_INSTANCE_AI_MODEL` and, for a model of `AI_MODELS`, `N8N_INSTANCE_AI_MODEL_URL` with the endpoint of the engine. The cloud models offered come from [compose/models/models.cloud.json](./compose/models/models.cloud.json); any other `provider/model` is accepted with a warning.
 - A model of `AI_MODELS` keeps the endpoint of the engine it was activated with. After changing `AI_ENGINE` or deselecting the model, run `pnpm run config N8N_ASSISTANT` again: `config` and `models select` warn, and Tilt refuses to load until the model fits.
 - Ollama needs no key. vLLM needs its bearer token as `N8N_INSTANCE_AI_MODEL_API_KEY`, and `config` prints the command that copies it. A cloud key can also be entered in the Assistant settings of n8n.
 - The sandbox runner is a privileged Docker-in-Docker container, which n8n documents as [for development and testing only](https://docs.n8n.io/deploy/host-n8n/install-options/install-using-docker-compose): keep it off shared and internet-facing hosts.
@@ -140,7 +140,7 @@ pnpm run config N8N_ASSISTANT false
 │   ├── n8n/                  # docker-compose.yml (dev) extended by .build.yml, .community.yml and .enterprise.yml; assistant/ for the n8n Assistant
 │   ├── storage/              # postgres, pgadmin, redis, redis-insight, garage
 │   ├── services/             # qdrant
-│   └── models/               # models.json plus ollama/ and vllm/, the litellm/ gateway, and models.assistant.json
+│   └── models/               # models.json plus ollama/ and vllm/, the litellm/ gateway, and models.cloud.json
 ├── assets/                   # images, icons (vscode-icons custom folder icons), static assets
 ├── packages/cli/             # n8n-starter: setup, verify, config, models, secrets, tilt, reset
 └── .volumes/                 # runtime data of every service, gitignored

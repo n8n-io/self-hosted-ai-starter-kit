@@ -90,7 +90,7 @@ const N8N_ENV = '# required\nN8N_VERSION=1\n'
 /** What an activation needs beside the root .env: both catalogues and the .env of the n8n project, which holds the model */
 async function writeAssistant(rootDir: string, n8nEnv: string | false = N8N_ENV) {
   await writeCatalogue(rootDir)
-  await writeFile(join(rootDir, 'compose', 'models', 'models.assistant.json'), JSON.stringify(ASSISTANT_CATALOGUE))
+  await writeFile(join(rootDir, 'compose', 'models', 'models.cloud.json'), JSON.stringify(ASSISTANT_CATALOGUE))
   const dir = join(rootDir, 'compose', 'n8n')
   await mkdir(dir, { recursive: true })
   if (n8nEnv !== false)
@@ -615,7 +615,7 @@ test('config N8N_ASSISTANT true with a cloud model writes it and clears the url 
   await config(rootDir, ['N8N_ASSISTANT', 'true', 'openrouter/vendor/other:free'])
 
   expect((await readEnv(n8nEnvPath)).N8N_INSTANCE_AI_MODEL).toBe('openrouter/vendor/other:free')
-  expect(logWarnMock).toHaveBeenCalledWith('openrouter/vendor/other:free is not one of the recommended models of compose/models/models.assistant.json')
+  expect(logWarnMock).toHaveBeenCalledWith('openrouter/vendor/other:free is not one of the recommended models of compose/models/models.cloud.json')
   expect(process.exitCode).toBe(0)
 })
 
@@ -720,7 +720,7 @@ test('config N8N_ASSISTANT false at the prompt asks nothing else, and a cancelle
 
 test.each([
   ['compose/n8n/.env', async () => { await writeAssistant(rootDir, false) }, ['N8N_ASSISTANT', 'true', 'anthropic/claude-x'], 'No compose/n8n/.env file found. Run `pnpm run setup` first.'],
-  ['the cloud catalogue', async () => { await writeCatalogue(rootDir) }, ['N8N_ASSISTANT', 'true', 'anthropic/claude-x'], 'No assistant model catalogue found'],
+  ['the cloud catalogue', async () => { await writeCatalogue(rootDir) }, ['N8N_ASSISTANT', 'true', 'anthropic/claude-x'], 'No cloud model catalogue found'],
   ['the model catalogue', async () => {}, ['N8N_ASSISTANT', 'true', 'a'], 'No model catalogue found'],
 ])('config N8N_ASSISTANT leaves the Assistant off when %s is missing', async (_, arrange, rest, message) => {
   const envPath = await writeEnv()

@@ -1,5 +1,5 @@
 {
-  "$schema": "./models.assistant.schema.json",
+  "$schema": "./models.cloud.schema.json",
   "providers": [
     {
       "id": "anthropic",

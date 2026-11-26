@@ -41,7 +41,7 @@ async function writeN8nEnv(content: string) {
 
 test('the cloud catalogue nests the models under their provider and refuses duplicates, empty lists and unknown keys', () => {
   expect(assistantCatalogueSchema.safeParse(PROVIDERS).success).toBe(true)
-  expect(assistantCatalogueSchema.safeParse({ $schema: './models.assistant.schema.json', ...PROVIDERS }).success).toBe(true)
+  expect(assistantCatalogueSchema.safeParse({ $schema: './models.cloud.schema.json', ...PROVIDERS }).success).toBe(true)
 
   const provider = PROVIDERS.providers[0]!
   const invalid = (providers: unknown) => assistantCatalogueSchema.safeParse({ providers }).error?.issues[0]?.message
@@ -151,11 +151,11 @@ test('the stale warning names the command that fixes it and stays silent while t
 })
 
 test('readAssistantCatalogue fails naming the file when it is missing or invalid', async () => {
-  await expect(readAssistantCatalogue(rootDir)).rejects.toThrow(`No assistant model catalogue found at ${join(rootDir, ASSISTANT_CATALOGUE_FILE)}`)
+  await expect(readAssistantCatalogue(rootDir)).rejects.toThrow(`No cloud model catalogue found at ${join(rootDir, ASSISTANT_CATALOGUE_FILE)}`)
 
   await mkdir(join(rootDir, 'compose', 'models'), { recursive: true })
   await writeFile(join(rootDir, ASSISTANT_CATALOGUE_FILE), JSON.stringify({ providers: [] }))
-  await expect(readAssistantCatalogue(rootDir)).rejects.toThrow(/Invalid assistant model catalogue .*models\.assistant\.json:[\s\S]*at least one provider/)
+  await expect(readAssistantCatalogue(rootDir)).rejects.toThrow(/Invalid cloud model catalogue .*models\.cloud\.json:[\s\S]*at least one provider/)
 
   await writeFile(join(rootDir, ASSISTANT_CATALOGUE_FILE), JSON.stringify(PROVIDERS))
   expect(await readAssistantCatalogue(rootDir)).toEqual(PROVIDERS)
@@ -172,8 +172,8 @@ test('the repository cloud catalogue is valid, mirrored by its editor schema, an
 
   // the editor schema carries the same shape and patterns as the zod schema
   const raw = JSON.parse(await readFile(join(repoRoot, ASSISTANT_CATALOGUE_FILE), 'utf-8'))
-  expect(raw.$schema).toBe('./models.assistant.schema.json')
-  const schema = JSON.parse(await readFile(join(repoRoot, 'compose/models/models.assistant.schema.json'), 'utf-8'))
+  expect(raw.$schema).toBe('./models.cloud.schema.json')
+  const schema = JSON.parse(await readFile(join(repoRoot, 'compose/models/models.cloud.schema.json'), 'utf-8'))
   expect(schema.properties.providers).toMatchObject({ type: 'array', minItems: 1, items: { $ref: '#/$defs/provider' } })
   expect(schema.additionalProperties).toBe(false)
   expect(schema.$defs.provider.properties.id.pattern).toBe(ASSISTANT_PROVIDER_ID_PATTERN.source)

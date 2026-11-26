@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-/** A provider id of compose/models/models.assistant.json: what n8n reads before the first slash of N8N_INSTANCE_AI_MODEL */
+/** A provider id of compose/models/models.cloud.json: what n8n reads before the first slash of N8N_INSTANCE_AI_MODEL */
 export const ASSISTANT_PROVIDER_ID_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/
 /** A model id as its provider names it; an aggregator nests the vendor, as `deepseek/deepseek-v4-pro` on openrouter */
 export const ASSISTANT_MODEL_ID_PATTERN = /^[\w.:-]+(\/[\w.:-]+)*$/
@@ -23,7 +23,7 @@ export const assistantProviderSchema = z.object({
 }).strict()
 
 /**
- * The shape of compose/models/models.assistant.json, mirrored for editors by compose/models/models.assistant.schema.json:
+ * The shape of compose/models/models.cloud.json, mirrored for editors by compose/models/models.cloud.schema.json:
  * the cloud models `config N8N_ASSISTANT` offers, nested under their provider. The first model of the first provider is
  * the default of N8N_INSTANCE_AI_MODEL in compose/n8n/docker-compose.yml (see ../../../../SPEC.md)
  */

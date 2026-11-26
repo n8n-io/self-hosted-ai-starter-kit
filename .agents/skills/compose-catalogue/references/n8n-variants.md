@@ -24,7 +24,7 @@
 `N8N_ASSISTANT` of the root `.env` is no variant: it combines with every one. Reasoning: SPEC.md, section "The n8n Assistant (`N8N_ASSISTANT`)".
 
 - Its n8n settings are one anchor of the base file, `x-n8n-env-assistant`, which every variant inherits through `extends` (main, worker and webhook processor all load the module). Every key in it is optional: never add a `${VAR:?}` there, or n8n stops running without the Assistant. A compose profile does not help, compose interpolates inactive profiles and unused anchors too.
-- The toggle reaches the files as `${N8N_ASSISTANT:-false}`, like `DOMAIN`. The model is `N8N_INSTANCE_AI_MODEL` and `N8N_INSTANCE_AI_MODEL_URL` of `compose/n8n/.env`, written by `pnpm run config N8N_ASSISTANT`; its compose default is the first model of `compose/models/models.assistant.json`, the one model name in a compose file (a test compares them).
+- The toggle reaches the files as `${N8N_ASSISTANT:-false}`, like `DOMAIN`. The model is `N8N_INSTANCE_AI_MODEL` and `N8N_INSTANCE_AI_MODEL_URL` of `compose/n8n/.env`, written by `pnpm run config N8N_ASSISTANT`; its compose default is the first model of `compose/models/models.cloud.json`, the one model name in a compose file (a test compares them).
 - `compose/n8n/assistant/` is an ordinary service directory with its own project `assistant`, `.env.template` and `.env.json`: the sandbox services (names fixed by their certificates, `sandbox-runner-1` privileged) and `searxng`. n8n gets the sandbox key through a conditional link (env-and-secrets reference).
 - A new Assistant setting is an n8n setting: confirm it through the n8n-docs skill, and check `packages/@n8n/config/src/configs/instance-ai.config.ts` of the pinned `N8N_VERSION` for whether that version knows it.
 

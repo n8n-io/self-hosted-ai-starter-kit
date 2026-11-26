@@ -17,7 +17,7 @@ export const ASSISTANT_MODEL_API_KEY = 'N8N_INSTANCE_AI_MODEL_API_KEY'
 /** The .env of the n8n compose project, relative to the root: where the model of the Assistant lives */
 export const ASSISTANT_ENV_FILE = 'compose/n8n/.env'
 /** The cloud models `config N8N_ASSISTANT` offers, relative to the root */
-export const ASSISTANT_CATALOGUE_FILE = 'compose/models/models.assistant.json'
+export const ASSISTANT_CATALOGUE_FILE = 'compose/models/models.cloud.json'
 
 /** The OpenAI compatible endpoint of the ollama server, which n8n needs as the base URL of a custom model */
 export const OLLAMA_OPENAI_ENDPOINT = `${OLLAMA_ENDPOINT}/v1`
@@ -50,11 +50,11 @@ export async function readAssistantCatalogue(rootDir: string): Promise<Assistant
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
       throw error
-    throw new Error(`No assistant model catalogue found at ${file}`)
+    throw new Error(`No cloud model catalogue found at ${file}`)
   }
   const result = assistantCatalogueSchema.safeParse(JSON.parse(content))
   if (!result.success)
-    throw new Error(`Invalid assistant model catalogue ${file}:\n${z.prettifyError(result.error)}`)
+    throw new Error(`Invalid cloud model catalogue ${file}:\n${z.prettifyError(result.error)}`)
   return result.data
 }
 
