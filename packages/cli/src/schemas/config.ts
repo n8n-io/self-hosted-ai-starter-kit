@@ -8,11 +8,10 @@ export const N8N_VARIANTS = ['dev', 'build', 'community', 'enterprise'] as const
 export const N8N_ASSISTANTS = ['false', 'true'] as const
 // The gateways in front of the model servers; none runs by default, so the template leaves AI_GATEWAY empty
 export const AI_GATEWAYS = ['litellm'] as const
+// The domains traefik can serve the stack at; n8n.local only resolves once its hostnames are published (see ../../../../SPEC.md)
+export const DOMAINS = ['n8n.localhost', 'n8n.local'] as const
 
-export const domainSchema = z
-  .string()
-  .min(1, 'Domain must not be empty')
-  .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i, 'Domain must be a valid hostname (e.g. n8n.localhost)')
+export const domainSchema = z.enum(DOMAINS, `Domain must be one of: ${DOMAINS.join(', ')}`)
 
 export const aiRuntimeSchema = z.enum(AI_RUNTIMES)
 export const aiEngineSchema = z.enum(AI_ENGINES)

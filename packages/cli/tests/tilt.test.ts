@@ -29,10 +29,10 @@ const CATALOGUE: ModelsCatalogue = {
   ],
 }
 
-const CONFIG: Config = { DOMAIN: 'dev.localhost', N8N_VARIANT: 'dev', N8N_ASSISTANT: 'false', AI_RUNTIME: 'cpu-arm64', AI_ENGINE: 'ollama', AI_GATEWAY: '', AI_MODELS: '' }
+const CONFIG: Config = { DOMAIN: 'n8n.local', N8N_VARIANT: 'dev', N8N_ASSISTANT: 'false', AI_RUNTIME: 'cpu-arm64', AI_ENGINE: 'ollama', AI_GATEWAY: '', AI_MODELS: '' }
 
 const ENV_CONTENT = `# The domain to run the docker compose services
-DOMAIN=dev.localhost
+DOMAIN=n8n.local
 N8N_VARIANT=community
 AI_RUNTIME=cpu-arm64
 AI_ENGINE=vllm
@@ -87,10 +87,10 @@ test('dev registers every compose project but enables n8n alone: no storage serv
   expect(names(plan)).not.toContain('n8n-webhook')
   // the optional services and the ollama server without models wait for a manual start
   expect(names(plan, resource => !resource.auto_init)).toEqual(['pgadmin', 'redisinsight', 'garage', 'garage-webui', 'qdrant', 'ollama'])
-  expect(find(plan, 'n8n')).toMatchObject({ resource_deps: [], links: ['dev.localhost'], infer_links: true })
-  expect(find(plan, 'traefik')).toMatchObject({ links: ['traefik.dev.localhost'], infer_links: false })
-  expect(find(plan, 'pgadmin')).toMatchObject({ resource_deps: ['postgres'], links: ['pgadmin.dev.localhost'] })
-  expect(find(plan, 'garage').links).toEqual(['s3.dev.localhost', 'web.dev.localhost'])
+  expect(find(plan, 'n8n')).toMatchObject({ resource_deps: [], links: ['n8n.local'], infer_links: true })
+  expect(find(plan, 'traefik')).toMatchObject({ links: ['traefik.n8n.local'], infer_links: false })
+  expect(find(plan, 'pgadmin')).toMatchObject({ resource_deps: ['postgres'], links: ['pgadmin.n8n.local'] })
+  expect(find(plan, 'garage').links).toEqual(['s3.n8n.local', 'web.n8n.local'])
   // the dev variant is the base file alone, only its .env to watch
   const n8n = plan.projects.find(project => project.resources[0]!.service === 'n8n')!
   expect(n8n).toMatchObject({ files: ['./compose/n8n/docker-compose.yml'], watch: ['./compose/n8n/.env'], profiles: [] })
@@ -108,7 +108,7 @@ test('build enables postgres with pgadmin and the external task runner, neither 
   expect(names(plan, resource => !resource.enabled)).toEqual(['redis', 'redisinsight', 'garage', 'garage-webui', 'sandbox-certs', 'sandbox-api', 'sandbox-runner-1', 'searxng', 'litellm-db', 'litellm'])
   expect(names(plan)).not.toContain('n8n-worker')
   expect(names(plan)).not.toContain('n8n-webhook')
-  expect(find(plan, 'n8n')).toMatchObject({ resource_deps: ['postgres'], links: ['dev.localhost'] })
+  expect(find(plan, 'n8n')).toMatchObject({ resource_deps: ['postgres'], links: ['n8n.local'] })
   expect(find(plan, 'n8n-runner').resource_deps).toEqual(['n8n'])
   // the build variant is its own file with the base watched
   const n8n = plan.projects.find(project => project.resources[0]!.service === 'n8n')!
@@ -124,7 +124,7 @@ test('community runs queue mode: redis, a worker pair, a webhook processor and n
   expect(find(plan, 'n8n').resource_deps).toEqual(['postgres', 'redis'])
   expect(find(plan, 'n8n-worker')).toMatchObject({ labels: ['n8n'], resource_deps: ['n8n', 'redis'], infer_links: false, enabled: true })
   expect(find(plan, 'n8n-worker-runner')).toMatchObject({ resource_deps: ['n8n-worker'], infer_links: false })
-  expect(find(plan, 'n8n-webhook')).toMatchObject({ labels: ['n8n'], resource_deps: ['n8n', 'redis'], links: ['hooks.dev.localhost'], infer_links: false, enabled: true })
+  expect(find(plan, 'n8n-webhook')).toMatchObject({ labels: ['n8n'], resource_deps: ['n8n', 'redis'], links: ['hooks.n8n.local'], infer_links: false, enabled: true })
   const n8n = plan.projects.find(project => project.resources[0]!.service === 'n8n')!
   expect(n8n.files).toEqual(['./compose/n8n/docker-compose.community.yml'])
   expect(n8n.watch).toEqual(['./compose/n8n/docker-compose.yml', './compose/n8n/docker-compose.build.yml', './compose/n8n/.env'])
@@ -198,7 +198,7 @@ test('AI_GATEWAY=litellm enables the gateway with one model list entry per selec
   expect(ollama.project.project_name).toBeUndefined()
   expect(ollama.project.resources).toEqual([
     expect.objectContaining({ service: 'litellm-db', name: 'litellm-db', labels: ['models'], infer_links: false, auto_init: true, enabled: true }),
-    expect.objectContaining({ service: 'litellm', name: 'litellm', labels: ['models'], resource_deps: ['litellm-db'], links: ['litellm.dev.localhost/ui'], auto_init: true, enabled: true }),
+    expect.objectContaining({ service: 'litellm', name: 'litellm', labels: ['models'], resource_deps: ['litellm-db'], links: ['litellm.n8n.local/ui'], auto_init: true, enabled: true }),
   ])
   expect(ollama.config).toEqual({
     model_list: [
@@ -222,7 +222,7 @@ test('AI_GATEWAY=litellm enables the gateway with one model list entry per selec
   // compose and Tilt compare the service, not the content of its config, so the hash of the list labels the proxy:
   // a changed list recreates the container, an unrelated change of the root .env leaves it alone
   expect(ollama.labels).toEqual([expect.stringMatching(new RegExp(`^${GATEWAY_CONFIG_HASH_LABEL}=[0-9a-f]{16}$`))])
-  expect(gateway({ AI_RUNTIME: 'gpu-nvidia', AI_MODELS: 'a-1,b', N8N_VARIANT: 'community', DOMAIN: 'other.localhost' }).labels).toEqual(ollama.labels)
+  expect(gateway({ AI_RUNTIME: 'gpu-nvidia', AI_MODELS: 'a-1,b', N8N_VARIANT: 'community', DOMAIN: 'n8n.localhost' }).labels).toEqual(ollama.labels)
   const lists = [ollama, vllm, gateway({}), gateway({ AI_RUNTIME: 'gpu-nvidia', AI_MODELS: 'a-1' }), gateway({ AI_RUNTIME: 'gpu-nvidia', AI_MODELS: 'b,a-1' })]
   expect(new Set(lists.map(list => list.labels[0])).size).toBe(lists.length)
 })
@@ -325,7 +325,7 @@ test('the plan schema rejects duplicate names, unknown dependencies and enabled 
 test('readRootConfig validates the root .env', async () => {
   await writeFile(join(rootDir, '.env'), ENV_CONTENT)
   // a root .env written before AI_GATEWAY and N8N_ASSISTANT existed runs no gateway and no Assistant
-  expect(await readRootConfig(rootDir)).toEqual({ DOMAIN: 'dev.localhost', N8N_VARIANT: 'community', N8N_ASSISTANT: 'false', AI_RUNTIME: 'cpu-arm64', AI_ENGINE: 'vllm', AI_GATEWAY: '', AI_MODELS: 'a-1' })
+  expect(await readRootConfig(rootDir)).toEqual({ DOMAIN: 'n8n.local', N8N_VARIANT: 'community', N8N_ASSISTANT: 'false', AI_RUNTIME: 'cpu-arm64', AI_ENGINE: 'vllm', AI_GATEWAY: '', AI_MODELS: 'a-1' })
 
   await writeFile(join(rootDir, '.env'), `${ENV_CONTENT}AI_GATEWAY=litellm\n`)
   expect((await readRootConfig(rootDir)).AI_GATEWAY).toBe('litellm')
@@ -336,7 +336,11 @@ test('readRootConfig validates the root .env', async () => {
   await writeFile(join(rootDir, '.env'), ENV_CONTENT.replace('N8N_VARIANT=community', 'N8N_VARIANT=pro'))
   await expect(readRootConfig(rootDir)).rejects.toThrow(/Invalid .*\.env:[\s\S]*N8N_VARIANT/)
 
-  await writeFile(join(rootDir, '.env'), 'DOMAIN=dev.localhost\n')
+  // a hostname outside the two supported domains stops the plan, like any other unknown option
+  await writeFile(join(rootDir, '.env'), ENV_CONTENT.replace('DOMAIN=n8n.local', 'DOMAIN=example.test'))
+  await expect(readRootConfig(rootDir)).rejects.toThrow(/Invalid .*\.env:[\s\S]*one of: n8n\.localhost, n8n\.local[\s\S]*DOMAIN/)
+
+  await writeFile(join(rootDir, '.env'), 'DOMAIN=n8n.local\n')
   await expect(readRootConfig(rootDir)).rejects.toThrow(/AI_ENGINE/)
 
   await rm(join(rootDir, '.env'))
@@ -352,7 +356,7 @@ test('tilt resources prints one JSON document and nothing else', async () => {
 
   expect(logSpy).toHaveBeenCalledOnce()
   const plan = tiltResourcesSchema.parse(JSON.parse(logSpy.mock.calls[0]![0] as string))
-  expect(plan.config).toEqual({ DOMAIN: 'dev.localhost', N8N_VARIANT: 'community', N8N_ASSISTANT: 'false', AI_RUNTIME: 'cpu-arm64', AI_ENGINE: 'vllm', AI_GATEWAY: '', AI_MODELS: ['a-1'] })
+  expect(plan.config).toEqual({ DOMAIN: 'n8n.local', N8N_VARIANT: 'community', N8N_ASSISTANT: 'false', AI_RUNTIME: 'cpu-arm64', AI_ENGINE: 'vllm', AI_GATEWAY: '', AI_MODELS: ['a-1'] })
   expect(names(plan)).toContain('vllm-a-1')
   expect(plan.projects.some(project => project.secrets !== undefined)).toBe(false)
   expect(logErrorMock).not.toHaveBeenCalled()

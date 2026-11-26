@@ -5,9 +5,9 @@ import type { Platform, PlatformOptions } from '../utils/platform'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join, posix, relative, sep } from 'node:path'
 import { styleText } from 'node:util'
-import { isCancel, select, text } from '@clack/prompts'
+import { isCancel, select } from '@clack/prompts'
 import { z } from 'zod'
-import { AI_ENGINES, AI_RUNTIMES, aiEngineSchema, aiGatewaySchema, aiRuntimeSchema, configSchema, domainSchema, N8N_ASSISTANTS, N8N_VARIANTS, n8nAssistantSchema, n8nVariantSchema } from '../schemas/config'
+import { AI_ENGINES, AI_RUNTIMES, aiEngineSchema, aiGatewaySchema, aiRuntimeSchema, configSchema, DOMAINS, domainSchema, N8N_ASSISTANTS, N8N_VARIANTS, n8nAssistantSchema, n8nVariantSchema } from '../schemas/config'
 import { activatedModels, ASSISTANT_CATALOGUE_FILE, ASSISTANT_ENV_FILE, ASSISTANT_MODEL_API_KEY, ASSISTANT_MODEL_KEY, ASSISTANT_MODEL_URL_KEY, assistantStaleWarning, assistantTarget, cloudModel, cloudModels, parseCloudModel, readAssistantCatalogue, readAssistantEnv, selfHostedAssistant, writeAssistantModel } from '../utils/assistant'
 import { parseEnvContent, updateEnvContent } from '../utils/env'
 import { runCommand } from '../utils/format'
@@ -51,16 +51,20 @@ const CHOICES = {
   AI_RUNTIME: { message: 'The hardware-supported AI runtime', options: AI_RUNTIMES, schema: aiRuntimeSchema },
   AI_ENGINE: { message: 'The engine serving the AI models', options: AI_ENGINES, schema: aiEngineSchema },
   AI_GATEWAY: { message: 'The gateway in front of the AI models', options: aiGatewaySchema.options, schema: aiGatewaySchema },
+  DOMAIN: { message: 'The domain to run the Docker Compose services on', options: DOMAINS, schema: domainSchema },
 } as const
+
+/** What `config DOMAIN` warns about a domain no browser or OS resolves by itself (see ../../../../SPEC.md, section Routing) */
+const UNRESOLVED_DOMAIN_WARNING = 'does not resolve on its own: add the hostnames of the stack to your hosts file, see "Networks and routing" in README.md'
 
 /**
  * The hint of a key in the key select: its description, then the available values with the current
- * one in green (styleText stays plain without a tty or with NO_COLOR). DOMAIN and AI_MODELS have no list,
- * only their current value; the empty option of AI_GATEWAY and an empty AI_MODELS read `none`.
+ * one in green (styleText stays plain without a tty or with NO_COLOR). AI_MODELS has no list,
+ * only its current value; the empty option of AI_GATEWAY and an empty AI_MODELS read `none`.
  */
 export function keyHint(key: ConfigKey, current: Current): string {
   const selected = current[key] ?? ''
-  const available: readonly string[] = key === 'DOMAIN' || key === 'AI_MODELS' ? [selected] : CHOICES[key].options
+  const available: readonly string[] = key === 'AI_MODELS' ? [selected] : CHOICES[key].options
   const values = [...new Set([...available, selected])].filter(value => value !== '' || available.includes(''))
   const rendered = values.map(value => value === selected ? styleText('green', value || NONE) : value || NONE)
   return `${CONFIG_KEY_DESCRIPTIONS[key]}: ${rendered.length > 0 ? rendered.join(', ') : NONE}`
@@ -72,15 +76,6 @@ async function promptKey(current: Current): Promise<ConfigKey | undefined> {
     options: CONFIG_KEYS.map(value => ({ value, label: value, hint: keyHint(value, current) })),
   })
   return isCancel(key) ? undefined : key
-}
-
-async function promptDomain(current: Current): Promise<string | undefined> {
-  const domain = await text({
-    message: 'The domain to run the Docker Compose services on',
-    initialValue: current.DOMAIN ?? 'n8n.localhost',
-    validate: value => domainSchema.safeParse(value).error?.issues[0]?.message,
-  })
-  return isCancel(domain) ? undefined : domain
 }
 
 /**
@@ -380,8 +375,6 @@ export async function config(rootDir = process.cwd(), [requestedKey, value, mode
       return
     }
     resolved = value
-  } else if (key === 'DOMAIN') {
-    resolved = await promptDomain(current)
   } else {
     resolved = await promptChoice(key, current, platform?.runtime)
   }
@@ -430,6 +423,10 @@ export async function config(rootDir = process.cwd(), [requestedKey, value, mode
     if (gateway !== undefined)
       logGatewayEndpoint(gateway)
   }
+
+  // every domain but the default, which browsers resolve to the loopback themselves, needs its names published by hand
+  if (key === 'DOMAIN' && resolved !== DOMAINS[0])
+    logger.warn(`${resolved} ${UNRESOLVED_DOMAIN_WARNING}`)
 
   if (key !== 'DOMAIN')
     await warnSecrets(rootDir, updated)

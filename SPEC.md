@@ -216,6 +216,17 @@ Traefik discovers services through labels via `docker-socket-proxy` (`exposedByD
 
 The stack runs plain HTTP only ([traefik.yml](./compose/proxy/traefik/traefik.yml): one `web` entrypoint on `80`, no TLS, no HSTS headers); HTTPS is not supported yet.
 
+`DOMAIN` is one of two values, and `n8n.localhost` is the default for these reasons:
+
+| | `n8n.localhost` (default) | `n8n.local` |
+| --- | --- | --- |
+| Name resolution | Chrome and Firefox resolve `*.localhost` to the loopback themselves on every OS, as do systemd-resolved and current macOS and curl releases; older command-line tools need a hosts file entry | none without setup, and a failed lookup waits for the mDNS timeout: `.local` belongs to mDNS ([RFC 6762](https://www.rfc-editor.org/rfc/rfc6762)), so every hostname needs a hosts file entry (or an mDNS publisher on the host, which the stack does not ship). Linux [nss-mdns](https://github.com/avahi/nss-mdns) refuses names with more than two labels such as `traefik.n8n.local` by default, and a network whose Active Directory domain ends in `.local` conflicts with it |
+| Reach from the local network | no, the loopback by definition | not by the name alone: traefik binds `127.0.0.1` and the names would have to be published to the other devices |
+| Browser features over plain HTTP | `http://*.localhost` is a [secure context](https://www.w3.org/TR/secure-contexts/#is-origin-trustworthy) | `http://n8n.local` is not, so it depends on HTTPS |
+| A self-signed certificate later | `*.n8n.localhost` plus `n8n.localhost` | `*.n8n.local` plus `n8n.local`, equally valid: both wildcards sit below a second label, which `*.localhost` and `*.local` would not; every other device would need the root certificate installed |
+
+`n8n.local` is therefore the shorter name and fits the planned certificates, but only serves the local network once the names are published, traefik listens beyond the loopback and HTTPS exists. Until then it needs one hosts file line with every hostname of the stack, and `config DOMAIN n8n.local` warns about it.
+
 n8n runs with `N8N_PROXY_HOPS=1` because Traefik is the only proxy in front of it, so Express trusts one hop of `X-Forwarded-*` headers when it determines client IPs (rate limiting, Webhook node IP whitelists). Raise the value in `compose/n8n/.env` by one for every additional proxy or load balancer placed in front of Traefik.
 
 ## Configuration
@@ -242,6 +253,7 @@ AI_GATEWAY=
 # ollama pulls them into one server, vllm runs one container per model, pick them with `pnpm run models select`
 AI_MODELS=
 # The domain to run the docker compose services
+# Options: n8n.localhost or n8n.local, which resolves only with a hosts file entry per hostname (see ./SPEC.md)
 DOMAIN=n8n.localhost
 ```
 
@@ -255,7 +267,7 @@ DOMAIN=n8n.localhost
 * Secret keys are empty in the templates and filled by `setup` as the `.env.json` next to the template declares (see [Secrets](#secrets)).
 * The instance owner of n8n is managed by env in every variant ([manage settings using environment variables](https://docs.n8n.io/deploy/host-n8n/configure-n8n/manage-settings-using-environment-variables#instance-owner), from n8n 2.17.0): `x-n8n-env-owner` of the base file sets `N8N_INSTANCE_OWNER_MANAGED_BY_ENV` (`true`), `N8N_INSTANCE_OWNER_EMAIL` (`owner@example.com`), `N8N_INSTANCE_OWNER_FIRST_NAME` (`Instance`) and `N8N_INSTANCE_OWNER_LAST_NAME` (`Owner`) as knobs with generic defaults, and the required `N8N_INSTANCE_OWNER_PASSWORD_HASH`, which must be a bcrypt hash: `setup` derives it from `N8N_INSTANCE_OWNER_PASSWORD` in `compose/n8n/.env.secrets`. n8n overwrites the owner with these values on every start, makes the matching UI controls read-only and rejects API writes, so nobody creates the owner in the browser: `pnpm run secrets read n8n` prints the login, the email changes in `compose/n8n/.env` ([change instance owner email](https://docs.n8n.io/deploy/host-n8n/configure-n8n/change-instance-owner-email)) and the password with `pnpm run secrets set N8N_INSTANCE_OWNER_PASSWORD`. `N8N_INSTANCE_OWNER_MANAGED_BY_ENV=false` gives the UI its write access back and keeps the values last applied. The worker and the webhook processor inherit the variables through `extends`; only the `start` command applies them ([start.ts](https://github.com/n8n-io/n8n/blob/master/packages/cli/src/commands/start.ts) of n8n, not stated in its docs).
 * In `compose/n8n/.env` ([template](./compose/n8n/.env.template)), the sections named after a variant in their header list the keys only that variant uses: the postgres keys, the runner token `N8N_RUNNERS_AUTH_TOKEN` and the Python allowlists are only used from the `build` variant up (`dev` runs on SQLite with the internal runner), the license keys only by the `enterprise` variant, and `OFFLOAD_MANUAL_EXECUTIONS_TO_WORKERS` / `QUEUE_WORKER_CONCURRENCY` / `N8N_WEBHOOK_REPLICAS` / `N8N_DISABLE_PRODUCTION_MAIN_PROCESS` only in queue mode (`community`, `enterprise`).
-* `DOMAIN` defaults to `n8n.localhost` in every compose file that uses it (traefik, n8n, garage) and in the root [.env.template](./.env.template). Tilt exports the root `.env`, and a shell variable wins over the `.env` next to a compose file, which wins over the compose default, so the root `.env` steers every project while `docker compose` by hand needs nothing. `N8N_ASSISTANT` reaches the n8n compose files the same way, with `false` as their default.
+* `DOMAIN` is `n8n.localhost` or `n8n.local` and nothing else, because no other domain strategy is supported ([Routing](#routing)): the CLI offers the two as a select and rejects any other value, in `config DOMAIN <value>` and in a root `.env` edited by hand, where it stops the Tilt plan. It defaults to `n8n.localhost` in every compose file that uses it (traefik, n8n, garage) and in the root [.env.template](./.env.template). Compose itself cannot restrict a value, so `DOMAIN=… docker compose` by hand takes any hostname, unsupported. Tilt exports the root `.env`, and a shell variable wins over the `.env` next to a compose file, which wins over the compose default, so the root `.env` steers every project while `docker compose` by hand needs nothing. `N8N_ASSISTANT` reaches the n8n compose files the same way, with `false` as their default.
 * Tilt and the CLI are conveniences, never requirements. Any service runs with plain `docker compose up` from its directory once the two docker networks exist (`docker network create n8n-starter-public` and `n8n-starter-private`), its `.env.template` is copied to `.env` with the empty secret keys filled by hand (a value that holds `$`, the bcrypt hash of the n8n owner password for one, in single quotes so compose does not interpolate it) and the services it talks to are up; `pnpm run setup` does the first two for every service at once.
 
 ### Secrets

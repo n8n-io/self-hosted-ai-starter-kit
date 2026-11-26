@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { stripVTControlCharacters } from 'node:util'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
-import { AI_ENGINES, AI_GATEWAYS, AI_RUNTIMES, aiGatewaySchema, configSchema, domainSchema, N8N_ASSISTANTS, N8N_VARIANTS } from '../src/schemas/config'
+import { AI_ENGINES, AI_GATEWAYS, AI_RUNTIMES, aiGatewaySchema, configSchema, DOMAINS, domainSchema, N8N_ASSISTANTS, N8N_VARIANTS } from '../src/schemas/config'
 import type { DockerRunner } from '../src/utils/docker'
 import { formatEnvValue, parseEnvContent, parseEnvDefaults, updateEnvContent } from '../src/utils/env'
 import { setLogLevel } from '../src/utils/logger'
@@ -177,6 +177,7 @@ test('the first option of every list is the default of the root .env.template', 
   expect(template.N8N_VARIANT).toBe(N8N_VARIANTS[0])
   expect(template.N8N_ASSISTANT).toBe(N8N_ASSISTANTS[0])
   expect(N8N_ASSISTANTS[0]).toBe('false')
+  expect(template.DOMAIN).toBe(DOMAINS[0])
   // no model starts with the stack by default, and no gateway
   expect(template.AI_MODELS).toBe('')
   expect(template.AI_GATEWAY).toBe('')
@@ -197,11 +198,16 @@ test('the config keys and their descriptions mirror the root .env.template', asy
   }
 })
 
-test('domain schema rejects invalid hostnames', () => {
-  expect(domainSchema.safeParse('n8n.localhost').success).toBe(true)
+test('domain schema accepts the two supported domains only', () => {
+  expect(DOMAINS).toEqual(['n8n.localhost', 'n8n.local'])
+  for (const domain of DOMAINS)
+    expect(domainSchema.safeParse(domain).success).toBe(true)
   expect(domainSchema.safeParse('').success).toBe(false)
-  expect(domainSchema.safeParse('not a domain').success).toBe(false)
-  expect(domainSchema.safeParse('-bad.localhost').success).toBe(false)
+  // a valid hostname is not enough: no other domain strategy is supported
+  expect(domainSchema.safeParse('example.test').success).toBe(false)
+  expect(domainSchema.safeParse('my.localhost').success).toBe(false)
+  expect(configSchema.safeParse({ ...VALID_CONFIG, DOMAIN: 'n8n.local' }).success).toBe(true)
+  expect(configSchema.safeParse({ ...VALID_CONFIG, DOMAIN: 'example.test' }).success).toBe(false)
 })
 
 test('parseEnvContent reads keys and ignores comments', () => {
@@ -284,8 +290,8 @@ test('keyHint lists the available values and marks the selected one', async () =
   // an unknown current value is listed after the options
   expect(keyHint('N8N_VARIANT', { N8N_VARIANT: 'pro' }).replace(/\u001B\[\d+m/g, '')).toBe(`${CONFIG_KEY_DESCRIPTIONS.N8N_VARIANT}: dev, build, community, enterprise, pro`)
   expect(keyHint('N8N_ASSISTANT', current).replace(/\u001B\[\d+m/g, '')).toBe(`${CONFIG_KEY_DESCRIPTIONS.N8N_ASSISTANT}: false, true`)
-  expect(keyHint('DOMAIN', current).replace(/\u001B\[\d+m/g, '')).toBe(`${CONFIG_KEY_DESCRIPTIONS.DOMAIN}: n8n.localhost`)
-  expect(keyHint('DOMAIN', {}).replace(/\u001B\[\d+m/g, '')).toBe(`${CONFIG_KEY_DESCRIPTIONS.DOMAIN}: none`)
+  expect(keyHint('DOMAIN', current).replace(/\u001B\[\d+m/g, '')).toBe(`${CONFIG_KEY_DESCRIPTIONS.DOMAIN}: n8n.localhost, n8n.local`)
+  expect(keyHint('DOMAIN', {}).replace(/\u001B\[\d+m/g, '')).toBe(`${CONFIG_KEY_DESCRIPTIONS.DOMAIN}: n8n.localhost, n8n.local`)
   // the empty option of AI_GATEWAY reads none, also in a root .env without the key
   expect(keyHint('AI_GATEWAY', current).replace(/\u001B\[\d+m/g, '')).toBe(`${CONFIG_KEY_DESCRIPTIONS.AI_GATEWAY}: none, litellm`)
   expect(keyHint('AI_GATEWAY', {}).replace(/\u001B\[\d+m/g, '')).toBe(`${CONFIG_KEY_DESCRIPTIONS.AI_GATEWAY}: none, litellm`)
@@ -390,15 +396,32 @@ test('config AI_GATEWAY appends the key to a root .env written before it existed
   expect(await readFile(envPath, 'utf-8')).toBe(`${content}AI_GATEWAY=litellm\n`)
 })
 
-test('config DOMAIN prompts the domain only', async () => {
+test('config DOMAIN offers the two supported domains only', async () => {
   const envPath = await writeEnv()
-  textMock.mockResolvedValue('my.localhost')
+  selectMock.mockResolvedValueOnce('n8n.local')
 
   await config(rootDir, ['DOMAIN'])
 
-  expect(textMock).toHaveBeenCalledWith(expect.objectContaining({ initialValue: 'n8n.localhost' }))
-  expect(selectMock).not.toHaveBeenCalled()
-  expect(parseEnvContent(await readFile(envPath, 'utf-8')).DOMAIN).toBe('my.localhost')
+  expect(selectMock).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    options: [{ value: 'n8n.localhost', label: 'n8n.localhost' }, { value: 'n8n.local', label: 'n8n.local' }],
+    initialValue: 'n8n.localhost',
+  }))
+  expect(textMock).not.toHaveBeenCalled()
+  expect(parseEnvContent(await readFile(envPath, 'utf-8')).DOMAIN).toBe('n8n.local')
+  // nothing resolves a .local name by itself, unlike *.localhost
+  expect(logWarnMock).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/^n8n\.local does not resolve on its own/))
+})
+
+test('config DOMAIN falls back to the default for a domain that is no longer supported, and does not warn about it', async () => {
+  const envPath = await writeEnv(ENV_CONTENT.replace('DOMAIN=n8n.localhost', 'DOMAIN=example.test'))
+  selectMock.mockResolvedValueOnce('n8n.localhost')
+
+  await config(rootDir, ['DOMAIN'])
+
+  // no initial value, so the prompt focuses its first option, the default
+  expect(selectMock).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ initialValue: undefined }))
+  expect(parseEnvContent(await readFile(envPath, 'utf-8')).DOMAIN).toBe('n8n.localhost')
+  expect(logWarnMock).not.toHaveBeenCalled()
 })
 
 test('config KEY value writes without a prompt', async () => {
@@ -415,7 +438,7 @@ test('config KEY value writes without a prompt', async () => {
 test.each([
   [['NOPE', 'x'], 'Unknown config key "NOPE"'],
   [['N8N_VARIANT', 'pro'], 'Invalid N8N_VARIANT "pro"'],
-  [['DOMAIN', 'not a domain'], 'valid hostname'],
+  [['DOMAIN', 'example.test'], 'Invalid DOMAIN "example.test": Domain must be one of: n8n.localhost, n8n.local'],
   [['AI_GATEWAY', 'kong'], 'Invalid AI_GATEWAY "kong": Gateway must be empty for none, or one of: litellm'],
   // AI_MODELS is validated by `models select`: the shape, then the catalogue of the engine on the runtime
   [['AI_MODELS', 'A/B'], 'Invalid AI_MODELS "A/B"'],

@@ -187,6 +187,8 @@ Two external docker networks, created by `pnpm run setup`: `n8n-starter-public` 
 | `http://litellm.n8n.localhost/ui` | LiteLLM dashboard (the host root is its OpenAPI page), with `AI_GATEWAY=litellm` |
 | `http://s3.n8n.localhost`, `http://s3web.n8n.localhost`, `http://s3ui.n8n.localhost` | Garage S3 API, static web hosting, web UI |
 
+`DOMAIN` is `n8n.localhost` or `n8n.local` (`pnpm run config DOMAIN`). Nothing resolves a `.local` name on its own, so `n8n.local` needs every hostname above in your hosts file (`/etc/hosts`, or `C:\Windows\System32\drivers\etc\hosts`), for example `127.0.0.1 n8n.local traefik.n8n.local pgadmin.n8n.local`. It does not open the stack to your local network: Traefik still listens on `127.0.0.1` only. [SPEC.md](./SPEC.md#routing) compares the two.
+
 ### Configuration
 
 - The root `.env` steers the environment: `N8N_VARIANT`, `N8N_ASSISTANT`, `AI_RUNTIME`, `AI_ENGINE`, `AI_GATEWAY`, `AI_MODELS`, `DOMAIN`. Edit it with `pnpm run config` (`AI_MODELS` also with `pnpm run models select`; `N8N_ASSISTANT` also picks the model of the Assistant, which goes into `compose/n8n/.env`) or by hand.
@@ -252,8 +254,8 @@ docker network create n8n-starter-public && docker network create n8n-starter-pr
 cp compose/n8n/.env.template compose/n8n/.env   # and so on for every .env.template, then fill the empty secret keys it lists (a bcrypt hash in single quotes)
 # an n8n variant, from compose/n8n/
 docker compose -f docker-compose.community.yml up
-# another domain, from compose/n8n/ (a shell variable wins over .env and the compose default)
-DOMAIN=example.test docker compose -f docker-compose.community.yml up
+# the other domain, from compose/n8n/ (a shell variable wins over .env and the compose default)
+DOMAIN=n8n.local docker compose -f docker-compose.community.yml up
 # a model engine, from compose/models/ollama/ (one service per AI_RUNTIME profile)
 OLLAMA_PULL_MODELS=qwen3.5:0.8b docker compose --profile cpu-arm64 up
 # the n8n Assistant, from compose/n8n/: its sandbox and web search, then n8n with the toggle (the model is N8N_INSTANCE_AI_MODEL in .env)

@@ -12,7 +12,7 @@ Paths are relative to `packages/cli/` unless they start at the repository root. 
 ## Add a root `.env` key
 
 1. `src/schemas/config.ts`: the schema and the `configSchema` field (plus a const tuple when it is an enum).
-2. `src/commands/config.ts`: the key in `CONFIG_KEYS` (template order) and `CONFIG_KEY_DESCRIPTIONS` (the template comment), an entry in `CHOICES` for an enum key or its own prompt function (like `promptDomain`), and the branch that picks it. A value given on the command line is validated by `configSchema.shape[key]`, so a rule beyond the shape of one key belongs in the schema.
+2. `src/commands/config.ts`: the key in `CONFIG_KEYS` (template order) and `CONFIG_KEY_DESCRIPTIONS` (the template comment), an entry in `CHOICES` for an enum key (like `DOMAIN`) or its own prompt function and the branch that picks it. A value given on the command line is validated by `configSchema.shape[key]`, so a rule beyond the shape of one key belongs in the schema.
 3. The root `.env.template` (a comment line above the key, an `Options:` comment for enums), the `KEY:` note of `COMMAND_HELP.config` in `src/help.ts`, the banner line in `print_env()` of the Tiltfile (the key reaches Tilt through the `config` of the plan, which extends `configSchema`), the Configuration block of SPEC.md, `tests/config.test.ts` (`VALID_CONFIG`, the template-defaults and the key-mirror tests).
 
 ## Add a generator

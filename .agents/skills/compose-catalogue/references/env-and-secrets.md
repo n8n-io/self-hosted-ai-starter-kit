@@ -22,7 +22,7 @@ Reasoning: [SPEC.md](../../../../SPEC.md), sections "Compose spec rules", "Confi
 
 - It holds only `N8N_VARIANT`, `N8N_ASSISTANT` (`false` or `true`), `AI_RUNTIME`, `AI_ENGINE`, `AI_GATEWAY` (empty for none), `AI_MODELS`, `DOMAIN`; `AI_GATEWAY` and `N8N_ASSISTANT` are the keys that may be absent. It never holds a secret: the Tiltfile prints it.
 - `N8N_ASSISTANT` is the one root key with settings outside the root `.env`: `config N8N_ASSISTANT` writes the model of the Assistant into `compose/n8n/.env` (`N8N_INSTANCE_AI_MODEL`, `N8N_INSTANCE_AI_MODEL_URL`), and the n8n compose files read the toggle as `${N8N_ASSISTANT:-false}`.
-- Tilt loads it with the `dotenv` extension, so every compose project it starts sees `DOMAIN` and `N8N_ASSISTANT`. By hand the compose default `n8n.localhost` applies (shell variable > `.env` next to the file > compose default) and `DOMAIN=… docker compose …` overrides it.
+- Tilt loads it with the `dotenv` extension, so every compose project it starts sees `DOMAIN` and `N8N_ASSISTANT`. By hand the compose default `n8n.localhost` applies (shell variable > `.env` next to the file > compose default) and `DOMAIN=… docker compose …` overrides it. The CLI accepts `n8n.localhost` and `n8n.local` only (`DOMAINS`, see Routing in SPEC.md); compose cannot restrict the value.
 - `DOMAIN` is used at compose time in labels and at runtime by traefik (`{{ env "DOMAIN" }}` in the default rule and in `config/dashboard.yml`), so it reaches traefik as a container variable too. The default `n8n.localhost` is written in every compose file that uses it (traefik, n8n, garage) and in the root `.env.template`.
 
 ## Secrets manifest (`.env.json`)
