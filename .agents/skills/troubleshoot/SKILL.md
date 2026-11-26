@@ -13,7 +13,7 @@ For a model server or the gateway (vLLM, Ollama, LiteLLM), read [references/mode
 
 - The stack belongs to the user. Never `tilt down` a session you did not start, never run `pnpm run reset`, never delete `.volumes/`, and start `pnpm run dev` (interactive) only when asked.
 - If port 10350 is in use, a Tilt session already runs: reuse it. `tilt get uiresources -o name` lists its resources, `tilt logs <resource>` prints a log, `tilt trigger <resource>` re-applies one resource.
-- Read before you change: logs and `docker inspect` first.
+- Read before you change: logs and `docker inspect` first. The n8n logs of earlier sessions outlive their containers as JSON lines in `.volumes/n8n/logs` (`n8n.log`, `n8n-worker.log`, `n8n-webhook.log`; the highest number is the newest file).
 - `node packages/cli/dist/index.mjs secrets read <KEY>` prints one secret value for piping. Do not paste secret values into a report.
 - What n8n is supposed to do is confirmed in the documentation ([n8n-docs](../n8n-docs/SKILL.md) skill), not assumed.
 

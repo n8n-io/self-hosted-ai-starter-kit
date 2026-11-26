@@ -10,7 +10,6 @@ x-n8n-env: &n8n-env
   GENERIC_TIMEZONE: ${TZ:-Europe/Berlin}
   TZ: ${TZ:-Europe/Berlin}
   N8N_DEPLOYMENT_ARTIFACT: docker-compose
-  N8N_LOG_LEVEL: ${N8N_LOG_LEVEL:-info}
   N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: ${N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS:-true}
   N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?}
   N8N_USER_MANAGEMENT_JWT_SECRET: ${N8N_USER_MANAGEMENT_JWT_SECRET:?}
@@ -36,6 +35,14 @@ x-n8n-env-hosting: &n8n-env-hosting
   N8N_PORT: 5678
   N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-false}
   N8N_PROXY_HOPS: ${N8N_PROXY_HOPS:-1}
+
+# the console always, plus rotating JSON files in the logs volume, one file per n8n process, see ../../SPEC.md
+x-n8n-env-logs: &n8n-env-logs
+  N8N_LOG_LEVEL: ${N8N_LOG_LEVEL:-info}
+  N8N_LOG_OUTPUT: ${N8N_LOG_OUTPUT:-console,file}
+  N8N_LOG_FILE_LOCATION: /home/node/logs/n8n.log
+  N8N_LOG_FILE_SIZE_MAX: ${N8N_LOG_FILE_SIZE_MAX:-16}
+  N8N_LOG_FILE_COUNT_MAX: ${N8N_LOG_FILE_COUNT_MAX:-10}
 
 # the instance owner n8n applies on every start, the hash is derived by `pnpm run setup`, see ../../SPEC.md
 x-n8n-env-owner: &n8n-env-owner
@@ -69,8 +76,9 @@ services:
   n8n:
     volumes:
       - ${VOLUMES_PATH:-../../.volumes}/n8n/data:/home/node/.n8n
+      - ${VOLUMES_PATH:-../../.volumes}/n8n/logs:/home/node/logs
     environment:
-      <<: [ *n8n-env, *n8n-env-hosting, *n8n-env-owner, *n8n-env-sqlite, *n8n-env-runners-internal, *n8n-env-assistant ]
+      <<: [ *n8n-env, *n8n-env-hosting, *n8n-env-logs, *n8n-env-owner, *n8n-env-sqlite, *n8n-env-runners-internal, *n8n-env-assistant ]
     networks:
       - n8n-starter-public
       - n8n-starter-private

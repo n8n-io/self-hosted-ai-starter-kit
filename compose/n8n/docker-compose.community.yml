@@ -34,7 +34,11 @@ services:
     depends_on:
       n8n:
         condition: service_healthy
-    volumes: !reset []
+    # only the logs volume, no .n8n mount, see ../../SPEC.md
+    volumes: !override
+      - ${VOLUMES_PATH:-../../.volumes}/n8n/logs:/home/node/logs
+    environment:
+      N8N_LOG_FILE_LOCATION: /home/node/logs/n8n-webhook.log
     command: webhook
     labels: !override
       - traefik.enable=true
@@ -51,9 +55,12 @@ services:
     depends_on:
       n8n:
         condition: service_healthy
-    volumes: !reset []
+    # only the logs volume, no .n8n mount, see ../../SPEC.md
+    volumes: !override
+      - ${VOLUMES_PATH:-../../.volumes}/n8n/logs:/home/node/logs
     environment:
       QUEUE_WORKER_CONCURRENCY: ${QUEUE_WORKER_CONCURRENCY:-10}
+      N8N_LOG_FILE_LOCATION: /home/node/logs/n8n-worker.log
     networks: !override
       - n8n-starter-private
     command: worker

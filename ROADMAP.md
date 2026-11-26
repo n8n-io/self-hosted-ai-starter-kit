@@ -17,14 +17,18 @@
 
 ## Next
 
-### Implement n8n import/export
+### remove DOMAIN option *.n8n.local
 
-### Local network access with \*.n8n.local
+### Add https option with self-signed certificate for *.n8n.localhost
 
-* `DOMAIN=n8n.local` only works with hosts file entries today (see Routing in SPEC.md). To serve the local network it needs its hostnames published (an mDNS publisher on the host or a hosts file helper), traefik listening beyond `127.0.0.1` and the https option below.
+### Implement n8n project export/import cli commands using the n8n api
 
-
-### CLI import and export for agents and worklfows
+* cli command "n8n xxx" always pre checks if an n8n api key was set before executing commands
+* if no api key is set, the cli prompts to enter an n8n api key with a required set of scopes
+* where to store the api key once entered?
+* cli command "n8n export" renders select project list and exports selected into ./projects/{PROJECT NAME}/[credential|workflow].json files
+* cli command "n8n export" also exports any credential dependencies even if they are coming from another project
+* cli command "n8n import" renders a select list with available projects in "./projects" and imports selected
 
 ### Add N8N_ENTERPRISE_VARIANT config for `compose/n8n/enterprise` variants
 
@@ -39,4 +43,4 @@ In the Tiltfile directly (not cli), add a new verify function that only verifies
 
 ### Minimum Viable Collection for Models
 
-### Add https option with self-signed certificate for *.n8n.localhost and *.n8n.local
+
