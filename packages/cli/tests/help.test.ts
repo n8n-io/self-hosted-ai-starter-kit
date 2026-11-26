@@ -65,7 +65,10 @@ test('the help of one command shows its usage, its sub-commands or notes, and th
   expect(verify).not.toContain('Sub-commands:')
   expect(verify).toContain(commandHelp('verify').description)
 
-  expect(plain(renderHelp('config'))).toContain('  KEY: N8N_VARIANT, AI_RUNTIME, AI_ENGINE, AI_GATEWAY, AI_MODELS or DOMAIN')
+  const config = plain(renderHelp('config'))
+  expect(config).toContain('  KEY: N8N_VARIANT, N8N_ASSISTANT, AI_RUNTIME, AI_ENGINE, AI_GATEWAY, AI_MODELS or DOMAIN')
+  // the one key with a third argument
+  expect(config).toContain('  N8N_ASSISTANT true [model]: an id of AI_MODELS or a cloud model as provider/model')
 })
 
 test('the usage column is highlighted when colours are on and plain when they are off', () => {

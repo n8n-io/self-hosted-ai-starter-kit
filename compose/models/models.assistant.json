@@ -1,0 +1,26 @@
+{
+  "$schema": "./models.assistant.schema.json",
+  "providers": [
+    {
+      "id": "anthropic",
+      "label": "Anthropic",
+      "models": [
+        { "id": "claude-opus-5-5", "label": "Claude Opus 5.5" }
+      ]
+    },
+    {
+      "id": "openai",
+      "label": "OpenAI",
+      "models": [
+        { "id": "gpt-5.5", "label": "GPT-5.5" }
+      ]
+    },
+    {
+      "id": "openrouter",
+      "label": "OpenRouter",
+      "models": [
+        { "id": "deepseek/deepseek-v4-pro", "label": "DeepSeek V4 Pro" }
+      ]
+    }
+  ]
+}

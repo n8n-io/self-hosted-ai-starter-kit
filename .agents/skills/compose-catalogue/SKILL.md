@@ -14,7 +14,7 @@ Read the reference the task needs, not all of them:
 | [references/service-directory.md](references/service-directory.md) | adding a service, or touching what a service directory holds: its README, `.env.template`, config files, data path |
 | [references/env-and-secrets.md](references/env-and-secrets.md) | adding, renaming or removing an environment variable or a secret, in the root or in a service template |
 | [references/networks-routing.md](references/networks-routing.md) | changing ports, network membership, traefik labels or routes |
-| [references/n8n-variants.md](references/n8n-variants.md) | touching `compose/n8n/` or adding a variant; every n8n setting also goes through the [n8n-docs](../n8n-docs/SKILL.md) skill |
+| [references/n8n-variants.md](references/n8n-variants.md) | touching `compose/n8n/`, the n8n Assistant in `compose/n8n/assistant/` included, or adding a variant; every n8n setting also goes through the [n8n-docs](../n8n-docs/SKILL.md) skill |
 | [references/models.md](references/models.md) | touching `compose/models/`: catalogue entries, engine compose files, runtimes, the gateway |
 | [references/mirrors.md](references/mirrors.md) | adding, renaming or removing a value that exists in more than one file |
 
@@ -29,13 +29,13 @@ Read the reference the task needs, not all of them:
 - [ ] Shared config is factored into `x-*` anchors within a file. Anchors never cross files: cross-file reuse is `extends` (the n8n cascade) or `.env` variables only.
 - [ ] `${VAR:-default}` for optional settings (the default lives in the compose file, the template shows the knob commented out); `${VAR:?}` for values that must come from `.env`, never for an optional knob. Never a bare `${VAR}`, `$VAR` or `environment: - VAR` (`lint:env` fails on the first two), never a literal credential or an absolute host path. The one exception: vllm checks `MODEL` at container start, because Tilt sets container variables, not interpolation ones.
 - [ ] Runtime data never lives in the service directory: bind mounts go to `${VOLUMES_PATH:-<relative path to .volumes>}/<group>/<service>/…`.
-- [ ] No model name in a compose file, no model-specific flag in `command`, no runtime flag in the catalogue `args`.
+- [ ] No model name in a compose file, no model-specific flag in `command`, no runtime flag in the catalogue `args`. The one exception is the default of `N8N_INSTANCE_AI_MODEL` in `compose/n8n/docker-compose.yml`, the first model of `compose/models/models.assistant.json`: n8n takes an empty value literally.
 - [ ] Comments stay one line and point to where the reasoning lives (`see ../../SPEC.md`), with a path relative to the file. No multi-line comment repeating SPEC.md.
 - [ ] No `version:` key: `no-version-field` is the only dclint rule switched off in `compose/.dclintrc`.
 
 ## Naming
 
-- Directory name = compose project `name:` = compose service name = traefik host label (`<service>.<DOMAIN>`). Exceptions today: `redis-insight/` runs the project and service `redisinsight`, `garage/` also runs `garage-webui`, `litellm/` also runs `litellm-db`.
+- Directory name = compose project `name:` = compose service name = traefik host label (`<service>.<DOMAIN>`). Exceptions today: `redis-insight/` runs the project and service `redisinsight`, `garage/` also runs `garage-webui`, `litellm/` also runs `litellm-db`, and `n8n/assistant/` runs `sandbox-certs`, `sandbox-api`, `sandbox-runner-1` and `searxng` (no service is named after it, and the sandbox names are fixed by their certificates).
 - Model engine services are `<engine>-<runtime>` (`ollama-cpu-arm64`, `vllm-gpu-nvidia`, …), one per `AI_RUNTIME`, each in the compose profile of the same name.
 - A vllm model is addressed everywhere (Tilt resource, compose project, `container_name`, hostname) by `vllm-<id>`, the `id` of its catalogue entry (`vllm-qwen3-5-0-8b`), the same value as in `AI_MODELS`. Nothing normalises or derives a name.
 - YAML anchors are named after what they configure (`x-n8n-env-queue`, `x-n8n-env-license`, `x-n8n-env-runners-broker`), never after a variant.
@@ -45,7 +45,7 @@ Read the reference the task needs, not all of them:
 The current files deviate from the rules above in places. Mention them when relevant; do not clean them up without being asked:
 
 - Not exactly pinned: `postgres:17`, `redis:8-alpine` and `qdrant/qdrant:${QDRANT_VERSION:?}` with `v1.19` in the template.
-- No `no-new-privileges`: traefik, postgres, redis, pgadmin, redisinsight, garage, garage-webui, qdrant; `vllm-gpu-amd` has only `seccomp=unconfined`.
+- No `no-new-privileges`: traefik, postgres, redis, pgadmin, redisinsight, garage, garage-webui, qdrant; `vllm-gpu-amd` has only `seccomp=unconfined`; `sandbox-runner-1` is `privileged: true` (Docker in Docker, development and testing only, see the Assistant section of SPEC.md).
 - A named volume instead of a `.volumes` bind mount: qdrant `qdrant_storage`.
 - postgres and redis bind `0.0.0.0`.
 - Required (`${VAR:?}`) without being a secret or a pinned version: `POSTGRES_USER`, `DB_POSTGRESDB_USER` and `PGADMIN_DEFAULT_EMAIL`, live in their templates with a placeholder value.

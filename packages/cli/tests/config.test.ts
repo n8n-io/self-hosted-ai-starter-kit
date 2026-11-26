@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { stripVTControlCharacters } from 'node:util'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
-import { AI_ENGINES, AI_GATEWAYS, AI_RUNTIMES, aiGatewaySchema, configSchema, domainSchema, N8N_VARIANTS } from '../src/schemas/config'
+import { AI_ENGINES, AI_GATEWAYS, AI_RUNTIMES, aiGatewaySchema, configSchema, domainSchema, N8N_ASSISTANTS, N8N_VARIANTS } from '../src/schemas/config'
 import type { DockerRunner } from '../src/utils/docker'
 import { formatEnvValue, parseEnvContent, parseEnvDefaults, updateEnvContent } from '../src/utils/env'
 import { setLogLevel } from '../src/utils/logger'
@@ -37,6 +37,9 @@ const { config, CONFIG_KEYS, CONFIG_KEY_DESCRIPTIONS } = await import('../src/co
 const ENV_CONTENT = `# Which variant of n8n to run in ./compose/n8n
 # Options: dev, build, community or enterprise
 N8N_VARIANT=dev
+# The n8n Assistant with its sandbox and web search in ./compose/n8n/assistant
+# Options: false or true
+N8N_ASSISTANT=false
 # The hardware supported ai runtime
 # Options: cpu-arm64, cpu-x86-64, gpu-nvidia or gpu-amd
 AI_RUNTIME=cpu-arm64
@@ -72,6 +75,32 @@ async function writeCatalogue(rootDir: string) {
   const dir = join(rootDir, 'compose', 'models')
   await mkdir(dir, { recursive: true })
   await writeFile(join(dir, 'models.json'), JSON.stringify(CATALOGUE))
+}
+
+// the cloud models config N8N_ASSISTANT offers: two of one provider, one of an aggregator that nests the vendor
+const ASSISTANT_CATALOGUE = {
+  providers: [
+    { id: 'anthropic', label: 'Anthropic', models: [{ id: 'claude-x', label: 'Claude X' }, { id: 'claude-y', label: 'Claude Y', note: 'smaller' }] },
+    { id: 'openrouter', label: 'OpenRouter', models: [{ id: 'vendor/model-z', label: 'Model Z' }] },
+  ],
+}
+
+const N8N_ENV = '# required\nN8N_VERSION=1\n'
+
+/** What an activation needs beside the root .env: both catalogues and the .env of the n8n project, which holds the model */
+async function writeAssistant(rootDir: string, n8nEnv: string | false = N8N_ENV) {
+  await writeCatalogue(rootDir)
+  await writeFile(join(rootDir, 'compose', 'models', 'models.assistant.json'), JSON.stringify(ASSISTANT_CATALOGUE))
+  const dir = join(rootDir, 'compose', 'n8n')
+  await mkdir(dir, { recursive: true })
+  if (n8nEnv !== false)
+    await writeFile(join(dir, '.env'), n8nEnv)
+  return join(dir, '.env')
+}
+
+/** The keys of a .env file, none when it does not exist */
+async function readEnv(path: string) {
+  return existsSync(path) ? parseEnvContent(await readFile(path, 'utf-8')) : {}
 }
 
 const NVIDIA_LINE = 'x86_64|67353571328|16|Ubuntu|io.containerd.runc.v2,nvidia,runc,\n'
@@ -124,6 +153,11 @@ test('config schema accepts the template defaults and rejects invalid values', (
   expect(configSchema.safeParse({ ...VALID_CONFIG, AI_MODELS: 'a-,b' }).success).toBe(false)
   // no gateway runs by default: a root .env without the key reads like an empty one
   expect(configSchema.parse(VALID_CONFIG).AI_GATEWAY).toBe('')
+  // nor the Assistant, which is a plain toggle
+  expect(configSchema.parse(VALID_CONFIG).N8N_ASSISTANT).toBe('false')
+  expect(configSchema.safeParse({ ...VALID_CONFIG, N8N_ASSISTANT: 'true' }).success).toBe(true)
+  expect(configSchema.safeParse({ ...VALID_CONFIG, N8N_ASSISTANT: 'yes' }).success).toBe(false)
+  expect(configSchema.safeParse({ ...VALID_CONFIG, N8N_ASSISTANT: '' }).success).toBe(false)
   expect(configSchema.safeParse({ ...VALID_CONFIG, AI_GATEWAY: '' }).success).toBe(true)
   expect(configSchema.safeParse({ ...VALID_CONFIG, AI_GATEWAY: 'litellm' }).success).toBe(true)
   expect(configSchema.safeParse({ ...VALID_CONFIG, AI_GATEWAY: 'kong' }).success).toBe(false)
@@ -141,6 +175,8 @@ test('the first option of every list is the default of the root .env.template', 
   expect(template.AI_RUNTIME).toBe(AI_RUNTIMES[0])
   expect(template.AI_ENGINE).toBe(AI_ENGINES[0])
   expect(template.N8N_VARIANT).toBe(N8N_VARIANTS[0])
+  expect(template.N8N_ASSISTANT).toBe(N8N_ASSISTANTS[0])
+  expect(N8N_ASSISTANTS[0]).toBe('false')
   // no model starts with the stack by default, and no gateway
   expect(template.AI_MODELS).toBe('')
   expect(template.AI_GATEWAY).toBe('')
@@ -176,6 +212,7 @@ test('parseEnvContent reads keys and ignores comments', () => {
     AI_GATEWAY: '',
     AI_MODELS: '',
     N8N_VARIANT: 'dev',
+    N8N_ASSISTANT: 'false',
   })
 })
 
@@ -226,10 +263,11 @@ test('config without arguments asks which key, prompts only that key and writes 
     options: CONFIG_KEYS.map(key => expect.objectContaining({ value: key, label: key, hint: expect.stringContaining(CONFIG_KEY_DESCRIPTIONS[key]) })),
   }))
   const hints = selectMock.mock.calls[0]![0].options.map((option: { hint: string }) => option.hint)
-  // n8n first, the rarely changed DOMAIN last
+  // n8n first with its Assistant, the rarely changed DOMAIN last
   expect(hints[0]).toMatch(/dev.*community.*enterprise/)
+  expect(hints[1]).toMatch(/Assistant.*: .*false.*true/)
   expect(hints.at(-1)).toMatch(/: .*n8n\.localhost/)
-  expect(hints).toHaveLength(6)
+  expect(hints).toHaveLength(7)
   expect(selectMock).toHaveBeenNthCalledWith(2, expect.objectContaining({ initialValue: 'dev' }))
   expect(textMock).not.toHaveBeenCalled()
   expect(multiselectMock).not.toHaveBeenCalled()
@@ -245,6 +283,7 @@ test('keyHint lists the available values and marks the selected one', async () =
   expect(keyHint('AI_ENGINE', current).replace(/\u001B\[\d+m/g, '')).toBe(`${CONFIG_KEY_DESCRIPTIONS.AI_ENGINE}: ollama, vllm`)
   // an unknown current value is listed after the options
   expect(keyHint('N8N_VARIANT', { N8N_VARIANT: 'pro' }).replace(/\u001B\[\d+m/g, '')).toBe(`${CONFIG_KEY_DESCRIPTIONS.N8N_VARIANT}: dev, build, community, enterprise, pro`)
+  expect(keyHint('N8N_ASSISTANT', current).replace(/\u001B\[\d+m/g, '')).toBe(`${CONFIG_KEY_DESCRIPTIONS.N8N_ASSISTANT}: false, true`)
   expect(keyHint('DOMAIN', current).replace(/\u001B\[\d+m/g, '')).toBe(`${CONFIG_KEY_DESCRIPTIONS.DOMAIN}: n8n.localhost`)
   expect(keyHint('DOMAIN', {}).replace(/\u001B\[\d+m/g, '')).toBe(`${CONFIG_KEY_DESCRIPTIONS.DOMAIN}: none`)
   // the empty option of AI_GATEWAY reads none, also in a root .env without the key
@@ -381,10 +420,16 @@ test.each([
   // AI_MODELS is validated by `models select`: the shape, then the catalogue of the engine on the runtime
   [['AI_MODELS', 'A/B'], 'Invalid AI_MODELS "A/B"'],
   [['AI_MODELS', 'b'], 'Invalid AI_MODELS "b": b: not served by vllm on cpu-arm64'],
+  // N8N_ASSISTANT is a toggle; its model is an activated id of AI_MODELS (none here) or provider/model
+  [['N8N_ASSISTANT', 'maybe'], 'Invalid N8N_ASSISTANT "maybe": Assistant must be one of: false, true'],
+  [['N8N_ASSISTANT', 'false', 'a'], 'A model is only given with N8N_ASSISTANT true, not with "false"'],
+  [['N8N_ASSISTANT', 'true', 'a'], 'Invalid model "a": not a model of AI_MODELS served by vllm on cpu-arm64, run `pnpm run models select` or name a cloud model as provider/model'],
+  [['N8N_ASSISTANT', 'true', 'Anthropic/claude-x'], 'Invalid model "Anthropic/claude-x": expected an id of AI_MODELS or provider/model such as anthropic/claude-x'],
+  [['N8N_ASSISTANT', 'true', 'anthropic/'], 'Invalid model "anthropic/"'],
 ])('config %j fails without writing or prompting', async (rest, message) => {
   const content = ENV_CONTENT.replace('AI_ENGINE=ollama', 'AI_ENGINE=vllm')
   const envPath = await writeEnv(content)
-  await writeCatalogue(rootDir)
+  const n8nEnvPath = await writeAssistant(rootDir)
 
   await config(rootDir, rest)
 
@@ -392,6 +437,7 @@ test.each([
   expect(selectMock).not.toHaveBeenCalled()
   expect(multiselectMock).not.toHaveBeenCalled()
   expect(await readFile(envPath, 'utf-8')).toBe(content)
+  expect(await readFile(n8nEnvPath, 'utf-8')).toBe(N8N_ENV)
   expect(process.exitCode).toBe(1)
 })
 
@@ -527,5 +573,250 @@ test('config warns about a human secret the new value requires and points at sec
   logWarnMock.mockReset()
   await config(rootDir, ['N8N_VARIANT', 'community'])
 
+  expect(logWarnMock).not.toHaveBeenCalled()
+})
+
+test('config N8N_ASSISTANT true and false alone flip the toggle and leave the model of compose/n8n/.env alone', async () => {
+  const envPath = await writeEnv()
+  const n8nEnvPath = await writeAssistant(rootDir)
+
+  await config(rootDir, ['N8N_ASSISTANT', 'true'])
+
+  expect((await readEnv(envPath)).N8N_ASSISTANT).toBe('true')
+  expect(await readFile(n8nEnvPath, 'utf-8')).toBe(N8N_ENV)
+  // without a model in the file the default of the compose file applies
+  expect(logInfoMock).toHaveBeenCalledWith('The Assistant uses the default model of compose/n8n/docker-compose.yml, run `pnpm run config N8N_ASSISTANT` to pick one')
+  expect(logInfoMock).toHaveBeenCalledWith('It starts sandbox-api, sandbox-runner-1 and searxng of compose/n8n/assistant; the sandbox runner is a privileged container, for development and testing only')
+
+  logInfoMock.mockReset()
+  await config(rootDir, ['N8N_ASSISTANT', 'false'])
+
+  expect(await readFile(envPath, 'utf-8')).toBe(ENV_CONTENT)
+  expect(await readFile(n8nEnvPath, 'utf-8')).toBe(N8N_ENV)
+  expect(logInfoMock).not.toHaveBeenCalled()
+  expect(selectMock).not.toHaveBeenCalled()
+  expect(process.exitCode).toBe(0)
+})
+
+test('config N8N_ASSISTANT true with a cloud model writes it and clears the url of an earlier self-hosted one', async () => {
+  const envPath = await writeEnv()
+  const n8nEnvPath = await writeAssistant(rootDir, `${N8N_ENV}N8N_INSTANCE_AI_MODEL=Org/A\nN8N_INSTANCE_AI_MODEL_URL=http://vllm-a:8000/v1\n`)
+
+  await config(rootDir, ['N8N_ASSISTANT', 'true', 'anthropic/claude-y'])
+
+  expect((await readEnv(envPath)).N8N_ASSISTANT).toBe('true')
+  // comments and other keys are kept, the two keys replaced in place
+  expect(await readFile(n8nEnvPath, 'utf-8')).toBe(`${N8N_ENV}N8N_INSTANCE_AI_MODEL=anthropic/claude-y\nN8N_INSTANCE_AI_MODEL_URL=\n`)
+  expect(logInfoMock).toHaveBeenCalledWith('The Assistant uses anthropic/claude-y (N8N_INSTANCE_AI_MODEL of compose/n8n/.env)')
+  expect(logWarnMock).not.toHaveBeenCalled()
+  expect(selectMock).not.toHaveBeenCalled()
+
+  // a model the catalogue does not list is written too, with a warning: the catalogue recommends, n8n decides
+  await config(rootDir, ['N8N_ASSISTANT', 'true', 'openrouter/vendor/other:free'])
+
+  expect((await readEnv(n8nEnvPath)).N8N_INSTANCE_AI_MODEL).toBe('openrouter/vendor/other:free')
+  expect(logWarnMock).toHaveBeenCalledWith('openrouter/vendor/other:free is not one of the recommended models of compose/models/models.assistant.json')
+  expect(process.exitCode).toBe(0)
+})
+
+test.each([
+  // vllm serves a everywhere: its own container, addressed by the id
+  ['vllm', 'cpu-arm64', { N8N_INSTANCE_AI_MODEL: 'Org/A', N8N_INSTANCE_AI_MODEL_URL: 'http://vllm-a:8000/v1' }],
+  // ollama serves a on gpu-nvidia only: one server for every model, addressed by the tag
+  ['ollama', 'gpu-nvidia', { N8N_INSTANCE_AI_MODEL: 'a:1b', N8N_INSTANCE_AI_MODEL_URL: 'http://ollama:11434/v1' }],
+])('config N8N_ASSISTANT true with an id of AI_MODELS writes the name and the endpoint of %s', async (engine, runtime, written) => {
+  const envPath = await writeEnv(ENV_CONTENT.replace('AI_ENGINE=ollama', `AI_ENGINE=${engine}`).replace('AI_RUNTIME=cpu-arm64', `AI_RUNTIME=${runtime}`).replace('AI_MODELS=', 'AI_MODELS=a'))
+  const n8nEnvPath = await writeAssistant(rootDir)
+
+  await config(rootDir, ['N8N_ASSISTANT', 'true', 'a'])
+
+  expect((await readEnv(envPath)).N8N_ASSISTANT).toBe('true')
+  expect(await readEnv(n8nEnvPath)).toEqual({ N8N_VERSION: '1', ...written })
+  expect(logInfoMock).toHaveBeenCalledWith(`The Assistant uses ${written.N8N_INSTANCE_AI_MODEL} at ${written.N8N_INSTANCE_AI_MODEL_URL} (N8N_INSTANCE_AI_MODEL and N8N_INSTANCE_AI_MODEL_URL of compose/n8n/.env)`)
+  expect(logWarnMock).not.toHaveBeenCalled()
+  expect(selectMock).not.toHaveBeenCalled()
+  expect(process.exitCode).toBe(0)
+})
+
+test('config N8N_ASSISTANT asks for the toggle, then a cloud provider and one of its recommended models', async () => {
+  const envPath = await writeEnv()
+  const n8nEnvPath = await writeAssistant(rootDir)
+  selectMock.mockResolvedValueOnce('N8N_ASSISTANT').mockResolvedValueOnce('true').mockResolvedValueOnce('cloud').mockResolvedValueOnce('anthropic').mockResolvedValueOnce('claude-y')
+
+  await config(rootDir)
+
+  expect(selectMock).toHaveBeenNthCalledWith(2, expect.objectContaining({ options: [{ value: 'false', label: 'false' }, { value: 'true', label: 'true' }], initialValue: 'false' }))
+  // self-hosted stays visible but disabled while AI_MODELS lists no model of the engine
+  expect(selectMock).toHaveBeenNthCalledWith(3, expect.objectContaining({
+    options: [
+      { value: 'cloud', label: 'cloud provider', hint: 'Anthropic, OpenRouter' },
+      { value: 'self-hosted', label: 'self-hosted on ollama', hint: 'no model of AI_MODELS runs on ollama, run `pnpm run models select`', disabled: true },
+    ],
+    initialValue: 'cloud',
+  }))
+  expect(selectMock).toHaveBeenNthCalledWith(4, expect.objectContaining({
+    options: [{ value: 'anthropic', label: 'Anthropic', hint: 'Claude X, Claude Y' }, { value: 'openrouter', label: 'OpenRouter', hint: 'Model Z' }],
+  }))
+  expect(selectMock).toHaveBeenNthCalledWith(5, expect.objectContaining({
+    options: [{ value: 'claude-x', label: 'Claude X', hint: 'anthropic/claude-x' }, { value: 'claude-y', label: 'Claude Y', hint: 'anthropic/claude-y, smaller' }],
+  }))
+  expect(selectMock).toHaveBeenCalledTimes(5)
+  expect((await readEnv(envPath)).N8N_ASSISTANT).toBe('true')
+  expect(await readEnv(n8nEnvPath)).toEqual({ N8N_VERSION: '1', N8N_INSTANCE_AI_MODEL: 'anthropic/claude-y', N8N_INSTANCE_AI_MODEL_URL: '' })
+
+  // the next run preselects what the file holds
+  selectMock.mockReset()
+  selectMock.mockResolvedValueOnce('true').mockResolvedValueOnce('cloud').mockResolvedValueOnce('openrouter').mockResolvedValueOnce('vendor/model-z')
+  await config(rootDir, ['N8N_ASSISTANT'])
+
+  expect(selectMock).toHaveBeenNthCalledWith(1, expect.objectContaining({ initialValue: 'true' }))
+  expect(selectMock).toHaveBeenNthCalledWith(3, expect.objectContaining({ initialValue: 'anthropic' }))
+  expect((await readEnv(n8nEnvPath)).N8N_INSTANCE_AI_MODEL).toBe('openrouter/vendor/model-z')
+})
+
+test('config N8N_ASSISTANT offers the activated models of the engine and writes the endpoint of the chosen one', async () => {
+  const envPath = await writeEnv(ENV_CONTENT.replace('AI_ENGINE=ollama', 'AI_ENGINE=vllm').replace('AI_MODELS=', 'AI_MODELS=a,b'))
+  const n8nEnvPath = await writeAssistant(rootDir)
+  selectMock.mockResolvedValueOnce('true').mockResolvedValueOnce('self-hosted').mockResolvedValueOnce('a')
+
+  await config(rootDir, ['N8N_ASSISTANT'])
+
+  // b is in AI_MODELS but vllm serves it on gpu-nvidia only, so it is no candidate on cpu-arm64
+  expect(selectMock).toHaveBeenNthCalledWith(2, expect.objectContaining({
+    options: [expect.objectContaining({ value: 'cloud' }), { value: 'self-hosted', label: 'self-hosted on vllm', hint: 'a', disabled: false }],
+  }))
+  expect(selectMock).toHaveBeenNthCalledWith(3, expect.objectContaining({ options: [{ value: 'a', label: 'a', hint: 'A, Org/A' }] }))
+  expect((await readEnv(envPath)).N8N_ASSISTANT).toBe('true')
+  expect(await readEnv(n8nEnvPath)).toEqual({ N8N_VERSION: '1', N8N_INSTANCE_AI_MODEL: 'Org/A', N8N_INSTANCE_AI_MODEL_URL: 'http://vllm-a:8000/v1' })
+
+  // a second run opens on the self-hosted model the file holds
+  selectMock.mockReset()
+  selectMock.mockResolvedValueOnce('true').mockResolvedValueOnce('self-hosted').mockResolvedValueOnce('a')
+  await config(rootDir, ['N8N_ASSISTANT'])
+
+  expect(selectMock).toHaveBeenNthCalledWith(2, expect.objectContaining({ initialValue: 'self-hosted' }))
+  expect(selectMock).toHaveBeenNthCalledWith(3, expect.objectContaining({ initialValue: 'a' }))
+})
+
+test('config N8N_ASSISTANT false at the prompt asks nothing else, and a cancelled model leaves both files alone', async () => {
+  const envPath = await writeEnv(ENV_CONTENT.replace('N8N_ASSISTANT=false', 'N8N_ASSISTANT=true'))
+  const n8nEnvPath = await writeAssistant(rootDir)
+  selectMock.mockResolvedValueOnce('true').mockResolvedValueOnce('cloud').mockResolvedValueOnce(CANCEL)
+
+  await config(rootDir, ['N8N_ASSISTANT'])
+
+  expect((await readEnv(envPath)).N8N_ASSISTANT).toBe('true')
+  expect(await readFile(n8nEnvPath, 'utf-8')).toBe(N8N_ENV)
+
+  selectMock.mockReset()
+  selectMock.mockResolvedValueOnce('false')
+  await config(rootDir, ['N8N_ASSISTANT'])
+
+  expect(selectMock).toHaveBeenCalledOnce()
+  expect((await readEnv(envPath)).N8N_ASSISTANT).toBe('false')
+  expect(await readFile(n8nEnvPath, 'utf-8')).toBe(N8N_ENV)
+  expect(process.exitCode).toBe(0)
+})
+
+test.each([
+  ['compose/n8n/.env', async () => { await writeAssistant(rootDir, false) }, ['N8N_ASSISTANT', 'true', 'anthropic/claude-x'], 'No compose/n8n/.env file found. Run `pnpm run setup` first.'],
+  ['the cloud catalogue', async () => { await writeCatalogue(rootDir) }, ['N8N_ASSISTANT', 'true', 'anthropic/claude-x'], 'No assistant model catalogue found'],
+  ['the model catalogue', async () => {}, ['N8N_ASSISTANT', 'true', 'a'], 'No model catalogue found'],
+])('config N8N_ASSISTANT leaves the Assistant off when %s is missing', async (_, arrange, rest, message) => {
+  const envPath = await writeEnv()
+  await arrange()
+
+  await config(rootDir, rest)
+
+  expect(logErrorMock).toHaveBeenCalledWith(expect.stringContaining(message))
+  expect(await readFile(envPath, 'utf-8')).toBe(ENV_CONTENT)
+  expect(process.exitCode).toBe(1)
+})
+
+test('config N8N_ASSISTANT names the command for the key its model needs and never writes one', async () => {
+  const envPath = await writeEnv(ENV_CONTENT.replace('AI_ENGINE=ollama', 'AI_ENGINE=vllm').replace('AI_MODELS=', 'AI_MODELS=a'))
+  const template = '# optional\n# N8N_INSTANCE_AI_MODEL_API_KEY=\n'
+  const n8nEnvPath = await writeAssistant(rootDir, template)
+  await writeFile(join(rootDir, 'compose', 'n8n', '.env.template'), template)
+  await writeFile(join(rootDir, 'compose', 'n8n', '.env.json'), JSON.stringify({ secrets: { N8N_INSTANCE_AI_MODEL_API_KEY: { source: 'prompt', description: 'model key' } } }))
+  const vllm = join(rootDir, 'compose', 'models', 'vllm')
+  await mkdir(vllm, { recursive: true })
+  await writeFile(join(vllm, '.env.template'), 'VLLM_API_KEY=\n')
+  await writeFile(join(vllm, '.env'), 'VLLM_API_KEY=sk-bearer\n')
+  await writeFile(join(vllm, '.env.json'), JSON.stringify({ secrets: { VLLM_API_KEY: { source: 'generate', description: 'bearer' } } }))
+  const cloudHint = 'Set the key of the provider with `pnpm run secrets set N8N_INSTANCE_AI_MODEL_API_KEY`, or in the Assistant settings of n8n'
+  const vllmHint = 'vllm needs its bearer token as N8N_INSTANCE_AI_MODEL_API_KEY, run `pnpm run secrets set N8N_INSTANCE_AI_MODEL_API_KEY "$(pnpm --silent run secrets read VLLM_API_KEY | head -n 1)"`'
+
+  // a cloud provider wants the key of the account: information, since the Assistant settings take it too
+  await config(rootDir, ['N8N_ASSISTANT', 'true', 'anthropic/claude-x'])
+  expect(logInfoMock).toHaveBeenCalledWith(cloudHint)
+  expect(logWarnMock).not.toHaveBeenCalled()
+
+  // vllm refuses a request without its bearer token: a warning
+  await config(rootDir, ['N8N_ASSISTANT', 'true', 'a'])
+  expect(logWarnMock).toHaveBeenCalledWith(vllmHint)
+  expect((await readEnv(n8nEnvPath)).N8N_INSTANCE_AI_MODEL_API_KEY).toBeUndefined()
+
+  // once the token is in place nothing is left to do, until a cloud model would be sent the token of vllm
+  await writeFile(n8nEnvPath, `${await readFile(n8nEnvPath, 'utf-8')}N8N_INSTANCE_AI_MODEL_API_KEY=sk-bearer\n`)
+  logInfoMock.mockReset()
+  logWarnMock.mockReset()
+  await config(rootDir, ['N8N_ASSISTANT', 'true', 'a'])
+  expect(logWarnMock).not.toHaveBeenCalled()
+  await config(rootDir, ['N8N_ASSISTANT', 'true', 'anthropic/claude-x'])
+  expect(logInfoMock).toHaveBeenCalledWith(cloudHint)
+
+  // a key of the provider settles the cloud model
+  await writeFile(n8nEnvPath, (await readFile(n8nEnvPath, 'utf-8')).replace('sk-bearer', 'sk-ant-account'))
+  logInfoMock.mockReset()
+  await config(rootDir, ['N8N_ASSISTANT', 'true', 'anthropic/claude-x'])
+  expect(logInfoMock).not.toHaveBeenCalledWith(cloudHint)
+  expect((await readEnv(envPath)).N8N_ASSISTANT).toBe('true')
+})
+
+test('config warns when the Assistant points at a model the new engine no longer serves', async () => {
+  const envPath = await writeEnv(ENV_CONTENT.replace('N8N_ASSISTANT=false', 'N8N_ASSISTANT=true').replace('AI_ENGINE=ollama', 'AI_ENGINE=vllm').replace('AI_MODELS=', 'AI_MODELS=a'))
+  const n8nEnvPath = await writeAssistant(rootDir, `${N8N_ENV}N8N_INSTANCE_AI_MODEL=Org/A\nN8N_INSTANCE_AI_MODEL_URL=http://vllm-a:8000/v1\n`)
+  const stale = 'N8N_INSTANCE_AI_MODEL=Org/A at http://vllm-a:8000/v1 (compose/n8n/.env) is not a model of AI_MODELS served by ollama on cpu-arm64, run `pnpm run config N8N_ASSISTANT`'
+
+  await config(rootDir, ['AI_ENGINE', 'ollama'])
+
+  // the engine is written and the model kept, as a stale AI_MODELS id is: `tilt resources` refuses the plan until it is fixed
+  expect((await readEnv(envPath)).AI_ENGINE).toBe('ollama')
+  expect(logWarnMock).toHaveBeenCalledWith(stale)
+  expect((await readEnv(n8nEnvPath)).N8N_INSTANCE_AI_MODEL_URL).toBe('http://vllm-a:8000/v1')
+
+  // switching it on again without a model reports the same
+  logWarnMock.mockReset()
+  await config(rootDir, ['N8N_ASSISTANT', 'true'])
+  expect(logWarnMock).toHaveBeenCalledWith(stale)
+
+  // back on the engine it was activated with, or with the Assistant off, nothing is stale
+  logWarnMock.mockReset()
+  await config(rootDir, ['AI_ENGINE', 'vllm'])
+  await config(rootDir, ['N8N_ASSISTANT', 'false'])
+  await config(rootDir, ['AI_ENGINE', 'ollama'])
+  expect(logWarnMock).not.toHaveBeenCalledWith(expect.stringContaining('N8N_INSTANCE_AI_MODEL'))
+})
+
+test('config N8N_ASSISTANT true points at setup for the sandbox key an older compose/n8n/.env lacks', async () => {
+  await writeEnv()
+  const template = '# optional\n# N8N_SANDBOX_SERVICE_API_KEY=\n'
+  await writeAssistant(rootDir, template)
+  await writeFile(join(rootDir, 'compose', 'n8n', '.env.template'), template)
+  await writeFile(join(rootDir, 'compose', 'n8n', '.env.json'), JSON.stringify({ secrets: { N8N_SANDBOX_SERVICE_API_KEY: { source: 'link', from: './assistant', key: 'SANDBOX_API_KEYS', required: { N8N_ASSISTANT: ['true'] } } } }))
+  const assistant = join(rootDir, 'compose', 'n8n', 'assistant')
+  await mkdir(assistant, { recursive: true })
+  await writeFile(join(assistant, '.env.template'), 'SANDBOX_API_KEYS=\n')
+  await writeFile(join(assistant, '.env'), 'SANDBOX_API_KEYS=0f9a\n')
+  await writeFile(join(assistant, '.env.json'), JSON.stringify({ secrets: { SANDBOX_API_KEYS: { source: 'generate', description: 'sandbox key' } } }))
+
+  await config(rootDir, ['N8N_ASSISTANT', 'true'])
+
+  expect(logWarnMock).toHaveBeenCalledWith('Missing secret N8N_SANDBOX_SERVICE_API_KEY in compose/n8n/.env, required for N8N_ASSISTANT=true, run `pnpm run setup`')
+
+  // off again the key is not needed
+  logWarnMock.mockReset()
+  await config(rootDir, ['N8N_ASSISTANT', 'false'])
   expect(logWarnMock).not.toHaveBeenCalled()
 })

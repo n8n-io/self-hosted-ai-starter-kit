@@ -1,7 +1,7 @@
 version_settings(constraint='>=0.37.7')
 docker_prune_settings ( disable = False , max_age_mins = 360 , num_builds = 0 , interval_hrs = 1 , keep_recent = 2 )
 
-# Load .env file: the compose projects inherit DOMAIN from it (see ./SPEC.md)
+# Load .env file: the compose projects inherit DOMAIN and N8N_ASSISTANT from it (see ./SPEC.md)
 load('ext://dotenv', 'dotenv')
 dotenv(fn='./.env', verbose=True, showValues=True)
 
@@ -20,6 +20,7 @@ def print_hi():
 
 def print_env(cfg):
   print("📦 N8N_VARIANT:", cfg['N8N_VARIANT'])
+  print("✨ N8N_ASSISTANT:", cfg['N8N_ASSISTANT'])
   print("🧠 AI_RUNTIME:", cfg['AI_RUNTIME'])
   print("🤖 AI_ENGINE:", cfg['AI_ENGINE'])
   print("🚪 AI_GATEWAY:", cfg['AI_GATEWAY'] or '(none)')
@@ -42,9 +43,10 @@ def verify():
     fail('\n'.join(['The environment is not ready:'] + ['  ❌ ' + line for line in report['errors']] + ['  💡 ' + line for line in report['hints']]))
 
 def load_plan():
-  # The resource plan as JSON; an invalid root .env or an AI_MODELS id the engine does not serve on the
-  # runtime fails the command, and with it the Tiltfile, with the reason. quiet=True keeps the JSON out
-  # of the log. The plan is built from the root .env and the catalogue, so edits to them reload Tilt.
+  # The resource plan as JSON; an invalid root .env, an AI_MODELS id the engine does not serve on the runtime or
+  # an Assistant model that engine no longer serves fails the command, and with it the Tiltfile, with the reason.
+  # quiet=True keeps the JSON out of the log. The plan is built from the root .env and the catalogue, so edits to
+  # them reload Tilt (and from the Assistant model in ./compose/n8n/.env, which the n8n project watches).
   watch_file('./.env')
   watch_file('./compose/models/models.json')
   return decode_json(local('node %s tilt resources --log-level error' % CLI, echo_off=True, quiet=True))

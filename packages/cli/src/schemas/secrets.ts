@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { aiEngineSchema, aiRuntimeSchema, n8nVariantSchema } from './config'
+import { aiEngineSchema, aiRuntimeSchema, n8nAssistantSchema, n8nVariantSchema } from './config'
 
 /** A key of a .env.json manifest: an env name, the shape updateEnvContent matches (see ../utils/env.ts) */
 export const SECRET_KEY_PATTERN = /^[A-Z][A-Z0-9_]*$/
@@ -21,9 +21,10 @@ const descriptionSchema = z.string().min(1, 'description must not be empty')
 /** The keys of the same template that are no secrets but belong to one, such as the email of a login; `secrets read` prints them with it */
 const relatedSchema = z.array(secretKeySchema).min(1, 'related must name at least one key')
 
-/** The root .env values under which a prompt secret must be set; every listed key must match */
+/** The root .env values under which a prompt secret must be set or a link is needed; every listed key must match */
 export const secretRequiredSchema = z.object({
   N8N_VARIANT: z.array(n8nVariantSchema).min(1).optional(),
+  N8N_ASSISTANT: z.array(n8nAssistantSchema).min(1).optional(),
   AI_ENGINE: z.array(aiEngineSchema).min(1).optional(),
   AI_RUNTIME: z.array(aiRuntimeSchema).min(1).optional(),
 }).strict().refine(required => Object.keys(required).length > 0, 'required must name at least one root .env key')
@@ -65,11 +66,16 @@ export const promptSecretSchema = z.object({
   related: relatedSchema.optional(),
 }).strict()
 
-/** A copy of a generate or prompt secret of another directory, `from` relative to this manifest */
+/**
+ * A copy of a generate or prompt secret of another directory, `from` relative to this manifest. With `required` the
+ * consumer needs it only under the listed root .env values: `setup` still fills it, but the compose file reads it
+ * as optional and `verify` misses it only while they match (see ../../../../SPEC.md)
+ */
 export const linkSecretSchema = z.object({
   source: z.literal('link'),
   from: z.string().min(1, 'from must not be empty').refine(from => !from.startsWith('/'), 'from is a directory relative to the manifest'),
   key: secretKeySchema,
+  required: secretRequiredSchema.optional(),
 }).strict()
 
 export const secretEntrySchema = z.discriminatedUnion('source', [generateSecretSchema, promptSecretSchema, linkSecretSchema])

@@ -1,12 +1,14 @@
 import type { AiRuntime, Config, N8nVariant } from '../schemas/config'
 import type { ModelsCatalogue, VllmModel } from '../schemas/models'
 import type { TiltProject, TiltResource, TiltResources } from '../schemas/tilt'
+import type { AssistantEnv } from '../utils/assistant'
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { dirname, join, posix, relative, sep } from 'node:path'
 import { z } from 'zod'
 import { configSchema, N8N_VARIANTS } from '../schemas/config'
 import { tiltResourcesSchema } from '../schemas/tilt'
+import { assistantTarget, readAssistantEnv } from '../utils/assistant'
 import { parseEnvContent } from '../utils/env'
 import { findFiles } from '../utils/files'
 import { runCommand } from '../utils/format'
@@ -135,23 +137,32 @@ function gatewayProjects(config: Config, catalogue: ModelsCatalogue, models: str
  * and auto-started: every project of the catalogue is listed so disabled services stay visible in the Tilt
  * UI; dev is one n8n container on sqlite without a storage service, build adds postgres (with pgadmin) and the
  * external task runner, community and enterprise run in queue mode (redis, a worker and its task runner, a
- * webhook processor at hooks.<DOMAIN>), enterprise adds S3 binary data (garage), AI_GATEWAY a gateway. A project whose
- * directory is one of `secretDirs` carries it as `secrets`, the filter of its secrets button. Throws on an AI_MODELS id
- * the engine does not serve on the runtime. See ../../../../SPEC.md.
+ * webhook processor at hooks.<DOMAIN>), enterprise adds S3 binary data (garage), AI_GATEWAY a gateway and N8N_ASSISTANT
+ * the sandbox and web search of the Assistant, which n8n then waits for. A project whose directory is one of
+ * `secretDirs` carries it as `secrets`, the filter of its secrets button. Throws on an AI_MODELS id the engine does
+ * not serve on the runtime, and while the Assistant is on, on a model of `assistantEnv` (compose/n8n/.env) that
+ * points at a model server which no longer serves it. See ../../../../SPEC.md.
  */
-export function tiltResources(config: Config, catalogue: ModelsCatalogue, secretDirs: string[] = []): TiltResources {
+export function tiltResources(config: Config, catalogue: ModelsCatalogue, secretDirs: string[] = [], assistantEnv: AssistantEnv = {}): TiltResources {
   const domain = config.DOMAIN
   // the variants form a cascade, so a tier enables what every later variant needs too
   const atLeast = (variant: N8nVariant) => N8N_VARIANTS.indexOf(config.N8N_VARIANT) >= N8N_VARIANTS.indexOf(variant)
   const build = atLeast('build')
   const queue = atLeast('community')
   const enterprise = atLeast('enterprise')
+  const assistant = config.N8N_ASSISTANT === 'true'
   const models = parseModelList(config.AI_MODELS)
 
   const served = modelEntries(catalogue, config.AI_ENGINE, config.AI_RUNTIME).map(entry => entry.id)
   const unknown = models.filter(id => !served.includes(id))
   if (unknown.length > 0)
     throw new Error(`AI_MODELS ${unknown.join(', ')}: not served by ${config.AI_ENGINE} on ${config.AI_RUNTIME}, available: ${served.join(', ') || '(none)'} (see compose/models/models.json)`)
+
+  if (assistant) {
+    const target = assistantTarget(catalogue, config.AI_ENGINE, config.AI_RUNTIME, models, assistantEnv)
+    if (target.kind === 'stale')
+      throw new Error(`N8N_ASSISTANT: ${target.reason}, run ${runCommand('config N8N_ASSISTANT')}`)
+  }
 
   const cascade = N8N_VARIANT_CASCADE[config.N8N_VARIANT]
 
@@ -172,7 +183,7 @@ export function tiltResources(config: Config, catalogue: ModelsCatalogue, secret
     project([composeFile('services', 'qdrant')], [resource('qdrant', ['services'], { auto_init: false })]),
     // ./compose/n8n: the variant's file, its parents watched; the external task runner from build, a worker pair and a webhook processor in queue mode
     project([cascade[cascade.length - 1]!], [
-      resource('n8n', ['n8n'], { resource_deps: [...(build ? ['postgres'] : []), ...(queue ? ['redis'] : [])], links: [domain] }),
+      resource('n8n', ['n8n'], { resource_deps: [...(build ? ['postgres'] : []), ...(queue ? ['redis'] : []), ...(assistant ? ['sandbox-api'] : [])], links: [domain] }),
       ...(build ? [resource('n8n-runner', ['n8n'], { resource_deps: ['n8n'] })] : []),
       ...(queue
         ? [
@@ -182,6 +193,13 @@ export function tiltResources(config: Config, catalogue: ModelsCatalogue, secret
           ]
         : []),
     ], { watch: cascade.slice(0, -1) }),
+    // ./compose/n8n/assistant: the sandbox the Assistant runs code in and its web search, enabled by N8N_ASSISTANT
+    project([composeFile('n8n', 'assistant')], [
+      resource('sandbox-certs', ['n8n'], { infer_links: false, enabled: assistant }),
+      resource('sandbox-api', ['n8n'], { resource_deps: ['sandbox-certs'], infer_links: false, enabled: assistant }),
+      resource('sandbox-runner-1', ['n8n'], { resource_deps: ['sandbox-api'], infer_links: false, enabled: assistant }),
+      resource('searxng', ['n8n'], { infer_links: false, enabled: assistant }),
+    ]),
     // ./compose/models: the gateway, then the engine
     ...gatewayProjects(config, catalogue, models),
     ...modelProjects(config, catalogue, models),
@@ -221,7 +239,7 @@ export async function readRootConfig(rootDir: string): Promise<Config> {
 /**
  * `tilt resources`: the resource plan of the root .env as JSON on stdout, nothing else; the Tiltfile
  * decodes it and registers every project (see ../../../../Tiltfile). Exit code 1 with the reason when
- * the .env, the catalogue or an AI_MODELS id is invalid.
+ * the .env, the catalogue, an AI_MODELS id or the model of an activated Assistant is invalid.
  */
 export async function tilt(rootDir = process.cwd(), [subcommand]: string[] = []) {
   if (subcommand !== 'resources') {
@@ -232,7 +250,7 @@ export async function tilt(rootDir = process.cwd(), [subcommand]: string[] = [])
   try {
     const config = await readRootConfig(rootDir)
     const catalogue = await readModelsCatalogue(rootDir)
-    console.log(JSON.stringify(tiltResources(config, catalogue, await secretDirectories(rootDir)), null, 2))
+    console.log(JSON.stringify(tiltResources(config, catalogue, await secretDirectories(rootDir), await readAssistantEnv(rootDir)), null, 2))
   } catch (error) {
     logger.error((error as Error).message)
     process.exitCode = 1

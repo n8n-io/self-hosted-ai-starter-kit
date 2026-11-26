@@ -118,6 +118,8 @@ test.each([
   [['config'], []],
   [['config', 'N8N_VARIANT'], ['N8N_VARIANT']],
   [['config', 'N8N_VARIANT', 'enterprise'], ['N8N_VARIANT', 'enterprise']],
+  // N8N_ASSISTANT takes the model as a third argument, a cloud one with its slashes
+  [['config', 'N8N_ASSISTANT', 'true', 'openrouter/deepseek/deepseek-v4-pro'], ['N8N_ASSISTANT', 'true', 'openrouter/deepseek/deepseek-v4-pro']],
   // positionals stay strings and an empty value survives, whatever the flag position
   [['config', 'DOMAIN', '123'], ['DOMAIN', '123']],
   [['config', 'AI_MODELS', ''], ['AI_MODELS', '']],

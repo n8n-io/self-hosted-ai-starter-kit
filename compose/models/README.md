@@ -5,6 +5,7 @@ The local AI engines, their shared model catalogue and the gateway in front of t
 | File | Role |
 | --- | --- |
 | [models.json](./models.json) | the catalogue, one entry per model with a block per engine that serves it; edit with [models.schema.json](./models.schema.json) |
+| [models.assistant.json](./models.assistant.json) | the cloud models `pnpm run config N8N_ASSISTANT` offers for the n8n Assistant, nested under their provider; edit with [models.assistant.schema.json](./models.assistant.schema.json). The first one is the default of [../n8n/docker-compose.yml](../n8n/docker-compose.yml) |
 | [ollama/](./ollama/README.md) | one server that pulls every selected model |
 | [vllm/](./vllm/README.md) | one container per selected model |
 | [litellm/](./litellm/README.md) | the gateway: one endpoint and key for every selected model |

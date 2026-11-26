@@ -1,0 +1,6 @@
+# SearXNG serves HTML only by default, the web search of the n8n Assistant asks for JSON (see ../../../SPEC.md)
+use_default_settings: true
+search:
+  formats:
+    - html
+    - json

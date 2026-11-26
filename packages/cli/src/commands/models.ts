@@ -4,6 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { isCancel, multiselect } from '@clack/prompts'
 import { aiModelsSchema } from '../schemas/config'
+import { assistantStaleWarning } from '../utils/assistant'
 import { parseEnvContent, updateEnvContent } from '../utils/env'
 import { logger } from '../utils/logger'
 import { keyValue, runCommand } from '../utils/format'
@@ -124,6 +125,10 @@ async function select(rootDir: string, value: string | undefined, docker: Platfo
   const gateway = currentGateway(current)
   if (gateway !== undefined)
     logGatewayEndpoint(gateway)
+  // the Assistant names one of the models: deselecting it leaves compose/n8n/.env pointing at a model nothing serves
+  const staleAssistant = await assistantStaleWarning(rootDir, { ...current, AI_MODELS: resolved }, catalogue)
+  if (staleAssistant !== undefined)
+    logger.warn(staleAssistant)
   logger.outro(`Configuration written to ${ENV_FILENAME}`)
 }
 

@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { GATEWAY_CONFIG_HASH_LABEL, N8N_VARIANT_CASCADE, readRootConfig, secretDirectories, tilt, tiltResources } from '../src/commands/tilt'
-import { AI_ENGINES, AI_GATEWAYS, N8N_VARIANTS } from '../src/schemas/config'
+import { AI_ENGINES, AI_GATEWAYS, N8N_ASSISTANTS, N8N_VARIANTS } from '../src/schemas/config'
 import { tiltResourcesSchema } from '../src/schemas/tilt'
 import { parseEnvContent } from '../src/utils/env'
 import { setLogLevel } from '../src/utils/logger'
@@ -29,7 +29,7 @@ const CATALOGUE: ModelsCatalogue = {
   ],
 }
 
-const CONFIG: Config = { DOMAIN: 'dev.localhost', N8N_VARIANT: 'dev', AI_RUNTIME: 'cpu-arm64', AI_ENGINE: 'ollama', AI_GATEWAY: '', AI_MODELS: '' }
+const CONFIG: Config = { DOMAIN: 'dev.localhost', N8N_VARIANT: 'dev', N8N_ASSISTANT: 'false', AI_RUNTIME: 'cpu-arm64', AI_ENGINE: 'ollama', AI_GATEWAY: '', AI_MODELS: '' }
 
 const ENV_CONTENT = `# The domain to run the docker compose services
 DOMAIN=dev.localhost
@@ -81,7 +81,7 @@ test('dev registers every compose project but enables n8n alone: no storage serv
   const plan = tiltResources(CONFIG, CATALOGUE)
 
   expect(names(plan, resource => resource.enabled)).toEqual(['docker-socket-proxy', 'traefik', 'qdrant', 'n8n', 'ollama'])
-  expect(names(plan, resource => !resource.enabled)).toEqual(['postgres', 'pgadmin', 'redis', 'redisinsight', 'garage', 'garage-webui', 'litellm-db', 'litellm'])
+  expect(names(plan, resource => !resource.enabled)).toEqual(['postgres', 'pgadmin', 'redis', 'redisinsight', 'garage', 'garage-webui', 'sandbox-certs', 'sandbox-api', 'sandbox-runner-1', 'searxng', 'litellm-db', 'litellm'])
   expect(names(plan)).not.toContain('n8n-runner')
   expect(names(plan)).not.toContain('n8n-worker')
   expect(names(plan)).not.toContain('n8n-webhook')
@@ -105,7 +105,7 @@ test('build enables postgres with pgadmin and the external task runner, neither 
   expect(names(plan, resource => resource.enabled)).toEqual([
     'docker-socket-proxy', 'traefik', 'postgres', 'pgadmin', 'qdrant', 'n8n', 'n8n-runner', 'ollama',
   ])
-  expect(names(plan, resource => !resource.enabled)).toEqual(['redis', 'redisinsight', 'garage', 'garage-webui', 'litellm-db', 'litellm'])
+  expect(names(plan, resource => !resource.enabled)).toEqual(['redis', 'redisinsight', 'garage', 'garage-webui', 'sandbox-certs', 'sandbox-api', 'sandbox-runner-1', 'searxng', 'litellm-db', 'litellm'])
   expect(names(plan)).not.toContain('n8n-worker')
   expect(names(plan)).not.toContain('n8n-webhook')
   expect(find(plan, 'n8n')).toMatchObject({ resource_deps: ['postgres'], links: ['dev.localhost'] })
@@ -227,6 +227,62 @@ test('AI_GATEWAY=litellm enables the gateway with one model list entry per selec
   expect(new Set(lists.map(list => list.labels[0])).size).toBe(lists.length)
 })
 
+test('N8N_ASSISTANT enables the sandbox and the web search of the Assistant, which n8n then waits for, in every variant', () => {
+  // registered but disabled without the Assistant, so the services stay visible in the Tilt UI
+  const off = tiltResources(CONFIG, CATALOGUE)
+  for (const name of ['sandbox-certs', 'sandbox-api', 'sandbox-runner-1', 'searxng'])
+    expect(find(off, name).enabled, name).toBe(false)
+  expect(find(off, 'n8n').resource_deps).toEqual([])
+
+  const on = tiltResources({ ...CONFIG, N8N_ASSISTANT: 'true' }, CATALOGUE)
+  const project = on.projects.find(project => project.files[0] === './compose/n8n/assistant/docker-compose.yml')!
+  expect(project).toMatchObject({ watch: ['./compose/n8n/assistant/.env'], profiles: [] })
+  expect(project.project_name).toBeUndefined()
+  expect(project.override).toBeUndefined()
+  // the certificates first, then the API, then the runner that registers with it; nothing has a UI
+  expect(project.resources).toEqual([
+    expect.objectContaining({ service: 'sandbox-certs', name: 'sandbox-certs', labels: ['n8n'], resource_deps: [], infer_links: false, auto_init: true, enabled: true }),
+    expect.objectContaining({ service: 'sandbox-api', name: 'sandbox-api', labels: ['n8n'], resource_deps: ['sandbox-certs'], infer_links: false, auto_init: true, enabled: true }),
+    expect.objectContaining({ service: 'sandbox-runner-1', name: 'sandbox-runner-1', labels: ['n8n'], resource_deps: ['sandbox-api'], infer_links: false, auto_init: true, enabled: true }),
+    expect.objectContaining({ service: 'searxng', name: 'searxng', labels: ['n8n'], resource_deps: [], infer_links: false, auto_init: true, enabled: true }),
+  ])
+  expect(on.config.N8N_ASSISTANT).toBe('true')
+
+  // the Assistant is no variant: n8n gets its settings from the anchor of the base file, so the n8n project needs no override
+  const deps = { dev: ['sandbox-api'], build: ['postgres', 'sandbox-api'], community: ['postgres', 'redis', 'sandbox-api'], enterprise: ['postgres', 'redis', 'sandbox-api'] }
+  for (const N8N_VARIANT of N8N_VARIANTS) {
+    const plan = tiltResources({ ...CONFIG, N8N_VARIANT, N8N_ASSISTANT: 'true' }, CATALOGUE)
+    expect(find(plan, 'n8n').resource_deps, N8N_VARIANT).toEqual(deps[N8N_VARIANT])
+    const n8n = plan.projects.find(project => project.resources[0]!.service === 'n8n')!
+    expect(n8n.files, N8N_VARIANT).toEqual([N8N_VARIANT_CASCADE[N8N_VARIANT].at(-1)])
+    expect(n8n.override, N8N_VARIANT).toBeUndefined()
+  }
+})
+
+test('an activated Assistant fails the plan while its model points at a model server that no longer serves it', () => {
+  const on: Config = { ...CONFIG, N8N_ASSISTANT: 'true', AI_MODELS: 'a-1' }
+  const plan = (config: Config, env: { model?: string, url?: string }) => () => tiltResources(config, CATALOGUE, [], env)
+
+  // no model yet, a cloud model, the model of AI_MODELS on its engine, an endpoint of your own
+  expect(plan(on, {})).not.toThrow()
+  expect(plan(on, { model: 'anthropic/claude-x' })).not.toThrow()
+  expect(plan(on, { model: 'a:1b', url: 'http://ollama:11434/v1' })).not.toThrow()
+  expect(plan(on, { model: 'a:1b', url: 'http://ollama:11434/v1/' })).not.toThrow()
+  expect(plan({ ...on, AI_ENGINE: 'vllm' }, { model: 'Org/A', url: 'http://vllm-a-1:8000/v1' })).not.toThrow()
+  expect(plan(on, { model: 'my-model', url: 'http://host.docker.internal:1234/v1' })).not.toThrow()
+
+  // the engine changed since the activation
+  expect(plan(on, { model: 'Org/A', url: 'http://vllm-a-1:8000/v1' }))
+    .toThrow('N8N_ASSISTANT: N8N_INSTANCE_AI_MODEL=Org/A at http://vllm-a-1:8000/v1 (compose/n8n/.env) is not a model of AI_MODELS served by ollama on cpu-arm64, run `pnpm run config N8N_ASSISTANT`')
+  // the model was deselected, or its name edited by hand
+  expect(plan({ ...on, AI_MODELS: '' }, { model: 'a:1b', url: 'http://ollama:11434/v1' })).toThrow('is not a model of AI_MODELS served by ollama on cpu-arm64')
+  expect(plan(on, { model: 'a:7b', url: 'http://ollama:11434/v1' })).toThrow('N8N_INSTANCE_AI_MODEL=a:7b at http://ollama:11434/v1')
+  expect(plan(on, { url: 'http://ollama:11434/v1' })).toThrow('N8N_INSTANCE_AI_MODEL= at http://ollama:11434/v1')
+
+  // switched off, the model is not looked at
+  expect(plan({ ...on, N8N_ASSISTANT: 'false', AI_MODELS: '' }, { model: 'a:1b', url: 'http://ollama:11434/v1' })).not.toThrow()
+})
+
 test('a project whose directory holds a secrets manifest carries the directory as the filter of its secrets button', () => {
   const secrets = (plan: TiltResources) => plan.projects.filter(project => project.secrets !== undefined).map(project => [project.secrets, project.resources.map(resource => resource.name)])
 
@@ -268,8 +324,8 @@ test('the plan schema rejects duplicate names, unknown dependencies and enabled 
 
 test('readRootConfig validates the root .env', async () => {
   await writeFile(join(rootDir, '.env'), ENV_CONTENT)
-  // a root .env written before AI_GATEWAY existed runs no gateway
-  expect(await readRootConfig(rootDir)).toEqual({ DOMAIN: 'dev.localhost', N8N_VARIANT: 'community', AI_RUNTIME: 'cpu-arm64', AI_ENGINE: 'vllm', AI_GATEWAY: '', AI_MODELS: 'a-1' })
+  // a root .env written before AI_GATEWAY and N8N_ASSISTANT existed runs no gateway and no Assistant
+  expect(await readRootConfig(rootDir)).toEqual({ DOMAIN: 'dev.localhost', N8N_VARIANT: 'community', N8N_ASSISTANT: 'false', AI_RUNTIME: 'cpu-arm64', AI_ENGINE: 'vllm', AI_GATEWAY: '', AI_MODELS: 'a-1' })
 
   await writeFile(join(rootDir, '.env'), `${ENV_CONTENT}AI_GATEWAY=litellm\n`)
   expect((await readRootConfig(rootDir)).AI_GATEWAY).toBe('litellm')
@@ -296,7 +352,7 @@ test('tilt resources prints one JSON document and nothing else', async () => {
 
   expect(logSpy).toHaveBeenCalledOnce()
   const plan = tiltResourcesSchema.parse(JSON.parse(logSpy.mock.calls[0]![0] as string))
-  expect(plan.config).toEqual({ DOMAIN: 'dev.localhost', N8N_VARIANT: 'community', AI_RUNTIME: 'cpu-arm64', AI_ENGINE: 'vllm', AI_GATEWAY: '', AI_MODELS: ['a-1'] })
+  expect(plan.config).toEqual({ DOMAIN: 'dev.localhost', N8N_VARIANT: 'community', N8N_ASSISTANT: 'false', AI_RUNTIME: 'cpu-arm64', AI_ENGINE: 'vllm', AI_GATEWAY: '', AI_MODELS: ['a-1'] })
   expect(names(plan)).toContain('vllm-a-1')
   expect(plan.projects.some(project => project.secrets !== undefined)).toBe(false)
   expect(logErrorMock).not.toHaveBeenCalled()
@@ -320,6 +376,32 @@ test('tilt resources marks the projects with a .env.json beside their compose fi
     ['compose/n8n', 'n8n'],
     ['compose/models/vllm', 'vllm-a-1'],
   ])
+})
+
+test('tilt resources reads the model of the Assistant from compose/n8n/.env', async () => {
+  await writeFile(join(rootDir, '.env'), `${ENV_CONTENT}N8N_ASSISTANT=true\n`)
+  await writeCatalogue()
+  await mkdir(join(rootDir, 'compose', 'n8n'), { recursive: true })
+  // written while the engine was ollama, the root .env now says vllm
+  await writeFile(join(rootDir, 'compose', 'n8n', '.env'), 'N8N_VERSION=1\nN8N_INSTANCE_AI_MODEL=a:1b\nN8N_INSTANCE_AI_MODEL_URL=http://ollama:11434/v1\n')
+  setLogLevel('error')
+
+  await tilt(rootDir, ['resources'])
+
+  expect(logSpy).not.toHaveBeenCalled()
+  expect(logErrorMock).toHaveBeenCalledWith('N8N_ASSISTANT: N8N_INSTANCE_AI_MODEL=a:1b at http://ollama:11434/v1 (compose/n8n/.env) is not a model of AI_MODELS served by vllm on cpu-arm64, run `pnpm run config N8N_ASSISTANT`')
+  expect(process.exitCode).toBe(1)
+
+  // what `config N8N_ASSISTANT true a-1` writes for vllm
+  process.exitCode = previousExitCode
+  logErrorMock.mockReset()
+  await writeFile(join(rootDir, 'compose', 'n8n', '.env'), 'N8N_VERSION=1\nN8N_INSTANCE_AI_MODEL=Org/A\nN8N_INSTANCE_AI_MODEL_URL=http://vllm-a-1:8000/v1\n')
+  await tilt(rootDir, ['resources'])
+
+  expect(logErrorMock).not.toHaveBeenCalled()
+  const plan = tiltResourcesSchema.parse(JSON.parse(logSpy.mock.calls[0]![0] as string))
+  expect(plan.config.N8N_ASSISTANT).toBe('true')
+  expect(names(plan, resource => resource.enabled)).toEqual(expect.arrayContaining(['sandbox-api', 'sandbox-runner-1', 'searxng', 'vllm-a-1']))
 })
 
 test.each([
@@ -348,7 +430,7 @@ test.each([
   expect(process.exitCode).toBe(1)
 })
 
-test('the repository catalogue and template defaults produce a valid plan for every variant, engine and gateway', async () => {
+test('the repository catalogue and template defaults produce a valid plan for every variant, engine, gateway and with the Assistant', async () => {
   const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
   const catalogue = await readModelsCatalogue(repoRoot)
   const template = parseEnvContent(await readFile(join(repoRoot, '.env.template'), 'utf-8')) as unknown as Config
@@ -356,13 +438,15 @@ test('the repository catalogue and template defaults produce a valid plan for ev
   for (const N8N_VARIANT of N8N_VARIANTS) {
     for (const AI_ENGINE of AI_ENGINES) {
       for (const AI_GATEWAY of ['', ...AI_GATEWAYS] as const) {
-        const plan = tiltResources({ ...template, N8N_VARIANT, AI_ENGINE, AI_GATEWAY, AI_MODELS: 'qwen3-5-0-8b,qwen3-5-2b' }, catalogue)
-        expect(tiltResourcesSchema.safeParse(plan).success).toBe(true)
-        // every compose file of the plan exists; the .env files are gitignored, each project watches the one beside its entry file
-        for (const file of plan.projects.flatMap(project => [...project.files, ...project.watch.filter(file => !file.endsWith('/.env'))]))
-          await expect(readFile(join(repoRoot, file), 'utf-8'), file).resolves.toBeDefined()
-        for (const project of plan.projects)
-          expect(project.watch.at(-1)).toBe(`${project.files[0]!.replace(/\/[^/]+$/, '')}/.env`)
+        for (const N8N_ASSISTANT of N8N_ASSISTANTS) {
+          const plan = tiltResources({ ...template, N8N_VARIANT, N8N_ASSISTANT, AI_ENGINE, AI_GATEWAY, AI_MODELS: 'qwen3-5-0-8b,qwen3-5-2b' }, catalogue)
+          expect(tiltResourcesSchema.safeParse(plan).success).toBe(true)
+          // every compose file of the plan exists; the .env files are gitignored, each project watches the one beside its entry file
+          for (const file of plan.projects.flatMap(project => [...project.files, ...project.watch.filter(file => !file.endsWith('/.env'))]))
+            await expect(readFile(join(repoRoot, file), 'utf-8'), file).resolves.toBeDefined()
+          for (const project of plan.projects)
+            expect(project.watch.at(-1)).toBe(`${project.files[0]!.replace(/\/[^/]+$/, '')}/.env`)
+        }
       }
     }
   }
@@ -377,6 +461,6 @@ test('the repository catalogue and template defaults produce a valid plan for ev
   const full = tiltResources({ ...template, N8N_VARIANT: 'enterprise', AI_ENGINE: 'vllm', AI_GATEWAY: 'litellm', AI_MODELS: 'qwen3-5-0-8b' }, catalogue, secretDirs)
   expect([...new Set(full.projects.flatMap(project => project.secrets ?? []))].sort()).toEqual(secretDirs)
   expect(names({ ...full, projects: full.projects.filter(project => project.secrets !== undefined) })).toEqual([
-    'postgres', 'pgadmin', 'n8n', 'n8n-runner', 'n8n-worker', 'n8n-worker-runner', 'n8n-webhook', 'litellm-db', 'litellm', 'vllm-qwen3-5-0-8b',
+    'postgres', 'pgadmin', 'n8n', 'n8n-runner', 'n8n-worker', 'n8n-worker-runner', 'n8n-webhook', 'sandbox-certs', 'sandbox-api', 'sandbox-runner-1', 'searxng', 'litellm-db', 'litellm', 'vllm-qwen3-5-0-8b',
   ])
 })

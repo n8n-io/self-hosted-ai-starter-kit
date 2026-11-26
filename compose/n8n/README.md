@@ -9,6 +9,8 @@
 | `community` | [docker-compose.community.yml](./docker-compose.community.yml) | queue mode: a worker with its own task runner, a webhook processor serving production webhooks at `hooks.<DOMAIN>`, redis as the broker |
 | `enterprise` | [docker-compose.enterprise.yml](./docker-compose.enterprise.yml) | the license key on main, worker and webhook processor; S3 binary data, external secrets and multi-main still to be wired up |
 
+`N8N_ASSISTANT=true` in the root `.env` adds the n8n Assistant to any variant: its settings are the anchor `x-n8n-env-assistant` of the base file, all optional, and its sandbox and web search run from [assistant/](./assistant/README.md). Rules: [SPEC.md](../../SPEC.md#the-n8n-assistant-n8n_assistant).
+
 - Homepage: <https://n8n.io/>
 - Repository: <https://github.com/n8n-io/n8n>
 - Docker image (n8n, pulled from `docker.n8n.io`): <https://hub.docker.com/r/n8nio/n8n>

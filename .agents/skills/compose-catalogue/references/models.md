@@ -31,6 +31,10 @@ Engine compose changes (flags, versions, runtime services) touch `compose/models
 
 One entry per model: `id` (the `AI_MODELS` value and the DNS label of the docker names `<engine>-<id>`, pattern `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`, at most 58 characters), `label`, and a block per engine that serves it (`ollama`, `vllm`; at least one) with `model` (engine name: ollama tag or Hugging Face id), optional `memory` (a number of GB, an estimate; `models select` prints `~<GB> GB RAM`, VRAM on a gpu runtime), `note` (a short hint shown after the memory), `runtimes` (only when that engine cannot run the model on some hardware; today unused, memory is never a reason); the vllm block adds `args`. Validated by `packages/cli/src/schemas/models.ts` and, for editors, `compose/models/models.schema.json`; both change together.
 
+## Cloud models of the Assistant (`compose/models/models.assistant.json`)
+
+A second, separate catalogue: the cloud models `config N8N_ASSISTANT` offers. `providers`, each with `id` (what n8n reads before the first slash of `N8N_INSTANCE_AI_MODEL`, pattern `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`), `label` and `models`, each with `id` (the name at the provider, slashes allowed for a nested vendor), `label` and an optional `note`. Validated by `packages/cli/src/schemas/assistant.ts` and, for editors, `compose/models/models.assistant.schema.json`; both change together. Nothing in it is served locally and the Tilt plan does not read it. The first model of the first provider is the default of `N8N_INSTANCE_AI_MODEL` in `compose/n8n/docker-compose.yml` and the commented knob of its template: reorder or rename it only together with both (`tests/assistant.test.ts` compares them). Adding a model is one entry, taken from the n8n documentation (n8n-docs skill), not from memory.
+
 ## The gateway (`AI_GATEWAY`, today `litellm`)
 
 - The compose file declares the config `litellm-config` with an empty `model_list`, mounted at `/app/config.yaml`; the plan replaces its `content` (`gatewayProjects()`, [tilt](../../tilt/SKILL.md) skill). Never a model name in the compose file.

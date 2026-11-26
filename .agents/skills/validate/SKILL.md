@@ -14,6 +14,7 @@ Run every gate that matches what changed, from the repository root, and report e
 | any `docker-compose*.yml` | lint; compose config for every changed file, and for an n8n variant file also for every file that extends it |
 | `.env.template`, `.env.json` | lint; test; compose config for the file beside it; for a new template `pnpm run setup && pnpm run verify`; for a changed secret a `reset`, `setup`, `verify` cycle on a scratch copy |
 | `compose/models/models.json`, `models.schema.json` | test; `pnpm run models read <id>`; Tiltfile evaluation with the id in `AI_MODELS` |
+| `compose/models/models.assistant.json`, `models.assistant.schema.json` | test (it compares the first model with the default of `compose/n8n/docker-compose.yml` and its template); compose config for the n8n base file when that default changed |
 | `compose/models/<engine>/docker-compose.yml` | lint; compose config with the profile of every runtime touched |
 | `compose/proxy/traefik/**` | lint; compose config for the traefik file |
 | `packages/cli/src`, `packages/cli/tests` | typecheck; build; test; the built command |

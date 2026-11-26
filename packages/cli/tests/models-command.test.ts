@@ -8,8 +8,9 @@ import { parseEnvContent } from '../src/utils/env'
 import { setLogLevel } from '../src/utils/logger'
 import { DOCKER_INFO_FORMAT } from '../src/utils/platform'
 
-const { multiselectMock, introMock, outroMock, logInfoMock, logErrorMock, CANCEL } = vi.hoisted(() => ({
+const { multiselectMock, introMock, outroMock, logInfoMock, logWarnMock, logErrorMock, CANCEL } = vi.hoisted(() => ({
   multiselectMock: vi.fn(),
+  logWarnMock: vi.fn(),
   introMock: vi.fn(),
   outroMock: vi.fn(),
   logInfoMock: vi.fn(),
@@ -25,7 +26,7 @@ vi.mock('@clack/prompts', () => ({
   select: vi.fn(),
   multiselect: multiselectMock,
   isCancel: (value: unknown) => value === CANCEL,
-  log: { info: logInfoMock, warn: vi.fn(), success: vi.fn(), error: logErrorMock, step: vi.fn(), message: vi.fn() },
+  log: { info: logInfoMock, warn: logWarnMock, success: vi.fn(), error: logErrorMock, step: vi.fn(), message: vi.fn() },
 }))
 
 const { models, validateModels } = await import('../src/commands/models')
@@ -57,6 +58,7 @@ beforeEach(async () => {
   introMock.mockReset()
   outroMock.mockReset()
   logInfoMock.mockReset()
+  logWarnMock.mockReset()
   logErrorMock.mockReset()
   logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
 })
@@ -344,4 +346,27 @@ test('models select points out an estimate above the docker memory without disab
     { value: 'small', label: 'small', hint: 'Small, small:1b, ~6 GB RAM', disabled: false },
     { value: 'big', label: 'big', hint: 'Big, big:70b, ~40 GB RAM, over the 16 GB of docker memory, needs a big machine', disabled: false },
   ])
+})
+
+test('models select warns when it deselects the model the Assistant runs on, and only while the Assistant is on', async () => {
+  const content = `${ENV_CONTENT.replace('AI_MODELS=', 'AI_MODELS=a-1')}N8N_ASSISTANT=true\n`
+  const envPath = await writeEnv(content)
+  await writeCatalogue()
+  await mkdir(join(rootDir, 'compose', 'n8n'), { recursive: true })
+  await writeFile(join(rootDir, 'compose', 'n8n', '.env'), 'N8N_INSTANCE_AI_MODEL=Org/A\nN8N_INSTANCE_AI_MODEL_URL=http://vllm-a-1:8000/v1\n')
+
+  // the model stays selected: nothing to report
+  await models(rootDir, ['select', 'a-1'])
+  expect(logWarnMock).not.toHaveBeenCalled()
+
+  // AI_MODELS is written as asked and the model of compose/n8n/.env kept: the plan of `tilt resources` refuses it
+  await models(rootDir, ['select', ''])
+  expect(parseEnvContent(await readFile(envPath, 'utf-8')).AI_MODELS).toBe('')
+  expect(logWarnMock).toHaveBeenCalledWith('N8N_INSTANCE_AI_MODEL=Org/A at http://vllm-a-1:8000/v1 (compose/n8n/.env) is not a model of AI_MODELS served by vllm on cpu-arm64, run `pnpm run config N8N_ASSISTANT`')
+
+  logWarnMock.mockReset()
+  await writeEnv(content.replace('N8N_ASSISTANT=true', 'N8N_ASSISTANT=false'))
+  await models(rootDir, ['select', ''])
+  expect(logWarnMock).not.toHaveBeenCalled()
+  expect(process.exitCode).toBe(0)
 })

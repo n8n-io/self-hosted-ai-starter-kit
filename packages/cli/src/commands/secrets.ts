@@ -2,7 +2,7 @@ import type { Config } from '../schemas/config'
 import type { GenerateSecret, LinkSecret, PromptSecret, SecretEntry, SecretRequired } from '../schemas/secrets'
 import type { DerivedGenerator } from '../utils/generators'
 import { readFile, writeFile } from 'node:fs/promises'
-import { dirname, join, relative, resolve } from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 import { isCancel, password } from '@clack/prompts'
 import { z } from 'zod'
 import { secretsManifestSchema } from '../schemas/secrets'
@@ -68,7 +68,7 @@ export interface SecretCheck {
   source?: { envPath: string, key: string }
   /** Set on a derived value, whose mismatch is no difference but a hash that does not fit its input */
   derived?: boolean
-  /** The root .env condition a required prompt secret is missing for, such as N8N_VARIANT=enterprise */
+  /** The root .env condition a required prompt secret or a conditional link is missing for, such as N8N_VARIANT=enterprise */
   condition?: string
 }
 
@@ -223,8 +223,11 @@ export function isSecretUnfilled(state: SecretState, secret: DeclaredSecret): bo
   return isUnfilled(secretValue(state, secret), templateValue)
 }
 
-/** The root .env condition a prompt secret is required under right now, such as `N8N_VARIANT=enterprise`, or undefined while it is optional */
-export function requiredBy(entry: PromptSecret, config: Config): string | undefined {
+/**
+ * The root .env condition a prompt secret or a conditional link is required under right now, such as
+ * `N8N_VARIANT=enterprise`, or undefined while it is optional
+ */
+export function requiredBy(entry: PromptSecret | LinkSecret, config: Config): string | undefined {
   if (entry.required === undefined)
     return undefined
   const conditions = (Object.entries(entry.required) as [keyof SecretRequired, string[] | undefined][]).filter(([, values]) => values !== undefined)
@@ -234,7 +237,8 @@ export function requiredBy(entry: PromptSecret, config: Config): string | undefi
 
 /**
  * The state of every declared secret of a directory that has a .env (a missing .env is reported by itself);
- * the conditions of prompt secrets need the root config and are skipped without it.
+ * the conditions of prompt secrets need the root config and are skipped without it. A link with a condition is
+ * missing only while the root config meets it: without one, or without the root config, an unfilled one is unset.
  */
 export function checkSecrets(state: SecretState, config?: Config): SecretCheck[] {
   const checks: SecretCheck[] = []
@@ -253,8 +257,10 @@ export function checkSecrets(state: SecretState, config?: Config): SecretCheck[]
     } else if (isLink(secret)) {
       const source = linkSource(secret, state.declared)
       const sourceFilled = !isSecretUnfilled(state, source)
-      const status = unfilled ? 'missing' : sourceFilled && secretValue(state, secret) !== secretValue(state, source) ? 'mismatch' : 'ok'
-      checks.push({ envPath, key, status, source: { envPath: secretPath(state, source), key: source.key } })
+      const conditional = secret.entry.required !== undefined
+      const condition = conditional && config !== undefined ? requiredBy(secret.entry, config) : undefined
+      const status = unfilled ? conditional && condition === undefined ? 'unset' : 'missing' : sourceFilled && secretValue(state, secret) !== secretValue(state, source) ? 'mismatch' : 'ok'
+      checks.push({ envPath, key, status, source: { envPath: secretPath(state, source), key: source.key }, ...(condition === undefined ? {} : { condition }) })
     } else {
       const condition = config === undefined ? undefined : requiredBy(entry as PromptSecret, config)
       const status = !unfilled ? 'ok' : condition === undefined ? 'unset' : 'required'
@@ -269,7 +275,7 @@ export function formatSecretCheck(rootDir: string, check: SecretCheck): string {
   const path = relative(rootDir, check.envPath)
   switch (check.status) {
     case 'missing':
-      return `Missing secret ${check.key} in ${path}`
+      return `Missing secret ${check.key} in ${path}${check.condition === undefined ? '' : `, required for ${check.condition}`}`
     case 'mismatch':
       return `${check.key} in ${path} ${check.derived ? 'does not match' : 'differs from'} ${check.source!.key} in ${relative(rootDir, check.source!.envPath)}`
     case 'required':
@@ -366,11 +372,17 @@ function relatedValue(directory: SecretDirectory, key: string): string | undefin
   return directory.env[key] || directory.template[key] || directory.defaults[key] || undefined
 }
 
-/** The declared secrets with their current values, keeping those whose directory or key contains `filter` (case-insensitive) */
+/**
+ * The declared secrets with their current values, keeping those whose directory or key contains `filter`
+ * (case-insensitive). A filter that is the directory of a manifest keeps that directory alone, so the filter of
+ * compose/n8n does not list the manifest nested in compose/n8n/assistant.
+ */
 export function listSecrets(state: SecretState, filter = ''): SecretValue[] {
-  const needle = filter.toLowerCase()
+  const needle = filter.toLowerCase().replace(/\/+$/, '')
+  const directory = (secret: DeclaredSecret) => relative(state.rootDir, secret.dir).split(sep).join('/').toLowerCase()
+  const exact = needle !== '' && state.declared.some(secret => directory(secret) === needle)
   return state.declared
-    .filter(secret => relative(state.rootDir, secret.dir).toLowerCase().includes(needle) || secret.key.toLowerCase().includes(needle))
+    .filter(secret => exact ? directory(secret) === needle : directory(secret).includes(needle) || secret.key.toLowerCase().includes(needle))
     .map((secret) => {
       const directory = state.directories.get(secret.dir)!
       const related = secret.entry.source === 'link' ? undefined : secret.entry.related

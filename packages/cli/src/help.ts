@@ -26,8 +26,11 @@ export const COMMAND_HELP = {
   reset: { usage: 'reset', description: 'Delete all generated .env and .env.secrets files' },
   config: {
     usage: 'config [KEY] [value]',
-    description: 'Edit the root .env: no KEY asks which key, KEY prompts that key only, KEY value writes it without a prompt; AI_RUNTIME marks the detected runtime and warns about a mismatch, AI_MODELS runs models select',
-    notes: ['KEY: N8N_VARIANT, AI_RUNTIME, AI_ENGINE, AI_GATEWAY, AI_MODELS or DOMAIN'],
+    description: 'Edit the root .env: no KEY asks which key, KEY prompts that key only, KEY value writes it without a prompt; AI_RUNTIME marks the detected runtime and warns about a mismatch, AI_MODELS runs models select, N8N_ASSISTANT also picks the model of the Assistant and writes it into compose/n8n/.env',
+    notes: [
+      'KEY: N8N_VARIANT, N8N_ASSISTANT, AI_RUNTIME, AI_ENGINE, AI_GATEWAY, AI_MODELS or DOMAIN',
+      'N8N_ASSISTANT true [model]: an id of AI_MODELS or a cloud model as provider/model, written without a prompt',
+    ],
   },
   models: {
     usage: 'models <read|select>',

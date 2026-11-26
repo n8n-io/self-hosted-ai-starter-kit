@@ -15,6 +15,20 @@ x-n8n-env: &n8n-env
   N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?}
   N8N_USER_MANAGEMENT_JWT_SECRET: ${N8N_USER_MANAGEMENT_JWT_SECRET:?}
 
+# the n8n Assistant, on with N8N_ASSISTANT=true of the root .env: every key is optional, so n8n runs without it (see ../../SPEC.md)
+x-n8n-env-assistant: &n8n-env-assistant
+  N8N_INSTANCE_AI_ENABLED: ${N8N_ASSISTANT:-false}
+  # the first model of ../models/models.assistant.json: an empty value would replace the default of n8n, `pnpm run config N8N_ASSISTANT` writes the model
+  N8N_INSTANCE_AI_MODEL: ${N8N_INSTANCE_AI_MODEL:-anthropic/claude-opus-5-5}
+  N8N_INSTANCE_AI_MODEL_URL: ${N8N_INSTANCE_AI_MODEL_URL:-}
+  N8N_INSTANCE_AI_MODEL_API_KEY: ${N8N_INSTANCE_AI_MODEL_API_KEY:-}
+  # the sandbox and the web search of ./assistant/docker-compose.yml
+  N8N_INSTANCE_AI_SANDBOX_ENABLED: ${N8N_ASSISTANT:-false}
+  N8N_INSTANCE_AI_SANDBOX_PROVIDER: n8n-sandbox
+  N8N_SANDBOX_SERVICE_URL: http://sandbox-api:8080
+  N8N_SANDBOX_SERVICE_API_KEY: ${N8N_SANDBOX_SERVICE_API_KEY:-}
+  N8N_INSTANCE_AI_SEARXNG_URL: http://searxng:8080
+
 x-n8n-env-hosting: &n8n-env-hosting
   N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
   N8N_HOST: ${DOMAIN:-n8n.localhost}
@@ -56,7 +70,7 @@ services:
     volumes:
       - ${VOLUMES_PATH:-../../.volumes}/n8n/data:/home/node/.n8n
     environment:
-      <<: [ *n8n-env, *n8n-env-hosting, *n8n-env-owner, *n8n-env-sqlite, *n8n-env-runners-internal ]
+      <<: [ *n8n-env, *n8n-env-hosting, *n8n-env-owner, *n8n-env-sqlite, *n8n-env-runners-internal, *n8n-env-assistant ]
     networks:
       - n8n-starter-public
       - n8n-starter-private

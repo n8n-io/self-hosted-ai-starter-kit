@@ -13,7 +13,7 @@ What a directory `compose/<group>/<service>/` holds, and how to add one. Reasoni
 | Config files | Mounted into the container from the directory (`traefik.yml`, `garage.toml`, `server.json`, `n8n-task-runners.json`, …). |
 | Runtime data | Never in the directory. It sits in `.volumes/<group>/<service>/…` at the repo root, reached as `${VOLUMES_PATH:-<relative path to .volumes>}/<group>/<service>/…` (three `../` from a service directory, two from `compose/n8n/`). `VOLUMES_PATH` always names the `.volumes` root, never a service folder. |
 
-Groups: `proxy` (edge), `n8n` (the application, a variant cascade instead of one file), `storage` (data stores and their admin UIs), `services` (qdrant), `models` (the catalogue plus one directory per engine and per gateway: `litellm`). A new group also needs `COMPOSE_GROUPS` in `packages/cli/src/schemas/tilt.ts`, which the Tilt labels are validated against.
+Groups: `proxy` (edge), `n8n` (the application, a variant cascade instead of one file, with the service directory `assistant/` beside it: the sandbox and web search of the n8n Assistant, one `../` deeper than the cascade for `VOLUMES_PATH`), `storage` (data stores and their admin UIs), `services` (qdrant), `models` (the catalogue plus one directory per engine and per gateway: `litellm`, and `models.assistant.json`, the cloud models of the Assistant). A new group also needs `COMPOSE_GROUPS` in `packages/cli/src/schemas/tilt.ts`, which the Tilt labels are validated against.
 
 ## Recipe: add a service
 

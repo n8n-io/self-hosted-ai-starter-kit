@@ -6,7 +6,7 @@
 
 ```text
 Tiltfile                     # loops over the plan of `n8n-starter tilt resources`, gated by `verify --json`
-.env.template -> .env        # N8N_VARIANT, AI_RUNTIME, AI_ENGINE, AI_GATEWAY, AI_MODELS, DOMAIN
+.env.template -> .env        # N8N_VARIANT, N8N_ASSISTANT, AI_RUNTIME, AI_ENGINE, AI_GATEWAY, AI_MODELS, DOMAIN
 compose/<group>/<service>/   # one compose project per directory: proxy, n8n, storage, services, models
 compose/models/models.json   # the model catalogue, one DNS-label id per entry
 packages/cli/                # n8n-starter (TypeScript, tsdown -> dist/index.mjs)

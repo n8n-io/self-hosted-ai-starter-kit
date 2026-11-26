@@ -19,6 +19,15 @@
 - The webhook processor starts no task runner, so it has no runner sidecar and scales with `N8N_WEBHOOK_REPLICAS` (`deploy.replicas`, default 1; keep 1 with an MCP Server Trigger). It keeps both networks and `labels: !override` with its own `hooks.<DOMAIN>` router; the test paths (`/webhook-test/`, `/form-test/`, `/mcp-test/`) are only served by main.
 - The variant list is mirrored: `N8N_VARIANT_CASCADE` in `packages/cli/src/commands/tilt.ts` maps each variant to its files (Tilt runs the last one and watches the parents), and `N8N_VARIANTS` in `packages/cli/src/schemas/config.ts` lists the same keys.
 
+## The n8n Assistant
+
+`N8N_ASSISTANT` of the root `.env` is no variant: it combines with every one. Reasoning: SPEC.md, section "The n8n Assistant (`N8N_ASSISTANT`)".
+
+- Its n8n settings are one anchor of the base file, `x-n8n-env-assistant`, which every variant inherits through `extends` (main, worker and webhook processor all load the module). Every key in it is optional: never add a `${VAR:?}` there, or n8n stops running without the Assistant. A compose profile does not help, compose interpolates inactive profiles and unused anchors too.
+- The toggle reaches the files as `${N8N_ASSISTANT:-false}`, like `DOMAIN`. The model is `N8N_INSTANCE_AI_MODEL` and `N8N_INSTANCE_AI_MODEL_URL` of `compose/n8n/.env`, written by `pnpm run config N8N_ASSISTANT`; its compose default is the first model of `compose/models/models.assistant.json`, the one model name in a compose file (a test compares them).
+- `compose/n8n/assistant/` is an ordinary service directory with its own project `assistant`, `.env.template` and `.env.json`: the sandbox services (names fixed by their certificates, `sandbox-runner-1` privileged) and `searxng`. n8n gets the sandbox key through a conditional link (env-and-secrets reference).
+- A new Assistant setting is an n8n setting: confirm it through the n8n-docs skill, and check `packages/@n8n/config/src/configs/instance-ai.config.ts` of the pinned `N8N_VERSION` for whether that version knows it.
+
 ## Task runner launcher config
 
 `n8n-runner` and `n8n-worker-runner` mount `compose/n8n/n8n-task-runners.json` over `/etc/n8n-task-runners.json`: the image's launcher config with the four Code node allowlists (`NODE_FUNCTION_ALLOW_BUILTIN`, `NODE_FUNCTION_ALLOW_EXTERNAL`, `N8N_RUNNERS_STDLIB_ALLOW`, `N8N_RUNNERS_EXTERNAL_ALLOW`) moved from `env-overrides` to `allowed-env`, because the launcher forwards only listed variables to a runner. Their curated defaults live in `x-n8n-env-runners-code-allow` of the build file; `dev` sets the JavaScript pair on `n8n` through `x-n8n-env-runners-internal` of the base file. Anchors do not cross files, so keep both copies of the JavaScript defaults equal. Re-diff the file against the image on every `N8N_VERSION` bump: [n8n-upgrade](../../n8n-upgrade/SKILL.md) skill.

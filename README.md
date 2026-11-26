@@ -13,7 +13,7 @@ Grouped like the [compose/](./compose/) directory. Services marked *on demand* a
 | Group | Services |
 | --- | --- |
 | `proxy` | [Traefik](./compose/proxy/traefik/README.md) as the edge, routing `<service>.n8n.localhost` to every exposed container, with a read-only [docker-socket-proxy](./compose/proxy/docker-socket-proxy/README.md) |
-| `n8n` | [n8n](./compose/n8n/README.md) in one of four variants (`dev`, `build`, `community`, `enterprise`): a single SQLite container in `dev`, postgres and external task runners from `build`, queue-mode workers plus a webhook processor at `hooks.n8n.localhost` in `community` and `enterprise` |
+| `n8n` | [n8n](./compose/n8n/README.md) in one of four variants (`dev`, `build`, `community`, `enterprise`): a single SQLite container in `dev`, postgres and external task runners from `build`, queue-mode workers plus a webhook processor at `hooks.n8n.localhost` in `community` and `enterprise`; with `N8N_ASSISTANT=true` the [n8n Assistant](./compose/n8n/assistant/README.md) in any of them, with its sandbox and SearXNG web search |
 | `storage` | [PostgreSQL](./compose/storage/postgres/README.md) and [pgAdmin](./compose/storage/pgadmin/README.md) (from `build`, pgAdmin on demand); [Redis](./compose/storage/redis/README.md) and [Redis Insight](./compose/storage/redis-insight/README.md) (queue mode, Redis Insight on demand); [Garage](./compose/storage/garage/README.md) S3 storage and its web UI (enterprise, on demand) |
 | `services` | [Qdrant](./compose/services/qdrant/README.md) vector store (on demand) |
 | `models` | [Ollama](./compose/models/ollama/README.md) **or** [vLLM](./compose/models/vllm/README.md) serving the models of the [catalogue](./compose/models/README.md), today Qwen3.5 in 0.8B, 2B and 4B; optionally the [LiteLLM](./compose/models/litellm/README.md) gateway in front of them (`AI_GATEWAY=litellm`) |
@@ -55,7 +55,7 @@ pnpm install
 pnpm run build
 # create a .env next to every .env.template (AI_RUNTIME from the detected platform), fill its secrets and create the n8n-starter-public / n8n-starter-private docker networks
 pnpm run setup
-# pick one of N8N_VARIANT, AI_RUNTIME, AI_ENGINE, AI_GATEWAY, AI_MODELS or DOMAIN and configure it interactively
+# pick one of N8N_VARIANT, N8N_ASSISTANT, AI_RUNTIME, AI_ENGINE, AI_GATEWAY, AI_MODELS or DOMAIN and configure it interactively
 pnpm run config
 # or name the key, or the key and its value to skip the prompts
 pnpm run config N8N_VARIANT enterprise
@@ -74,7 +74,7 @@ pnpm run dev
 
 Tilt prints the configuration, checks that the environment is complete, then starts the services of the selected variant. The Tilt UI is at `http://localhost:10350`; n8n is at `http://n8n.localhost` once it is healthy. Pressing Ctrl+C stops Tilt and removes every container it started (`pnpm run dev` runs `tilt up` followed by `tilt down`); the docker networks, the `.env` files and the data in `.volumes/` stay. Every service that has secrets (n8n, postgres, pgadmin, litellm, vllm) carries a `secrets` button in the Tilt UI that prints them into its log.
 
-Open `http://n8n.localhost` in a browser and sign in as the instance owner: `pnpm run secrets read n8n` (or the `secrets` button of n8n in the Tilt UI) prints the email and the password that `setup` generated. n8n applies this owner from `compose/n8n/.env` on every start and locks the fields in its UI, so change the email there (`N8N_INSTANCE_OWNER_EMAIL`) and the password with `pnpm run secrets set N8N_INSTANCE_OWNER_PASSWORD`; `N8N_INSTANCE_OWNER_MANAGED_BY_ENV=false` hands the owner back to the UI. Browsers resolve `*.localhost` to your machine on their own; command-line tools such as `curl` may need an `/etc/hosts` entry for `n8n.localhost` and the other hostnames.
+Open `http://n8n.localhost` in a browser and sign in as the instance owner: `pnpm run secrets read compose/n8n` (or the `secrets` button of n8n in the Tilt UI) prints the email and the password that `setup` generated. n8n applies this owner from `compose/n8n/.env` on every start and locks the fields in its UI, so change the email there (`N8N_INSTANCE_OWNER_EMAIL`) and the password with `pnpm run secrets set N8N_INSTANCE_OWNER_PASSWORD`; `N8N_INSTANCE_OWNER_MANAGED_BY_ENV=false` hands the owner back to the UI. Browsers resolve `*.localhost` to your machine on their own; command-line tools such as `curl` may need an `/etc/hosts` entry for `n8n.localhost` and the other hostnames.
 
 ### 3. Verify
 
@@ -106,19 +106,41 @@ Models that cannot run on the selected runtime are shown disabled. Ollama pulls 
 - **LiteLLM gateway** (`pnpm run config AI_GATEWAY litellm`): use one OpenAI credential for every model, with the base URL `http://litellm:4000/v1` and the `LITELLM_MASTER_KEY` of `compose/models/litellm/.env` as the API key (`pnpm run secrets read LITELLM_MASTER_KEY` prints it). The model name is the id of `AI_MODELS`, for example `qwen3-5-0-8b`, whichever engine serves it. Its dashboard is at `http://litellm.n8n.localhost/ui`, the link Tilt shows.
 - **Ollama running natively on macOS** instead of in Docker: point the credential at `http://host.docker.internal:11434`.
 
+### Turning on the n8n Assistant
+
+`N8N_ASSISTANT=true` runs n8n with the [n8n Assistant](https://docs.n8n.io/deploy/host-n8n/configure-n8n/set-up-n8n-assistant) in any variant and starts what it needs from [compose/n8n/assistant/](./compose/n8n/assistant/README.md): the n8n sandbox service it runs code in and SearXNG for its web search.
+
+```bash
+# asks for the model: a cloud provider and one of its recommended models, or one of AI_MODELS
+pnpm run config N8N_ASSISTANT
+# or without a prompt: a cloud model as provider/model, then the API key of that provider
+pnpm run config N8N_ASSISTANT true anthropic/claude-opus-5-5
+pnpm run secrets set N8N_INSTANCE_AI_MODEL_API_KEY
+# or a model of AI_MODELS, served by the current AI_ENGINE
+pnpm run config N8N_ASSISTANT true qwen3-5-4b
+# off again; the model stays in compose/n8n/.env for the next time
+pnpm run config N8N_ASSISTANT false
+```
+
+- The toggle lives in the root `.env`. The model is written into `compose/n8n/.env` as `N8N_INSTANCE_AI_MODEL` and, for a model of `AI_MODELS`, `N8N_INSTANCE_AI_MODEL_URL` with the endpoint of the engine. The cloud models offered come from [compose/models/models.assistant.json](./compose/models/models.assistant.json); any other `provider/model` is accepted with a warning.
+- A model of `AI_MODELS` keeps the endpoint of the engine it was activated with. After changing `AI_ENGINE` or deselecting the model, run `pnpm run config N8N_ASSISTANT` again: `config` and `models select` warn, and Tilt refuses to load until the model fits.
+- Ollama needs no key. vLLM needs its bearer token as `N8N_INSTANCE_AI_MODEL_API_KEY`, and `config` prints the command that copies it. A cloud key can also be entered in the Assistant settings of n8n.
+- The sandbox runner is a privileged Docker-in-Docker container, which n8n documents as [for development and testing only](https://docs.n8n.io/deploy/host-n8n/install-options/install-using-docker-compose): keep it off shared and internet-facing hosts.
+- n8n itself needs none of this: with `N8N_ASSISTANT=false` every Assistant setting is optional and the services stay stopped.
+
 ## Architecture
 
 ```text
 .
 ├── Tiltfile                  # Tilt orchestration of every compose project
-├── .env.template             # N8N_VARIANT, AI_RUNTIME, AI_ENGINE, AI_GATEWAY, AI_MODELS, DOMAIN
+├── .env.template             # N8N_VARIANT, N8N_ASSISTANT, AI_RUNTIME, AI_ENGINE, AI_GATEWAY, AI_MODELS, DOMAIN
 ├── compose/                  # the service catalogue, one compose project per directory
 │   ├── package.json          # n8n-service-catalogue: lint scripts and .dclintrc
 │   ├── proxy/                # traefik, docker-socket-proxy
-│   ├── n8n/                  # docker-compose.yml (dev) extended by .build.yml, .community.yml and .enterprise.yml
+│   ├── n8n/                  # docker-compose.yml (dev) extended by .build.yml, .community.yml and .enterprise.yml; assistant/ for the n8n Assistant
 │   ├── storage/              # postgres, pgadmin, redis, redis-insight, garage
 │   ├── services/             # qdrant
-│   └── models/               # models.json plus ollama/ and vllm/, and the litellm/ gateway
+│   └── models/               # models.json plus ollama/ and vllm/, the litellm/ gateway, and models.assistant.json
 ├── assets/                   # images, icons (vscode-icons custom folder icons), static assets
 ├── packages/cli/             # n8n-starter: setup, verify, config, models, secrets, tilt, reset
 └── .volumes/                 # runtime data of every service, gitignored
@@ -167,7 +189,7 @@ Two external docker networks, created by `pnpm run setup`: `n8n-starter-public` 
 
 ### Configuration
 
-- The root `.env` steers the environment: `N8N_VARIANT`, `AI_RUNTIME`, `AI_ENGINE`, `AI_GATEWAY`, `AI_MODELS`, `DOMAIN`. Edit it with `pnpm run config` (`AI_MODELS` also with `pnpm run models select`) or by hand.
+- The root `.env` steers the environment: `N8N_VARIANT`, `N8N_ASSISTANT`, `AI_RUNTIME`, `AI_ENGINE`, `AI_GATEWAY`, `AI_MODELS`, `DOMAIN`. Edit it with `pnpm run config` (`AI_MODELS` also with `pnpm run models select`; `N8N_ASSISTANT` also picks the model of the Assistant, which goes into `compose/n8n/.env`) or by hand.
 - Each service keeps its own `.env` next to its compose file, generated from the committed `.env.template`, with the secret keys filled by `setup` as the committed `.env.json` beside it declares (random values once, the n8n copy of the postgres password and the hash of the n8n owner password kept in sync). A secret no container reads, the owner password itself, lives in a `.env.secrets` beside the `.env`. Only the templates and manifests are committed. `pnpm run secrets read [filter]` prints the secrets, `pnpm run secrets set <KEY>` sets one by hand, the enterprise license key for example.
 - `VOLUMES_PATH` moves all runtime data elsewhere, for example `VOLUMES_PATH=/Volumes/ext/n8n pnpm run dev`. It always points at a `.volumes`-style root.
 - `pnpm run reset` deletes every generated `.env` and `.env.secrets` after confirmation and keeps the templates. It warns about the secrets the data in `.volumes/` depends on (the n8n encryption key, the postgres password): back them up with `pnpm run secrets read` first or delete `.volumes/` too.
@@ -234,6 +256,9 @@ docker compose -f docker-compose.community.yml up
 DOMAIN=example.test docker compose -f docker-compose.community.yml up
 # a model engine, from compose/models/ollama/ (one service per AI_RUNTIME profile)
 OLLAMA_PULL_MODELS=qwen3.5:0.8b docker compose --profile cpu-arm64 up
+# the n8n Assistant, from compose/n8n/: its sandbox and web search, then n8n with the toggle (the model is N8N_INSTANCE_AI_MODEL in .env)
+docker compose -f assistant/docker-compose.yml up -d
+N8N_ASSISTANT=true docker compose -f docker-compose.community.yml up
 ```
 
 ### CI

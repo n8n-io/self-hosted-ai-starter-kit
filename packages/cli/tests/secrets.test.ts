@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url'
 import { stripVTControlCharacters } from 'node:util'
 import { compareSync } from 'bcryptjs'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
-import { AI_ENGINES, AI_RUNTIMES, N8N_VARIANTS } from '../src/schemas/config'
-import { BCRYPT_ROUNDS, GENERATOR_TYPES, SECRET_ENCODINGS, SECRET_FILES, SECRET_KEY_PATTERN, SECRET_PREFIX_PATTERN, SECRET_ROTATIONS, SECRET_SOURCES, secretsManifestSchema } from '../src/schemas/secrets'
+import { AI_ENGINES, AI_RUNTIMES, N8N_ASSISTANTS, N8N_VARIANTS } from '../src/schemas/config'
+import { BCRYPT_ROUNDS, GENERATOR_TYPES, SECRET_ENCODINGS, SECRET_FILES, SECRET_KEY_PATTERN, SECRET_PREFIX_PATTERN, SECRET_ROTATIONS, SECRET_SOURCES, secretRequiredSchema, secretsManifestSchema } from '../src/schemas/secrets'
 import { parseEnvContent } from '../src/utils/env'
 import { generateRandom } from '../src/utils/generators'
 import { setLogLevel } from '../src/utils/logger'
@@ -55,7 +55,7 @@ const OWNER_MANIFEST = { secrets: {
 const OWNER_TEMPLATE = '# required\nOWNER_PASSWORD_HASH=\n\n# optional\n# the login\n# OWNER_EMAIL=owner@example.com\n'
 const ROOT_ENV = 'DOMAIN=n8n.localhost\nN8N_VARIANT=dev\nAI_RUNTIME=cpu-arm64\nAI_ENGINE=ollama\nAI_MODELS=\n'
 
-const CONFIG = { DOMAIN: 'n8n.localhost', N8N_VARIANT: 'dev', AI_RUNTIME: 'cpu-arm64', AI_ENGINE: 'ollama', AI_GATEWAY: '', AI_MODELS: '' } as const
+const CONFIG = { DOMAIN: 'n8n.localhost', N8N_VARIANT: 'dev', N8N_ASSISTANT: 'false', AI_RUNTIME: 'cpu-arm64', AI_ENGINE: 'ollama', AI_GATEWAY: '', AI_MODELS: '' } as const
 const ENTERPRISE = { ...CONFIG, N8N_VARIANT: 'enterprise' } as const
 
 let rootDir: string
@@ -327,6 +327,57 @@ test('checks every secret of the directories that have a .env', async () => {
 
   await rm(join(dirs.vllm, '.env'))
   expect(checkSecrets(await readSecretState(rootDir), CONFIG).map(check => check.key)).not.toContain('VLLM_API_KEY')
+})
+
+test('a conditional link is filled like every link and missed only while the root .env meets its condition', async () => {
+  await writeFile(join(rootDir, '.env'), ROOT_ENV)
+  const link = { source: 'link', from: './assistant', key: 'SANDBOX_API_KEYS', required: { N8N_ASSISTANT: ['true'] } }
+  // the consumer runs without the key, so its template keeps it commented out
+  const template = '# optional\n# N8N_SANDBOX_SERVICE_API_KEY=\n'
+  const assistant = await addDir('compose/n8n/assistant', { '.env.template': 'SANDBOX_API_KEYS=\n', '.env.json': { secrets: { SANDBOX_API_KEYS: { source: 'generate', description: 'sandbox key' } } }, '.env': 'SANDBOX_API_KEYS=\n' })
+  const n8n = await addDir('compose/n8n', { '.env.template': template, '.env.json': { secrets: { N8N_SANDBOX_SERVICE_API_KEY: link } }, '.env': template })
+  const ON = { ...CONFIG, N8N_ASSISTANT: 'true' } as const
+  const check = async (config?: typeof CONFIG | typeof ON) => checkSecrets(await readSecretState(rootDir), config).find(check => check.key === 'N8N_SANDBOX_SERVICE_API_KEY')!
+
+  // unfilled: information while the condition is not met or the root config is unknown, a failure once it is
+  expect((await check(CONFIG)).status).toBe('unset')
+  expect((await check()).status).toBe('unset')
+  const missing = await check(ON)
+  expect(missing).toMatchObject({ status: 'missing', condition: 'N8N_ASSISTANT=true' })
+  expect(formatSecretCheck(rootDir, missing)).toBe('Missing secret N8N_SANDBOX_SERVICE_API_KEY in compose/n8n/.env, required for N8N_ASSISTANT=true')
+
+  // setup fills it whatever the root .env says, appended to the .env since the template has no live key for it
+  await fillSecrets(rootDir)
+  expect((await env(n8n)).N8N_SANDBOX_SERVICE_API_KEY).toBe((await env(assistant)).SANDBOX_API_KEYS)
+  expect((await env(n8n)).N8N_SANDBOX_SERVICE_API_KEY).toMatch(/^[0-9a-f]{64}$/)
+  expect((await check(CONFIG)).status).toBe('ok')
+  expect((await check(ON)).status).toBe('ok')
+
+  // a link out of step with its source is a mismatch with or without the condition
+  await writeFile(join(assistant, '.env'), 'SANDBOX_API_KEYS=changed\n')
+  expect((await check(CONFIG)).status).toBe('mismatch')
+
+  // the condition is typed by the root .env lists, and an empty one is refused like that of a prompt
+  expect(secretsManifestSchema.safeParse({ secrets: { KEY: link } }).success).toBe(true)
+  expect(secretsManifestSchema.safeParse({ secrets: { KEY: { ...link, required: {} } } }).success).toBe(false)
+  expect(secretsManifestSchema.safeParse({ secrets: { KEY: { ...link, required: { N8N_ASSISTANT: ['on'] } } } }).success).toBe(false)
+})
+
+test('the filter of a manifest directory keeps that directory alone, also when another one is nested in it', async () => {
+  await writeFile(join(rootDir, '.env'), ROOT_ENV)
+  await addDir('compose/n8n/assistant', { '.env.template': 'SANDBOX_API_KEYS=\n', '.env.json': { secrets: { SANDBOX_API_KEYS: { source: 'generate', description: 'sandbox key' } } }, '.env': 'SANDBOX_API_KEYS=\n' })
+  await addDir('compose/n8n', { '.env.template': 'N8N_ENCRYPTION_KEY=\n', '.env.json': { secrets: { N8N_ENCRYPTION_KEY: { source: 'generate', description: 'encryption key' } } }, '.env': 'N8N_ENCRYPTION_KEY=\n' })
+  const state = await readSecretState(rootDir)
+  const keys = (filter: string) => listSecrets(state, filter).map(secret => secret.key)
+
+  // the filter of the secrets button of a Tilt project
+  expect(keys('compose/n8n')).toEqual(['N8N_ENCRYPTION_KEY'])
+  expect(keys('compose/n8n/')).toEqual(['N8N_ENCRYPTION_KEY'])
+  expect(keys('compose/n8n/assistant')).toEqual(['SANDBOX_API_KEYS'])
+  // a part of a directory or key still matches wherever it occurs
+  expect(keys('n8n')).toEqual(['N8N_ENCRYPTION_KEY', 'SANDBOX_API_KEYS'])
+  expect(keys('compose/n')).toEqual(['N8N_ENCRYPTION_KEY', 'SANDBOX_API_KEYS'])
+  expect(keys('sandbox')).toEqual(['SANDBOX_API_KEYS'])
 })
 
 test('lists the secrets whose directory or key contains the filter', async () => {
@@ -629,6 +680,7 @@ test('the repository manifests match their templates, their compose files and th
     'compose/models/litellm',
     'compose/models/vllm',
     'compose/n8n',
+    'compose/n8n/assistant',
     'compose/storage/pgadmin',
     'compose/storage/postgres',
   ])
@@ -644,8 +696,9 @@ test('the repository manifests match their templates, their compose files and th
       expect(directory.template[secret.key], where).toBeUndefined()
       expect(directory.defaults[secret.key], where).toBeUndefined()
       expect(compose, where).not.toContain(`\${${secret.key}:`)
-    } else if (secret.entry.source === 'prompt' && secret.entry.required === undefined) {
-      // optional human secrets stay commented out in the template and optional in the compose file
+    } else if (secret.entry.source === 'prompt' ? secret.entry.required === undefined : secret.entry.source === 'link' && secret.entry.required !== undefined) {
+      // optional human secrets, and the links only a root .env condition needs, stay commented out in the template
+      // and optional in the compose file: the service runs without them
       expect(directory.template[secret.key], where).toBeUndefined()
       expect(template, where).toContain(`# ${secret.key}=`)
       expect(compose, where).toContain(`\${${secret.key}:-`)
@@ -696,9 +749,14 @@ test('the repository manifests match their templates, their compose files and th
   expect(schema.$defs.bcrypt.properties.input.pattern).toBe(SECRET_KEY_PATTERN.source)
   expect(schema.$defs.bcrypt.properties.rounds).toEqual({ type: 'integer', minimum: BCRYPT_ROUNDS.min, maximum: BCRYPT_ROUNDS.max, default: BCRYPT_ROUNDS.default })
   expect(schema.$defs.related.items.pattern).toBe(SECRET_KEY_PATTERN.source)
-  expect(schema.$defs.prompt.properties.required.properties.N8N_VARIANT.items.enum).toEqual([...N8N_VARIANTS])
-  expect(schema.$defs.prompt.properties.required.properties.AI_ENGINE.items.enum).toEqual([...AI_ENGINES])
-  expect(schema.$defs.prompt.properties.required.properties.AI_RUNTIME.items.enum).toEqual([...AI_RUNTIMES])
+  // a prompt and a link share the condition, with the values of the root .env lists
+  expect(schema.$defs.prompt.properties.required).toEqual({ $ref: '#/$defs/required' })
+  expect(schema.$defs.link.properties.required).toEqual({ $ref: '#/$defs/required' })
+  expect(schema.$defs.required.properties.N8N_VARIANT.items.enum).toEqual([...N8N_VARIANTS])
+  expect(schema.$defs.required.properties.N8N_ASSISTANT.items.enum).toEqual([...N8N_ASSISTANTS])
+  expect(schema.$defs.required.properties.AI_ENGINE.items.enum).toEqual([...AI_ENGINES])
+  expect(schema.$defs.required.properties.AI_RUNTIME.items.enum).toEqual([...AI_RUNTIMES])
+  expect(Object.keys(schema.$defs.required.properties)).toEqual(Object.keys(secretRequiredSchema.shape))
   for (const dir of state.directories.keys()) {
     const manifest = JSON.parse(await readFile(join(dir, '.env.json'), 'utf-8'))
     expect(resolve(dir, manifest.$schema), relative(repoRoot, dir)).toBe(join(composeRoot, '.env.schema.json'))

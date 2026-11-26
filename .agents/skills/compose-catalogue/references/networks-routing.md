@@ -5,7 +5,7 @@ Reasoning: [SPEC.md](../../../../SPEC.md), sections "Docker networks" and "Routi
 ## Networks
 
 - `n8n-starter-public` holds traefik and every container it routes to (`traefik.enable=true`); `n8n-starter-private` holds everything else. A routed service that also needs a backend joins both.
-- Membership today: public only `garage`, `garage-webui`; private only `docker-socket-proxy`, `postgres`, `redis`, `n8n-runner`, `n8n-worker`, `n8n-worker-runner`, `qdrant`, `ollama`, `vllm-*`, `litellm-db`; both `traefik`, `n8n`, `n8n-webhook`, `pgadmin`, `redisinsight`, `litellm`. Update the table in SPEC.md when membership changes.
+- Membership today: public only `garage`, `garage-webui`; private only `docker-socket-proxy`, `postgres`, `redis`, `n8n-runner`, `n8n-worker`, `n8n-worker-runner`, `sandbox-api`, `sandbox-runner-1`, `searxng`, `qdrant`, `ollama`, `vllm-*`, `litellm-db` (the one-shot `sandbox-certs` joins none); both `traefik`, `n8n`, `n8n-webhook`, `pgadmin`, `redisinsight`, `litellm`. Update the table in SPEC.md when membership changes.
 - Both networks are `external` and created by `pnpm run setup`; a compose file never creates one.
 
 ## Routing
@@ -28,6 +28,8 @@ Reasoning: [SPEC.md](../../../../SPEC.md), sections "Docker networks" and "Routi
 | 11434 | ollama, `http://ollama:11434` (network alias on `n8n-starter-private`) | no, never routed |
 | 8000 | each vllm container, `http://vllm-<id>:8000/v1`, bearer `VLLM_API_KEY` (`/health` stays open) | no, never routed |
 | 4000 | litellm, `http://litellm:4000/v1`, bearer `LITELLM_MASTER_KEY` | no, routed at `litellm.<DOMAIN>` |
+| 8080, 9090, 9091 | the sandbox of the Assistant: `http://sandbox-api:8080` (n8n, key `SANDBOX_API_KEYS`), the API's gRPC registration and the runner's control port, both mutual TLS | no, never routed |
+| 8080 | searxng, `http://searxng:8080` (the web search of the Assistant) | no, never routed |
 | 3900, 3902, 3903, 3909 | garage S3, web, admin API and garage-webui | no, routed through explicit routers |
 
 Everything else is reachable only through traefik at `<service>.<DOMAIN>`.
