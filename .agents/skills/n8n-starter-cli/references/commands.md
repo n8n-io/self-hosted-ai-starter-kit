@@ -9,7 +9,7 @@ Every command takes `rootDir = process.cwd()` (the root scripts run from the rep
 - `findFiles(rootDir, '.env.template')`, copy each to `.env` beside it with `COPYFILE_EXCL` (`EEXIST` means `skipped`, never overwrites).
 - When a root template exists, `applyDetectedRuntime`: `detectPlatform`, an info line `Detected …`; a root `.env` created in this run gets the detected `AI_RUNTIME` when the template value differs, a skipped one only a `runtimeMismatch` warning.
 - `fillSecrets`: every unfilled random `generate` key of every manifest gets a value, in its `.env` or, with `file` `.env.secrets`, in that file beside it (created for its owner only); then every derived value (`staleDerived`: a `bcrypt` generator, rewritten only while empty or no longer the hash of its input) and every `link` is set to its source; logs `Generated`/`Linked` lines and one info line per `.env.secrets` written that names `secrets read <directory>`. Then a warning per `prompt` key the root `.env` requires but is unset (`checkSecrets` with `readRootConfigIfValid`).
-- `ensureDockerNetworks(['n8n-starter-public', 'n8n-starter-private'])`: creates only the missing ones, `--driver bridge`. Then a summary line.
+- `ensureDockerNetworks(['n8n-starter-public', 'n8n-starter-private'])`: creates only the missing ones, `--driver bridge`. Then a summary line (`logger.outro`) and, unless a step failed, `logger.banner(renderBanner())`: the n8n logo, the ready line and the next steps (`src/utils/logo.ts`).
 - Exit 1 when docker is unreachable (the `.env` files are still created) or a manifest is invalid.
 
 ## verify

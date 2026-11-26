@@ -1,4 +1,4 @@
-import { styleText } from 'node:util'
+import { accent } from './utils/format'
 
 /**
  * The command table of the CLI: one entry per command, rendered as the global help (`--help`, `help`)
@@ -91,13 +91,13 @@ interface Row {
 
 /**
  * Two-column rows, the descriptions aligned two spaces after the longest usage and notes under the
- * description. The usage column is highlighted so a wrapped description does not blur the list;
- * styleText stays plain without a tty or with NO_COLOR, and the padding counts the plain length.
+ * description. The usage column is highlighted in the accent colour so a wrapped description does not blur
+ * the list; it stays plain without a tty or with NO_COLOR, and the padding counts the plain length.
  */
 function table(rows: readonly Row[]): string[] {
   const width = Math.max(...rows.map(row => row.usage.length)) + 2
   return rows.flatMap(row => [
-    `  ${styleText('cyan', row.usage)}${''.padEnd(width - row.usage.length)}${row.description}`,
+    `  ${accent(row.usage)}${''.padEnd(width - row.usage.length)}${row.description}`,
     ...(row.notes ?? []).map(note => `  ${''.padEnd(width)}${note}`),
   ])
 }

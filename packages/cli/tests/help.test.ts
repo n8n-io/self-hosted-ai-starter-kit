@@ -71,16 +71,16 @@ test('the help of one command shows its usage, its sub-commands or notes, and th
   expect(config).toContain('  N8N_ASSISTANT true [model]: an id of AI_MODELS or a cloud model as provider/model')
 })
 
-test('the usage column is highlighted when colours are on and plain when they are off', () => {
+test('the usage column is highlighted in the accent colour when colours are on and plain when they are off', () => {
   const previous = { FORCE_COLOR: process.env.FORCE_COLOR, NO_COLOR: process.env.NO_COLOR }
   try {
     // FORCE_COLOR wins over NO_COLOR and the missing tty, see util.styleText
     process.env.FORCE_COLOR = '1'
     delete process.env.NO_COLOR
     const coloured = renderHelp('secrets')
-    expect(coloured).toContain('  \u001B[36msecrets read [filter] [--json]\u001B[39m  Print')
-    expect(coloured).toContain('  \u001B[36m-h, --help\u001B[39m')
-    expect(coloured).not.toContain('\u001B[36mUsage:')
+    expect(coloured).toContain('  \u001B[95msecrets read [filter] [--json]\u001B[39m  Print')
+    expect(coloured).toContain('  \u001B[95m-h, --help\u001B[39m')
+    expect(coloured).not.toContain('\u001B[95mUsage:')
     // the padding is computed on the plain usage, so the columns still line up once the codes are gone
     const rows = plain(coloured).split('\n').filter(line => line.startsWith('  secrets '))
     expect(new Set(rows.map(line => line.lastIndexOf('  ') + 2)).size).toBe(1)

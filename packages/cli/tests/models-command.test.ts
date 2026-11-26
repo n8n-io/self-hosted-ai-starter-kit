@@ -136,7 +136,7 @@ test('models read filters by a part of an engine or id and prints the records as
   ])
 })
 
-test('models read highlights the keys in cyan when colours are on', async () => {
+test('models read highlights the keys in the accent colour when colours are on', async () => {
   await writeCatalogue()
   const previous = { FORCE_COLOR: process.env.FORCE_COLOR, NO_COLOR: process.env.NO_COLOR }
   try {
@@ -144,7 +144,7 @@ test('models read highlights the keys in cyan when colours are on', async () => 
     process.env.FORCE_COLOR = '1'
     delete process.env.NO_COLOR
     await models(rootDir, ['read', 'a-1'])
-    expect(logSpy.mock.calls[0]![0]).toBe('vllm/a-1\n\u001B[36mmodel\u001B[39m=Org/A\n\u001B[36mlabel\u001B[39m=A\n\u001B[36margs\u001B[39m=--max-model-len=4096')
+    expect(logSpy.mock.calls[0]![0]).toBe('vllm/a-1\n\u001B[95mmodel\u001B[39m=Org/A\n\u001B[95mlabel\u001B[39m=A\n\u001B[95margs\u001B[39m=--max-model-len=4096')
   } finally {
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined)

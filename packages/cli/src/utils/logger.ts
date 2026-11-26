@@ -41,6 +41,11 @@ export const logger = {
     if (enabled('info'))
       outro(message)
   },
+  /** Lines after the outro, written as they are: the guide is closed there, so no bar and no symbol in front of them */
+  banner(lines: string[]): void {
+    if (enabled('info'))
+      log.message(lines, { withGuide: false, spacing: 0 })
+  },
   success(message: string): void {
     if (enabled('info'))
       log.success(message)

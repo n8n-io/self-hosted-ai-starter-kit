@@ -407,7 +407,7 @@ test('sets a secret and copies it to its links', async () => {
   await expect(setSecret(await readSecretState(rootDir), 'NOPE', 'x')).rejects.toThrow('Unknown secret "NOPE"')
 })
 
-test('secrets read prints the secrets grouped by .env, the keys in cyan on a tty, and nothing else', async () => {
+test('secrets read prints the secrets grouped by .env, the keys in the accent colour on a tty, and nothing else', async () => {
   const dirs = await fixture()
   await fillSecrets(rootDir)
   const n8n = await env(dirs.n8n)

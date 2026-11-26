@@ -10,6 +10,7 @@ import { parseEnvContent, updateEnvContent } from '../utils/env'
 import { findFiles } from '../utils/files'
 import { runCommand } from '../utils/format'
 import { logger } from '../utils/logger'
+import { renderBanner } from '../utils/logo'
 import { detectPlatform, formatPlatform, runtimeMismatch } from '../utils/platform'
 import { checkSecrets, fillSecrets, formatSecretCheck, readRootConfigIfValid, readSecretState, SECRETS_FILENAME } from './secrets'
 
@@ -108,6 +109,7 @@ export async function setup(rootDir = process.cwd(), docker: PlatformOptions = {
   // the secrets of the .env files just created or still unfilled and of the .env.secrets beside them, see
   // ../../../../SPEC.md; a human secret the current root .env requires (the enterprise license) is pointed at,
   // never prompted for here
+  let failed = false
   let secrets: SecretWriteResult[] = []
   try {
     secrets = await fillSecrets(rootDir)
@@ -124,6 +126,7 @@ export async function setup(rootDir = process.cwd(), docker: PlatformOptions = {
   } catch (error) {
     logger.error((error as Error).message)
     process.exitCode = 1
+    failed = true
   }
 
   let networks: DockerNetworkResult[] = []
@@ -133,6 +136,7 @@ export async function setup(rootDir = process.cwd(), docker: PlatformOptions = {
     logger.error(`Could not create the docker networks ${DOCKER_NETWORKS.join(', ')}. Is Docker installed and running?`)
     logger.error((error as Error).message)
     process.exitCode = 1
+    failed = true
   }
 
   for (const { name, status } of networks) {
@@ -148,4 +152,7 @@ export async function setup(rootDir = process.cwd(), docker: PlatformOptions = {
   const linked = secrets.length - generated
   const networksCreated = networks.filter(n => n.status === 'created').length
   logger.outro(`${created} file(s) created, ${skipped} skipped. ${generated} secret(s) generated, ${linked} linked. ${networksCreated} docker network(s) created.`)
+  // the sign-off of a run that went through; a failed one ends on its errors
+  if (!failed)
+    logger.banner(renderBanner())
 }

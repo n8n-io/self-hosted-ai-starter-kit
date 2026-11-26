@@ -452,7 +452,7 @@ export async function readRootConfigIfValid(rootDir: string): Promise<Config | u
 
 /**
  * `secrets read [filter] [--json]`: the declared secrets and their values on stdout, nothing else; grouped by
- * the file that holds them with the keys in cyan on a tty and the `related` keys of a secret above it, only the
+ * the file that holds them with the keys in the accent colour on a tty and the `related` keys of a secret above it, only the
  * value when the filter is an exact key (so it can be piped), or with `json` one array of
  * `{ file, key, value, source, related? }` (`value` null while the key is absent from its file). A derived value
  * is listed only when it is named: a hash is of no use to a reader.

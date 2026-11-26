@@ -6,6 +6,7 @@ import * as clack from '@clack/prompts'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { DOCKER_NETWORKS, findEnvTemplates, generateEnvFiles, setup } from '../src/commands/setup'
 import { parseEnvContent } from '../src/utils/env'
+import { nextSteps, READY, renderBanner } from '../src/utils/logo'
 
 // Silence the clack output so the command can run end-to-end in tests
 vi.mock('@clack/prompts', () => ({
@@ -132,6 +133,16 @@ test('setup creates the n8n docker networks that are missing', async () => {
   expect(await readFile(join(rootDir, 'compose/n8n/.env'), 'utf-8')).toBe('KEY=value\n')
 })
 
+test('setup signs off with the n8n logo, the ready line and the next steps after the summary', async () => {
+  await addTemplate('compose/n8n')
+
+  await setup(rootDir, { run: fakeDocker(), ...HOST })
+
+  expect(clack.log.message).toHaveBeenCalledExactlyOnceWith(renderBanner(), { withGuide: false, spacing: 0 })
+  expect(vi.mocked(clack.log.message).mock.calls[0]![0]).toEqual(expect.arrayContaining([`   ${READY}`, `   ${nextSteps()}`]))
+  expect(vi.mocked(clack.log.message).mock.invocationCallOrder[0]).toBeGreaterThan(vi.mocked(clack.outro).mock.invocationCallOrder[0]!)
+})
+
 test('setup fails with a non-zero exit code when docker is unavailable', async () => {
   const previousExitCode = process.exitCode
   const run: DockerRunner = async () => {
@@ -141,6 +152,9 @@ test('setup fails with a non-zero exit code when docker is unavailable', async (
   await setup(rootDir, { run, ...HOST })
 
   expect(process.exitCode).toBe(1)
+  // a failed run ends on its errors, not on the logo
+  expect(clack.outro).toHaveBeenCalledOnce()
+  expect(clack.log.message).not.toHaveBeenCalled()
   process.exitCode = previousExitCode
 })
 

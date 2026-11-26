@@ -32,6 +32,7 @@ const sinks = {
 function logEverything() {
   logger.intro('intro')
   logger.outro('outro')
+  logger.banner(['banner'])
   logger.success('success')
   logger.info('info')
   logger.step('step')
@@ -83,12 +84,15 @@ test('passes messages through unchanged', () => {
   expect(clack.cancel).toHaveBeenCalledWith('cancel')
   expect(clack.log.message).toHaveBeenCalledWith('hint', { symbol: HINT_SYMBOL })
   expect(clack.log.message).toHaveBeenCalledWith('debug', { symbol: '○' })
+  // after the outro the guide is closed: the lines of a banner carry no bar and no symbol
+  expect(clack.log.message).toHaveBeenCalledWith(['banner'], { withGuide: false, spacing: 0 })
 })
 
-test('hint is logged from the error level on and debug only at debug', () => {
+test('hint is logged from the error level on, debug only at debug and a banner not below info', () => {
   setLogLevel('error')
   logger.hint('hint')
   logger.debug('debug')
+  logger.banner(['banner'])
 
   expect(vi.mocked(clack.log.message).mock.calls).toEqual([['hint', { symbol: HINT_SYMBOL }]])
 })
