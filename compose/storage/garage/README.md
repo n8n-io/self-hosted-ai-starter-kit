@@ -1,6 +1,6 @@
 # garage
 
-[Garage](https://garagehq.deuxfleurs.fr/) is a lightweight S3-compatible object store, intended for n8n's binary data in the `enterprise` variant (still to be wired up). Traefik serves the S3 API at `s3.<DOMAIN>` and the web endpoint at `s3web.<DOMAIN>`; the bundled [garage-webui](https://github.com/khairul169/garage-webui) at `s3ui.<DOMAIN>`. Both start on demand from the Tilt UI. Node configuration: [garage.toml](./garage.toml); routing: [SPEC.md](../../../SPEC.md#routing).
+[Garage](https://garagehq.deuxfleurs.fr/) is a lightweight S3-compatible object store, intended for n8n's binary data in the `enterprise` variant (still to be wired up). Traefik serves the S3 API at `s3.<DOMAIN>` and the web endpoint at `s3web.<DOMAIN>`; the bundled [garage-webui](https://github.com/khairul169/garage-webui) at `s3ui.<DOMAIN>`. Both start on demand from the Tilt UI. Node configuration: one file per `DOMAIN`, [garage.n8n.localhost.toml](./garage.n8n.localhost.toml) and [garage.n8n.local.toml](./garage.n8n.local.toml), because garage reads its `root_domain` from the file only; the two differ in the `root_domain` of the S3 and web endpoints and nothing else, a test checks it. Routing: [SPEC.md](../../../SPEC.md#routing).
 
 - Homepage: <https://garagehq.deuxfleurs.fr/>
 - Repository: <https://git.deuxfleurs.fr/Deuxfleurs/garage>

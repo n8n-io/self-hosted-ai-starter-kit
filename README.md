@@ -185,7 +185,7 @@ Two external docker networks, created by `pnpm run setup`: `n8n-starter-public` 
 | `http://pgadmin.n8n.localhost` | pgAdmin |
 | `http://redisinsight.n8n.localhost` | Redis Insight |
 | `http://litellm.n8n.localhost/ui` | LiteLLM dashboard (the host root is its OpenAPI page), with `AI_GATEWAY=litellm` |
-| `http://s3.n8n.localhost`, `http://s3web.n8n.localhost`, `http://s3ui.n8n.localhost` | Garage S3 API, static web hosting, web UI |
+| `http://s3.n8n.localhost`, `http://s3web.n8n.localhost`, `http://s3ui.n8n.localhost` | Garage S3 API, static web hosting, web UI; buckets are also served at `<bucket>.s3.n8n.localhost` and `<bucket>.web.n8n.localhost` |
 
 `DOMAIN` is `n8n.localhost` or `n8n.local` (`pnpm run config DOMAIN`). Nothing resolves a `.local` name on its own, so `n8n.local` needs every hostname above in your hosts file (`/etc/hosts`, or `C:\Windows\System32\drivers\etc\hosts`), for example `127.0.0.1 n8n.local traefik.n8n.local pgadmin.n8n.local`. It does not open the stack to your local network: Traefik still listens on `127.0.0.1` only. [SPEC.md](./SPEC.md#routing) compares the two.
 

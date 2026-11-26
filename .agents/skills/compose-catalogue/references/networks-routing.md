@@ -11,7 +11,7 @@ Reasoning: [SPEC.md](../../../../SPEC.md), sections "Docker networks" and "Routi
 ## Routing
 
 - Traefik (`compose/proxy/traefik/traefik.yml`) discovers containers through `docker-socket-proxy` (`tcp://docker-socket-proxy:2375`, read-only: `CONTAINERS=1`, `POST=0`), `exposedByDefault: false`, provider `network: n8n-starter-public`, default rule ``Host(`<compose service>.<DOMAIN>`)``.
-- n8n overrides the rule to the bare `DOMAIN` and, in queue mode, `n8n-webhook` to `hooks.<DOMAIN>` with the test paths routed back to main by the `n8n-hooks-test` router; garage declares its own routers (`s3.`, `s3web.`, `s3ui.<DOMAIN>`); the traefik dashboard is `traefik.<DOMAIN>` (`config/dashboard.yml`); model servers are never routed, only the gateway in front of them is, at `litellm.<DOMAIN>`.
+- n8n overrides the rule to the bare `DOMAIN` and, in queue mode, `n8n-webhook` to `hooks.<DOMAIN>` with the test paths routed back to main by the `n8n-hooks-test` router; garage declares its own routers (`s3.`, `s3web.`, `s3ui.<DOMAIN>`; the first two also match `<bucket>.s3.<DOMAIN>` and `<bucket>.web.<DOMAIN>` through `HostRegexp`, the `root_domain` of `garage.<DOMAIN>.toml`; write `$$` for the regex anchor in a label); the traefik dashboard is `traefik.<DOMAIN>` (`config/dashboard.yml`); model servers are never routed, only the gateway in front of them is, at `litellm.<DOMAIN>`.
 - The `web` entrypoint applies the `default@file` middleware chain (compress + security headers) from `config/`. The stack is plain HTTP only; HTTPS is not supported yet.
 - `N8N_PROXY_HOPS=1` because traefik is the only proxy in front of n8n; raise it by one per additional proxy.
 

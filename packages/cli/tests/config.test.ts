@@ -184,6 +184,20 @@ test('the first option of every list is the default of the root .env.template', 
   expect(aiGatewaySchema.options).toEqual(['', ...AI_GATEWAYS])
 })
 
+test('garage has one config file per domain, equal but for the root_domain of its two endpoints', async () => {
+  // garage reads root_domain from its config file only, which compose picks by DOMAIN (compose/storage/garage/docker-compose.yml)
+  const read = (domain: string) => readFile(new URL(`../../../compose/storage/garage/garage.${domain}.toml`, import.meta.url), 'utf-8')
+  const [first, ...others] = DOMAINS
+  const reference = await read(first)
+
+  for (const domain of DOMAINS) {
+    const content = await read(domain)
+    expect([...content.matchAll(/^root_domain = "(.+)"$/gm)].map(match => match[1])).toEqual([`.s3.${domain}`, `.web.${domain}`])
+    expect(content.replaceAll(domain, first)).toBe(reference)
+  }
+  expect(others.length).toBeGreaterThan(0)
+})
+
 test('the config keys and their descriptions mirror the root .env.template', async () => {
   const content = await readFile(new URL('../../../.env.template', import.meta.url), 'utf-8')
 
