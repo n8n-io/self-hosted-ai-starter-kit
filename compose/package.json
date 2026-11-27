@@ -1,0 +1,16 @@
+{
+  "name": "n8n-service-catalogue",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The docker compose service catalogue of the n8n self-hosted-ai-starter-kit.",
+  "author": "n8n",
+  "license": "Apache-2.0",
+  "scripts": {
+    "lint": "node lint.mjs",
+    "lint:fix": "node lint.mjs --fix",
+    "lint:help": "dclint --help"
+  },
+  "devDependencies": {
+    "dclint": "^3.1.0"
+  }
+}

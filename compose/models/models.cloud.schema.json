@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Cloud model catalogue",
+  "description": "Cloud provider models only, nested under their provider: what `pnpm run config N8N_ASSISTANT` offers for the n8n Assistant (the models served locally live in models.json); the first model of the first provider is the default of N8N_INSTANCE_AI_MODEL in ../n8n/docker-compose.yml. The CLI validates the same shape in packages/cli/src/schemas/assistant.ts, see ../../SPEC.md",
+  "type": "object",
+  "properties": {
+    "$schema": { "type": "string" },
+    "providers": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/provider" }
+    }
+  },
+  "required": [ "providers" ],
+  "additionalProperties": false,
+  "$defs": {
+    "provider": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+          "description": "The provider as n8n names it, the part of N8N_INSTANCE_AI_MODEL before the first slash, e.g. anthropic"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The provider name shown by `config N8N_ASSISTANT`, e.g. Anthropic"
+        },
+        "models": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/model" },
+          "description": "The models recommended for the n8n Assistant, the first one offered first"
+        }
+      },
+      "required": [ "id", "label", "models" ],
+      "additionalProperties": false
+    },
+    "model": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[\\w.:-]+(\\/[\\w.:-]+)*$",
+          "description": "The model as its provider names it, the part of N8N_INSTANCE_AI_MODEL after the provider, e.g. claude-opus-5-5 or deepseek/deepseek-v4-pro"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The model name shown by `config N8N_ASSISTANT`, e.g. Claude Opus 5.5"
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A short hint shown after the model, e.g. what it needs"
+        }
+      },
+      "required": [ "id", "label" ],
+      "additionalProperties": false
+    }
+  }
+}

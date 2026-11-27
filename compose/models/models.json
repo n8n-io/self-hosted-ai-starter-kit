@@ -1,0 +1,35 @@
+{
+  "$schema": "./models.schema.json",
+  "models": [
+    {
+      "id": "qwen3-5-0-8b",
+      "label": "Qwen3.5 0.8B",
+      "ollama": { "model": "qwen3.5:0.8b", "memory": 1.5 },
+      "vllm": {
+        "model": "Qwen/Qwen3.5-0.8B",
+        "args": "--max-model-len=32768 --enable-auto-tool-choice --tool-call-parser=qwen3_coder",
+        "memory": 10
+      }
+    },
+    {
+      "id": "qwen3-5-2b",
+      "label": "Qwen3.5 2B",
+      "ollama": { "model": "qwen3.5:2b", "memory": 3 },
+      "vllm": {
+        "model": "Qwen/Qwen3.5-2B",
+        "args": "--max-model-len=32768 --enable-auto-tool-choice --tool-call-parser=qwen3_coder",
+        "memory": 12
+      }
+    },
+    {
+      "id": "qwen3-5-4b",
+      "label": "Qwen3.5 4B",
+      "ollama": { "model": "qwen3.5:4b", "memory": 6 },
+      "vllm": {
+        "model": "Qwen/Qwen3.5-4B",
+        "args": "--max-model-len=32768 --enable-auto-tool-choice --tool-call-parser=qwen3_coder",
+        "memory": 17
+      }
+    }
+  ]
+}

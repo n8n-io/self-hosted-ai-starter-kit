@@ -1,0 +1,113 @@
+# assistant: the sandbox the n8n Assistant runs code in and its web search, enabled by N8N_ASSISTANT of the root .env, see ../../../SPEC.md
+x-base: &base
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges=true
+
+# the sandbox API, runner and sandbox images ship as one release and are only supported together
+x-sandbox-api: &sandbox-api
+  image: ghcr.io/n8n-io/n8n-sandbox-service-api:${N8N_SANDBOX_VERSION:?}
+
+name: assistant
+services:
+  # n8n reaches it at http://sandbox-api:8080 with SANDBOX_API_KEYS, see ../docker-compose.yml
+  sandbox-api:
+    depends_on:
+      sandbox-certs:
+        condition: service_completed_successfully
+    volumes:
+      - ${VOLUMES_PATH:-../../../.volumes}/n8n/assistant/tls:/tls:ro
+    environment:
+      SANDBOX_API_KEYS: ${SANDBOX_API_KEYS:?}
+      SANDBOX_API_RUNNER_REGISTRATION_TOKEN: ${SANDBOX_API_RUNNER_REGISTRATION_TOKEN:?}
+      SANDBOX_API_RUNNER_API_KEY: ${SANDBOX_API_RUNNER_API_KEY:?}
+      SANDBOX_API_GRPC_TLS_CERT_FILE: /tls/api/grpc-server.crt
+      SANDBOX_API_GRPC_TLS_KEY_FILE: /tls/api/grpc-server.key
+      SANDBOX_API_GRPC_TLS_CLIENT_CA_FILE: /tls/api/ca.crt
+      SANDBOX_API_RUNNER_CONTROL_GRPC_TLS_CA_FILE: /tls/api/ca.crt
+      SANDBOX_API_RUNNER_CONTROL_GRPC_TLS_CERT_FILE: /tls/api/control-grpc-api-client.crt
+      SANDBOX_API_RUNNER_CONTROL_GRPC_TLS_KEY_FILE: /tls/api/control-grpc-api-client.key
+      SANDBOX_API_RUNNER_CONTROL_GRPC_TLS_SERVER_NAME: sandbox-runner-1
+    networks:
+      - n8n-starter-private
+    healthcheck:
+      test: [ "CMD", "wget", "-qO-", "http://localhost:8080/healthz" ]
+      start_interval: 2s
+      start_period: 30s
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    <<: [ *base, *sandbox-api ]
+
+  # runs once: the mutual TLS material of the API and its runner, issued for the service names sandbox-api and sandbox-runner-1, which therefore must not change
+  # no healthcheck: docker reports a stopped container that has one as unhealthy, and Tilt then shows the finished run as failed (see ../../../SPEC.md)
+  sandbox-certs:
+    volumes:
+      - ${VOLUMES_PATH:-../../../.volumes}/n8n/assistant/tls:/tls
+    environment:
+      NUM_RUNNERS: 1
+    network_mode: none
+    command:
+      - bootstrap-mtls.sh --out-dir /tls --api-san sandbox-api --control-san-prefix sandbox-runner --world-readable && chown -R sandbox-api:sandbox-api /tls/api && chmod -R a+rX /tls
+    entrypoint: [ "sh", "-c" ]
+    restart: "no"
+    user: "0:0"
+    <<: [ *base, *sandbox-api ]
+
+  # docker in docker: privileged, so for development and testing only and never reachable from outside (see ../../../SPEC.md)
+  sandbox-runner-1:
+    image: ghcr.io/n8n-io/n8n-sandbox-service-runner-dind:${N8N_SANDBOX_VERSION:?}
+    depends_on:
+      sandbox-api:
+        condition: service_healthy
+    volumes:
+      - ${VOLUMES_PATH:-../../../.volumes}/n8n/assistant/tls:/tls:ro
+    environment:
+      SANDBOX_RUNNER_API_KEYS: ${SANDBOX_API_RUNNER_API_KEY:?}
+      SANDBOX_RUNNER_REGISTRATION_TOKEN: ${SANDBOX_API_RUNNER_REGISTRATION_TOKEN:?}
+      SANDBOX_RUNNER_ID: runner-1
+      SANDBOX_RUNNER_API_GRPC_ADDR: sandbox-api:9090
+      SANDBOX_RUNNER_HTTP_BASE_URL: https://sandbox-runner-1:8080
+      SANDBOX_RUNNER_CONTROL_GRPC_LISTEN_ADDR: ":9091"
+      SANDBOX_RUNNER_CONTROL_GRPC_ADVERTISE_ADDR: sandbox-runner-1:9091
+      SANDBOX_RUNNER_DOCKER_SANDBOX_IMAGE: ghcr.io/n8n-io/n8n-sandbox-service-sandbox:${N8N_SANDBOX_VERSION:?}
+      SANDBOX_RUNNER_REGISTRATION_GRPC_CA_FILE: /tls/runner/ca.crt
+      SANDBOX_RUNNER_REGISTRATION_GRPC_CERT_FILE: /tls/runner/grpc-client.crt
+      SANDBOX_RUNNER_REGISTRATION_GRPC_KEY_FILE: /tls/runner/grpc-client.key
+      SANDBOX_RUNNER_REGISTRATION_GRPC_SERVER_NAME: sandbox-api
+      SANDBOX_RUNNER_CONTROL_GRPC_TLS_CERT_FILE: /tls/runner/control-grpc-server.crt
+      SANDBOX_RUNNER_CONTROL_GRPC_TLS_KEY_FILE: /tls/runner/control-grpc-server.key
+      SANDBOX_RUNNER_CONTROL_GRPC_TLS_CLIENT_CA_FILE: /tls/runner/ca.crt
+    networks:
+      - n8n-starter-private
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "docker", "info" ]
+      start_interval: 3s
+      start_period: 1m
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    privileged: true
+
+  # n8n searches the web at http://searxng:8080, ./searxng-settings.yml turns on the JSON format it asks for
+  searxng:
+    image: ghcr.io/searxng/searxng:${SEARXNG_VERSION:?}
+    volumes:
+      - ./searxng-settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?}
+    networks:
+      - n8n-starter-private
+    healthcheck:
+      test: [ "CMD", "wget", "--spider", "-q", "http://localhost:8080/healthz" ]
+      start_interval: 3s
+      start_period: 30s
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    <<: *base
+
+networks:
+  n8n-starter-private:
+    external: true

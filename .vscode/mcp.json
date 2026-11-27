@@ -1,0 +1,8 @@
+{
+  "servers": {
+    "n8n-docs": {
+      "type": "http",
+      "url": "https://docs.n8n.io/~gitbook/mcp"
+    }
+  }
+}

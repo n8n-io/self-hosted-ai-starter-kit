@@ -1,0 +1,67 @@
+# ollama: one server pulls every model of AI_MODELS, one service per AI_RUNTIME profile, see ../../../SPEC.md
+x-ollama: &ollama
+  volumes:
+    - ${VOLUMES_PATH:-../../../.volumes}/models/ollama/data:/root/.ollama
+  environment:
+    # comma separated ollama tags pulled on start, Tilt sets them from ../models.json (see ../../../SPEC.md)
+    MODELS: ${OLLAMA_PULL_MODELS:-}
+  networks:
+    n8n-starter-private:
+      aliases: [ "ollama" ]
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges=true
+  # pull the models next to the server, `ollama serve` stays PID 1
+  entrypoint: [ "/bin/sh", "-c" ]
+  command:
+    - |
+      (until ollama ls >/dev/null 2>&1; do sleep 1; done
+      for model in $$(echo "$$MODELS" | tr ',' ' '); do ollama pull "$$model"; done) &
+      exec ollama serve
+  healthcheck:
+    test:
+      - CMD-SHELL
+      - |
+        ollama ls >/dev/null || exit 1
+        for model in $$(echo "$$MODELS" | tr ',' ' '); do ollama show "$$model" >/dev/null || exit 1; done
+    start_interval: 10s
+    start_period: 15m
+    interval: 30s
+    timeout: 10s
+    retries: 3
+
+name: ollama
+services:
+  ollama-cpu-arm64:
+    image: ollama/ollama:${OLLAMA_VERSION:?}
+    <<: *ollama
+    profiles: [ "cpu-arm64" ]
+
+  ollama-cpu-x86-64:
+    image: ollama/ollama:${OLLAMA_VERSION:?}
+    <<: *ollama
+    profiles: [ "cpu-x86-64" ]
+
+  ollama-gpu-amd:
+    image: ollama/ollama:${OLLAMA_VERSION:?}-rocm
+    <<: *ollama
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    profiles: [ "gpu-amd" ]
+
+  ollama-gpu-nvidia:
+    image: ollama/ollama:${OLLAMA_VERSION:?}
+    <<: *ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    profiles: [ "gpu-nvidia" ]
+
+networks:
+  n8n-starter-private:
+    external: true

@@ -1,0 +1,99 @@
+# N8N_VARIANT=dev and base of the variant cascade: one container, sqlite, internal task runner, see ../../SPEC.md
+x-base: &base
+  security_opt:
+    - no-new-privileges=true
+
+x-n8n: &n8n
+  image: docker.n8n.io/n8nio/n8n:${N8N_VERSION:?}
+
+x-n8n-env: &n8n-env
+  GENERIC_TIMEZONE: ${TZ:-Europe/Berlin}
+  TZ: ${TZ:-Europe/Berlin}
+  N8N_DEPLOYMENT_ARTIFACT: docker-compose
+  N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: ${N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS:-true}
+  N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?}
+  N8N_USER_MANAGEMENT_JWT_SECRET: ${N8N_USER_MANAGEMENT_JWT_SECRET:?}
+
+# the n8n Assistant, on with N8N_ASSISTANT=true of the root .env: every key is optional, so n8n runs without it (see ../../SPEC.md)
+x-n8n-env-assistant: &n8n-env-assistant
+  N8N_INSTANCE_AI_ENABLED: ${N8N_ASSISTANT:-false}
+  # the first model of ../models/models.cloud.json: an empty value would replace the default of n8n, `pnpm run config N8N_ASSISTANT` writes the model
+  N8N_INSTANCE_AI_MODEL: ${N8N_INSTANCE_AI_MODEL:-anthropic/claude-opus-5-5}
+  N8N_INSTANCE_AI_MODEL_URL: ${N8N_INSTANCE_AI_MODEL_URL:-}
+  N8N_INSTANCE_AI_MODEL_API_KEY: ${N8N_INSTANCE_AI_MODEL_API_KEY:-}
+  # the sandbox and the web search of ./assistant/docker-compose.yml
+  N8N_INSTANCE_AI_SANDBOX_ENABLED: ${N8N_ASSISTANT:-false}
+  N8N_INSTANCE_AI_SANDBOX_PROVIDER: n8n-sandbox
+  N8N_SANDBOX_SERVICE_URL: http://sandbox-api:8080
+  N8N_SANDBOX_SERVICE_API_KEY: ${N8N_SANDBOX_SERVICE_API_KEY:-}
+  N8N_INSTANCE_AI_SEARXNG_URL: http://searxng:8080
+
+x-n8n-env-hosting: &n8n-env-hosting
+  N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+  N8N_HOST: ${DOMAIN:-n8n.localhost}
+  N8N_WEBHOOK_URL: ${N8N_PROTOCOL:-http}://${DOMAIN:-n8n.localhost}
+  N8N_PORT: 5678
+  N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-false}
+  N8N_PROXY_HOPS: ${N8N_PROXY_HOPS:-1}
+
+# the console always, plus rotating JSON files in the logs volume, one file per n8n process, see ../../SPEC.md
+x-n8n-env-logs: &n8n-env-logs
+  N8N_LOG_LEVEL: ${N8N_LOG_LEVEL:-info}
+  N8N_LOG_OUTPUT: ${N8N_LOG_OUTPUT:-console,file}
+  N8N_LOG_FILE_LOCATION: /home/node/logs/n8n.log
+  N8N_LOG_FILE_SIZE_MAX: ${N8N_LOG_FILE_SIZE_MAX:-16}
+  N8N_LOG_FILE_COUNT_MAX: ${N8N_LOG_FILE_COUNT_MAX:-10}
+
+# the instance owner n8n applies on every start, the hash is derived by `pnpm run setup`, see ../../SPEC.md
+x-n8n-env-owner: &n8n-env-owner
+  N8N_INSTANCE_OWNER_MANAGED_BY_ENV: ${N8N_INSTANCE_OWNER_MANAGED_BY_ENV:-true}
+  N8N_INSTANCE_OWNER_EMAIL: ${N8N_INSTANCE_OWNER_EMAIL:-owner@example.com}
+  N8N_INSTANCE_OWNER_FIRST_NAME: ${N8N_INSTANCE_OWNER_FIRST_NAME:-Instance}
+  N8N_INSTANCE_OWNER_LAST_NAME: ${N8N_INSTANCE_OWNER_LAST_NAME:-Owner}
+  N8N_INSTANCE_OWNER_PASSWORD_HASH: ${N8N_INSTANCE_OWNER_PASSWORD_HASH:?}
+
+# the internal runner is JavaScript only, Python needs the external runner of ./docker-compose.build.yml, see ../../SPEC.md
+x-n8n-env-runners-internal: &n8n-env-runners-internal
+  N8N_RUNNERS_MODE: internal
+  NODE_FUNCTION_ALLOW_BUILTIN: ${NODE_FUNCTION_ALLOW_BUILTIN:-crypto,buffer,url,util,path,events,stream,zlib,assert}
+  NODE_FUNCTION_ALLOW_EXTERNAL: ${NODE_FUNCTION_ALLOW_EXTERNAL:-moment,luxon,lodash,nanoid}
+
+# the database file lives in the .n8n volume, see ../../SPEC.md
+x-n8n-env-sqlite: &n8n-env-sqlite
+  DB_TYPE: sqlite
+
+x-n8n-health: &n8n-health
+  healthcheck:
+    test: [ "CMD", "wget", "--spider", "-q", "http://localhost:5678/healthz/readiness" ]
+    start_interval: 3s
+    start_period: 30s
+    interval: 10s
+    timeout: 5s
+    retries: 5
+
+name: n8n
+services:
+  n8n:
+    volumes:
+      - ${VOLUMES_PATH:-../../.volumes}/n8n/data:/home/node/.n8n
+      - ${VOLUMES_PATH:-../../.volumes}/n8n/logs:/home/node/logs
+    environment:
+      <<: [ *n8n-env, *n8n-env-hosting, *n8n-env-logs, *n8n-env-owner, *n8n-env-sqlite, *n8n-env-runners-internal, *n8n-env-assistant ]
+    networks:
+      - n8n-starter-public
+      - n8n-starter-private
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      # routed at the bare DOMAIN instead of the default `<service>.<DOMAIN>` rule, see ../../SPEC.md
+      - traefik.http.services.n8n.loadbalancer.server.port=5678
+      - traefik.http.routers.n8n.service=n8n
+      - traefik.http.routers.n8n.rule=Host(`${DOMAIN:-n8n.localhost}`)
+      - traefik.http.routers.n8n.entrypoints=web
+    <<: [ *base, *n8n, *n8n-health ]
+
+networks:
+  n8n-starter-public:
+    external: true
+  n8n-starter-private:
+    external: true
