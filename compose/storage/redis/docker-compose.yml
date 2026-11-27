@@ -4,8 +4,6 @@ services:
     image: redis:8-alpine
     volumes:
       - ${VOLUMES_PATH:-../../../.volumes}/storage/redis/data:/data
-    ports:
-      - '0.0.0.0:6379:6379'
     networks:
       - n8n-starter-private
     restart: on-failure
