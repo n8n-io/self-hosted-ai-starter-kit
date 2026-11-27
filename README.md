@@ -135,7 +135,7 @@ pnpm run config N8N_ASSISTANT false
 ├── Tiltfile                  # Tilt orchestration of every compose project
 ├── .env.template             # N8N_VARIANT, N8N_ASSISTANT, AI_RUNTIME, AI_ENGINE, AI_GATEWAY, AI_MODELS, DOMAIN
 ├── compose/                  # the service catalogue, one compose project per directory
-│   ├── package.json          # n8n-service-catalogue: lint scripts and .dclintrc
+│   ├── package.json          # n8n-service-catalogue: runs lint.mjs; .dclintrc and .compose-lint.yml beside it
 │   ├── proxy/                # traefik, docker-socket-proxy
 │   ├── n8n/                  # docker-compose.yml (dev) extended by .build.yml, .community.yml and .enterprise.yml; assistant/ for the n8n Assistant
 │   ├── storage/              # postgres, pgadmin, redis, redis-insight, garage
@@ -221,7 +221,7 @@ All root scripts are thin wrappers, see [package.json](./package.json):
 | `pnpm run setup`, `verify`, `config`, `models`, `secrets`, `reset` | the matching `n8n-starter` command from [packages/cli/](./packages/cli/) |
 | `pnpm run dev` | `tilt up` with the [Tiltfile](./Tiltfile), then `tilt down` once Tilt exits |
 | `pnpm run build`, `pnpm run test` | `pnpm -r run build` / `pnpm -r run test` across all workspace packages |
-| `pnpm run lint`, `pnpm run lint:fix` | `pnpm -r run lint` / `lint:fix`, the scripts of [compose/package.json](./compose/package.json): [dclint](https://github.com/zavoloklom/docker-compose-linter) over the catalogue with `--max-warnings 0` (warnings fail too), configured in [compose/.dclintrc](./compose/.dclintrc), then `lint:env`, which fails on any bare `${VAR}` in a compose file, and `lint:healthcheck`, which fails on a service without a healthcheck (needs `docker compose` and `jq`) |
+| `pnpm run lint`, `pnpm run lint:fix` | `pnpm -r run lint` / `lint:fix`, the scripts of [compose/package.json](./compose/package.json) running [compose/lint.mjs](./compose/lint.mjs): [dclint](https://github.com/zavoloklom/docker-compose-linter) with `--max-warnings 0` (warnings fail too), configured in [compose/.dclintrc](./compose/.dclintrc), `lint:env`, which fails on any bare `${VAR}` in a compose file, `lint:healthcheck`, which fails on a service without a healthcheck, and [compose-lint](https://github.com/tmatens/compose-lint), which checks OWASP/CIS security rules against the baseline in [compose/.compose-lint.yml](./compose/.compose-lint.yml) (needs `docker compose` and a running Docker daemon) |
 
 ### Editing the compose catalogue
 
@@ -287,6 +287,7 @@ N8N_ASSISTANT=true docker compose -f docker-compose.community.yml up
 - [n8n documentation](https://docs.n8n.io/) and the [n8n community forum](https://community.n8n.io/)
 - [Tilt documentation](https://docs.tilt.dev/)
 - [docker-compose-linter (dclint)](https://github.com/zavoloklom/docker-compose-linter)
+- [compose-lint](https://github.com/tmatens/compose-lint)
 - [self-hosted-ai-starter-kit on GitHub](https://github.com/n8n-io/self-hosted-ai-starter-kit)
 
 ## Roadmap

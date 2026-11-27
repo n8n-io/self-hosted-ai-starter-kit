@@ -6,10 +6,8 @@
   "author": "n8n",
   "license": "Apache-2.0",
   "scripts": {
-    "lint": "dclint . --recursive --max-warnings 0 && pnpm run lint:env && pnpm run lint:healthcheck",
-    "lint:env": "! grep -rnE --exclude-dir=node_modules '(^|[^$])\\$(\\{[A-Za-z_][A-Za-z0-9_]*\\}|[A-Za-z_])' --include='docker-compose*.yml' .",
-    "lint:healthcheck": "rc=0; for f in $(find . -name 'docker-compose*.yml' -not -path '*/node_modules/*' | sort); do docker compose -f \"$f\" --profile '*' config --no-interpolate --format json | jq -e --arg f \"$f\" '([.services[] | (.depends_on // {}) | to_entries[] | select(.value.condition == \"service_completed_successfully\") | .key]) as $once | [.services | to_entries[] | select(.key as $k | $once | index($k) | not) | select(.value.healthcheck.disable == true or ((.value.healthcheck.test // []) | length == 0 or . == [\"NONE\"])) | .key] | if length == 0 then true else \"\\($f): no healthcheck: \\(join(\", \"))\\n\" | halt_error(1) end' >/dev/null || rc=1; done; exit $rc",
-    "lint:fix": "dclint . --fix --recursive",
+    "lint": "node lint.mjs",
+    "lint:fix": "node lint.mjs --fix",
     "lint:help": "dclint --help"
   },
   "devDependencies": {

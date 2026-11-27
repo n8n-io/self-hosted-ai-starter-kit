@@ -55,4 +55,4 @@ The current files deviate from the rules above in places. Mention them when rele
 
 - A new, renamed or removed service, dependency or link also changes the Tilt plan: [tilt](../tilt/SKILL.md) skill.
 - Run the gates for what changed and report them: [validate](../validate/SKILL.md) skill. `pnpm run lint` must pass after every compose edit.
-- Compose mechanics: the [Compose specification](https://docs.docker.com/reference/compose-file/). Lint rules: [dclint](https://github.com/zavoloklom/docker-compose-linter) and `compose/.dclintrc`.
+- Compose mechanics: the [Compose specification](https://docs.docker.com/reference/compose-file/). Lint rules: [dclint](https://github.com/zavoloklom/docker-compose-linter) and `compose/.dclintrc`; security rules: [compose-lint](https://github.com/tmatens/compose-lint) with its baseline of suppressed pre-existing findings in `compose/.compose-lint.yml` (fix or justify, never extend it unprompted).

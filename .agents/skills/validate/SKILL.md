@@ -26,7 +26,7 @@ Run every gate that matches what changed, from the repository root, and report e
 ## The commands
 
 ```bash
-pnpm run lint  # dclint, lint:env and lint:healthcheck from compose/
+pnpm run lint  # compose/lint.mjs: dclint, lint:env, lint:healthcheck and compose-lint
 docker compose -f <compose file> config --quiet  # a service or an n8n variant file
 docker compose -f <engine file> --profile <runtime> config --quiet  # --profile goes before config
 pnpm --filter n8n-starter-cli run typecheck
@@ -42,7 +42,7 @@ tilt alpha tiltfile-result -v > /dev/null  # the Tiltfile, starting nothing: exi
 
 - `config --quiet` catches interpolation and `extends` errors without printing. Never print a rendered config: it contains the secrets of the `.env` beside the file. It reads that `.env`, so a fresh checkout needs `pnpm run setup` first.
 - A required variable the `.env` leaves empty stops that check with `required variable … is missing a value`. `setup` never fills a human secret, so the enterprise file needs it set for the check alone: `N8N_LICENSE_ACTIVATION_KEY=x docker compose -f compose/n8n/docker-compose.enterprise.yml config --quiet`. The model variables of the engine files (`VLLM_MODEL`, `OLLAMA_PULL_MODELS`) default to empty and need nothing.
-- `pnpm run lint` is the `lint` script of `compose/package.json`: dclint with `--max-warnings 0`, so every warning fails the gate (rules in `compose/.dclintrc`); then `lint:env`, which fails on a bare `${VAR}` or `$VAR`; then `lint:healthcheck`, which fails, naming file and services, on a service without a healthcheck, except one that another service of the file waits for with `service_completed_successfully` (it needs `docker compose` and `jq`, no `.env` and no daemon).
+- `pnpm run lint` is the `lint` script of `compose/package.json`, `node lint.mjs`, four stages that all run even when one fails: dclint with `--max-warnings 0`, so every warning fails the gate (rules in `compose/.dclintrc`); `lint:env`, which fails on a bare `${VAR}` or `$VAR`; `lint:healthcheck`, which fails, naming file and services, on a service without a healthcheck, except one that another service of the file waits for with `service_completed_successfully`; and compose-lint (the pinned image `composelint/compose-lint:1.8.2` via `docker run`), which fails on a high or critical security finding not suppressed in `compose/.compose-lint.yml`. It needs `docker compose` and a running Docker daemon, no `jq` and no `.env`. Fix a new compose-lint finding in the compose file or report it: never add a baseline entry without being asked.
 - `pnpm run lint:fix` may rewrite unrelated compose files: revert those with `git checkout -- <file>`, after checking that the file held no other uncommitted change.
 - Build before exercising the bundle, and run the typecheck locally: CI runs lint, build and test only.
 - The CLI writes its log lines to stdout, errors included: discarding stdout of a CLI command hides why it failed, hence the capture above.
