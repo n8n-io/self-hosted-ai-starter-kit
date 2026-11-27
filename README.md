@@ -143,7 +143,8 @@ pnpm run config N8N_ASSISTANT false
 │   └── models/               # models.json plus ollama/ and vllm/, the litellm/ gateway, and models.cloud.json
 ├── assets/                   # images, icons (vscode-icons custom folder icons), static assets
 ├── packages/cli/             # n8n-starter: setup, verify, config, models, secrets, tilt, reset
-└── .volumes/                 # runtime data of every service, gitignored
+├── .volumes/                 # runtime data of every service, gitignored
+└── export/                   # the workflows and credentials of `pnpm run export`, gitignored
 ```
 
 Every service directory holds a `docker-compose.yml` with its own project `name:`, an optional `.env.template` for the values that must come from `.env`, an optional `.env.json` naming the secrets among them and how `setup` produces them, and the config files it mounts. Runtime data never lives there: it sits under `.volumes/<group>/<service>/`, which `VOLUMES_PATH` can relocate as a whole. The full rules are in [SPEC.md](./SPEC.md#compose).
@@ -160,6 +161,16 @@ Every service directory holds a `docker-compose.yml` with its own project `name:
 | `enterprise` | [docker-compose.enterprise.yml](./compose/n8n/docker-compose.enterprise.yml) | the license (`N8N_LICENSE_ACTIVATION_KEY` in `compose/n8n/.env`, set with `pnpm run secrets set N8N_LICENSE_ACTIVATION_KEY`); S3 binary data on garage, external secrets and multi-main are still to be wired up | a license key |
 
 Any variant file also runs without Tilt: `docker compose -f docker-compose.<variant>.yml up` from `compose/n8n/` (see [Running a service without Tilt](#running-a-service-without-tilt)).
+
+`dev` keeps its data in SQLite and the other variants in postgres, so workflows and credentials do not follow a change of `N8N_VARIANT` between them. Two commands carry them over with the n8n [server CLI](https://docs.n8n.io/deploy/host-n8n/configure-n8n/use-the-command-line); both need n8n running:
+
+```bash
+pnpm run export                 # every workflow and credential of the running n8n into export/
+pnpm run config N8N_VARIANT build   # switch, then wait until n8n is up again
+pnpm run import                 # asks first: items with the same id are overwritten
+```
+
+`export/` is gitignored and holds the credentials in plain text, so delete it when you are done. Imported workflows arrive unpublished. Users, variables and the execution history are not part of it, see [Back up and restore](https://docs.n8n.io/deploy/host-n8n/keep-n8n-running/backup-and-restore).
 
 ### Local AI: Ollama or vLLM
 

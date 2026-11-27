@@ -48,6 +48,14 @@ export const COMMAND_HELP = {
       { name: 'set', usage: 'secrets set KEY [value]', description: 'Set one secret of the .env.json manifests, with its links and the values derived from it: KEY alone asks for it with a masked prompt, KEY value writes without a prompt' },
     ],
   },
+  n8n: {
+    usage: 'n8n <export|import>',
+    description: 'Move the workflows and credentials of the running n8n to and from the export folder with the n8n server CLI',
+    subcommands: [
+      { name: 'export', usage: 'n8n export', description: 'Write every workflow (its current draft) and every credential (decrypted, plain text) of the running n8n to export/workflows and export/credentials, one JSON file each, replacing the previous export' },
+      { name: 'import', usage: 'n8n import [--yes]', description: 'Import export/credentials, then export/workflows into the running n8n after a confirmation (--yes skips it): items with the same id are overwritten, workflows arrive unpublished' },
+    ],
+  },
   tilt: {
     usage: 'tilt <resources>',
     description: 'The plan the Tiltfile consumes',
@@ -68,6 +76,7 @@ export const OPTIONS = [
   { usage: '-q, --quiet', description: 'Only log errors (same as --log-level error)' },
   { usage: '    --log-level <lvl>', description: 'One of silent, error, warn, info or debug (default: info)' },
   { usage: '    --json', description: 'Print JSON instead of text (verify, models read and secrets read)' },
+  { usage: '-y, --yes', description: 'Skip the confirmation (n8n import)' },
 ] as const
 
 export function isCommand(value: string | undefined): value is Command {

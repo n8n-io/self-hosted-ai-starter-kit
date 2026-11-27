@@ -2,12 +2,13 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { run } from '../src'
 import { getLogLevel, setLogLevel } from '../src/utils/logger'
 
-const { verifyMock, configMock, modelsMock, secretsMock, tiltMock } = vi.hoisted(() => ({ verifyMock: vi.fn(), configMock: vi.fn(), modelsMock: vi.fn(), secretsMock: vi.fn(), tiltMock: vi.fn() }))
+const { verifyMock, configMock, modelsMock, secretsMock, n8nMock, tiltMock } = vi.hoisted(() => ({ verifyMock: vi.fn(), configMock: vi.fn(), modelsMock: vi.fn(), secretsMock: vi.fn(), n8nMock: vi.fn(), tiltMock: vi.fn() }))
 
 vi.mock('../src/commands/verify', () => ({ verify: verifyMock }))
 vi.mock('../src/commands/config', () => ({ config: configMock }))
 vi.mock('../src/commands/models', () => ({ models: modelsMock }))
 vi.mock('../src/commands/secrets', () => ({ secrets: secretsMock }))
+vi.mock('../src/commands/n8n', () => ({ n8n: n8nMock }))
 vi.mock('../src/commands/tilt', () => ({ tilt: tiltMock }))
 
 let logSpy: ReturnType<typeof vi.spyOn>
@@ -21,6 +22,7 @@ beforeEach(() => {
   configMock.mockReset()
   modelsMock.mockReset()
   secretsMock.mockReset()
+  n8nMock.mockReset()
   tiltMock.mockReset()
   previousExitCode = process.exitCode
 })
@@ -166,6 +168,32 @@ test.each([
   expect(secretsMock).not.toHaveBeenCalled()
 })
 
+test.each([
+  [['n8n', 'export'], ['export'], false],
+  [['n8n', 'import'], ['import'], false],
+  [['n8n', 'import', '--yes'], ['import'], true],
+  // the short alias takes no value, so it does not swallow the sub-command
+  [['n8n', '-y', 'import', '-q'], ['import'], true],
+])('%j passes the sub-command and --yes to n8n', async (argv, rest, yes) => {
+  await run(argv)
+
+  expect(n8nMock).toHaveBeenCalledWith(process.cwd(), rest, { yes })
+})
+
+test.each([
+  ['n8n', 'export', '--yes'],
+  ['verify', '-y'],
+  ['secrets', 'set', 'VLLM_API_KEY', 'sk-1', '--yes'],
+])('%s %s rejects --yes without running', async (...argv) => {
+  await run(argv)
+
+  expect(errorSpy).toHaveBeenCalledWith('--yes is only accepted by n8n import')
+  expect(process.exitCode).toBe(1)
+  expect(n8nMock).not.toHaveBeenCalled()
+  expect(verifyMock).not.toHaveBeenCalled()
+  expect(secretsMock).not.toHaveBeenCalled()
+})
+
 test('a command without sub-commands rejects extra arguments with its help', async () => {
   await run(['verify', 'extra'])
 
@@ -178,6 +206,7 @@ test('a command without sub-commands rejects extra arguments with its help', asy
 test.each([
   ['models', 'read, select', modelsMock],
   ['secrets', 'read, set', secretsMock],
+  ['n8n', 'export, import', n8nMock],
   ['tilt', 'resources', tiltMock],
 ])('%s without a sub-command prints its help with exit code 1', async (command, expected, mock) => {
   await run([command])

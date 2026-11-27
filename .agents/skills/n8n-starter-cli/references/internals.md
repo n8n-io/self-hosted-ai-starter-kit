@@ -14,9 +14,9 @@ Where things live in `packages/cli`, how the command line is parsed, how `.env` 
 
 | File | Role |
 | --- | --- |
-| `src/index.ts` | `run(argv)`: parses flags, prints the help or the version, resolves the log level, checks the usage against the table of `src/help.ts`, dispatches to one command with its positional arguments (`positionals(argv)`: command, sub-command, value) and, for `verify`, `models` and `secrets`, `{ json }`. Calls `run(process.argv.slice(2))` only when executed directly. |
+| `src/index.ts` | `run(argv)`: parses flags, prints the help or the version, resolves the log level, checks the usage against the table of `src/help.ts`, dispatches to one command with its positional arguments (`positionals(argv)`: command, sub-command, value) and, for `verify`, `models` and `secrets`, `{ json }`, for `n8n` `{ yes }`. Calls `run(process.argv.slice(2))` only when executed directly. |
 | `src/help.ts` | `COMMAND_HELP` (one entry per command: `usage`, `description`, `notes`, `subcommands` with `name`, `usage`, `description`), `COMMANDS`, `OPTIONS`, `isCommand`, `commandHelp`, `subcommandNames`, `renderHelp(command?)` |
-| `src/commands/<name>.ts` | one file per command (`setup`, `verify`, `config`, `models`, `tilt`, `secrets`, `reset`): the exported logic (`generateEnvFiles`, `fillSecrets`, `verifyEnvironment`, `tiltResources`, …) and the command function that owns the intro, the outro and the prompts |
+| `src/commands/<name>.ts` | one file per command (`setup`, `verify`, `config`, `models`, `tilt`, `secrets`, `n8n`, `reset`): the exported logic (`generateEnvFiles`, `fillSecrets`, `verifyEnvironment`, `tiltResources`, …) and the command function that owns the intro, the outro and the prompts |
 | `src/schemas/{config,models,assistant,secrets,tilt}.ts` | the zod shapes of the root `.env`, the catalogue, the cloud models of the Assistant, a manifest and the plan (section "Schemas" below) |
 | `src/utils/files.ts` | `findFiles(rootDir, filename)`: recursive, sorted, skips `node_modules`, `dist` and dot-directories |
 | `src/utils/env.ts` | `parseEnvContent` (node's `util.parseEnv`), `parseEnvDefaults` (the knobs a template shows commented out), `formatEnvValue` (single quotes where compose or node would read syntax), `updateEnvContent` (in-place value replacement that keeps comments and order and appends unknown keys) |
@@ -33,11 +33,12 @@ Where things live in `packages/cli`, how the command line is parsed, how `.env` 
 
 ## Command line, options and help
 
-- The command line is `<command> [sub-command] [value] [options]`. `config` takes a key and a value, `models`, `secrets` and `tilt` a sub-command and a value; the other commands reject extra arguments with exit 1.
+- The command line is `<command> [sub-command] [value] [options]`. `config` takes a key and a value, `models`, `secrets`, `n8n` and `tilt` a sub-command and a value; the other commands reject extra arguments with exit 1.
 - `--log-level silent|error|warn|info|debug` (default `info`) and `-q` / `--quiet` (= `error`). An explicit `--log-level` wins over `--quiet`; a bare `--log-level` or an unknown value exits 1 and lists the levels.
 - `--json` is accepted by `verify`, `models read` and `secrets read` (passed as `{ json }`); every other command rejects it with exit 1.
+- `-y` / `--yes` is accepted by `n8n import` (passed as `{ yes }`); every other command rejects it with exit 1.
 - `-h` / `--help` and `help [command]` print the global help, or the help of the command named on the command line (`secrets -h`, `secrets read --help`, `-h secrets`, `help secrets`), with exit 0; an unknown name is an unknown command (exit 1). Both come from `renderHelp()` in `src/help.ts`, so the global help and the per-command help never drift. The usage column is in the accent colour through `accent()` (plain without a tty or with `NO_COLOR`, the padding counts the plain length); the headings are not styled so tests can match `Usage:` lines verbatim.
-- A usage error (unknown command, extra arguments to a command without sub-commands, a missing or unknown sub-command for `models`, `secrets` or `tilt`) prints the reason on stderr and the help of the command on stdout with exit 1 before the module runs; the modules keep their own missing/unknown checks for direct calls.
+- A usage error (unknown command, extra arguments to a command without sub-commands, a missing or unknown sub-command for `models`, `secrets`, `n8n` or `tilt`) prints the reason on stderr and the help of the command on stdout with exit 1 before the module runs; the modules keep their own missing/unknown checks for direct calls.
 
 ## State and `.env` handling
 

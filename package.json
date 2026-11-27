@@ -8,6 +8,8 @@
     "config": "node packages/cli/dist/index.mjs config",
     "models": "node packages/cli/dist/index.mjs models",
     "secrets": "node packages/cli/dist/index.mjs secrets",
+    "export": "node packages/cli/dist/index.mjs n8n export",
+    "import": "node packages/cli/dist/index.mjs n8n import",
     "setup": "node packages/cli/dist/index.mjs setup",
     "verify": "node packages/cli/dist/index.mjs verify",
     "dev": "tilt up; tilt down",

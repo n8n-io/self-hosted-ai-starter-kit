@@ -1,6 +1,8 @@
 # n8n resources
 .n8n*
 .volumes
+# the workflows and plain text credentials `pnpm run export` writes
+export
 
 # tmp
 .tmp

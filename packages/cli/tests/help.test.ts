@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest'
 import { CONFIG_KEYS } from '../src/commands/config'
 import { MODELS_SUBCOMMANDS } from '../src/commands/models'
+import { N8N_SUBCOMMANDS } from '../src/commands/n8n'
 import { SECRETS_SUBCOMMANDS } from '../src/commands/secrets'
 import { TILT_SUBCOMMANDS } from '../src/commands/tilt'
 import { commandHelp, COMMANDS, isCommand, OPTIONS, renderHelp, subcommandNames } from '../src/help'
@@ -11,9 +12,10 @@ function plain(text: string): string {
 }
 
 test('the table lists every command with the sub-commands of its module and the keys of config', () => {
-  expect(COMMANDS).toEqual(['setup', 'verify', 'reset', 'config', 'models', 'secrets', 'tilt'])
+  expect(COMMANDS).toEqual(['setup', 'verify', 'reset', 'config', 'models', 'secrets', 'n8n', 'tilt'])
   expect(subcommandNames('models')).toEqual([...MODELS_SUBCOMMANDS])
   expect(subcommandNames('secrets')).toEqual([...SECRETS_SUBCOMMANDS])
+  expect(subcommandNames('n8n')).toEqual([...N8N_SUBCOMMANDS])
   expect(subcommandNames('tilt')).toEqual([...TILT_SUBCOMMANDS])
   expect(subcommandNames('setup')).toEqual([])
   expect(subcommandNames('config')).toEqual([])

@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url'
 import { parse } from '@bomb.sh/args'
 import { config } from './commands/config'
 import { models } from './commands/models'
+import { n8n } from './commands/n8n'
 import { reset } from './commands/reset'
 import { secrets } from './commands/secrets'
 import { setup } from './commands/setup'
@@ -50,9 +51,9 @@ export async function run(argv: string[]) {
   const args = parse(argv, {
     // The parser types a flag by its raw key before resolving aliases, so a
     // short alias that is not listed here would swallow the next token as its value
-    boolean: ['help', 'version', 'quiet', 'json', 'h', 'v', 'q'],
+    boolean: ['help', 'version', 'quiet', 'json', 'yes', 'h', 'v', 'q', 'y'],
     string: ['log-level'],
-    alias: { h: 'help', v: 'version', q: 'quiet' },
+    alias: { h: 'help', v: 'version', q: 'quiet', y: 'yes' },
   })
 
   const [command, ...rest] = positionals(argv)
@@ -115,6 +116,13 @@ export async function run(argv: string[]) {
     return
   }
 
+  const yes = args.yes === true
+  if (yes && !(command === 'n8n' && rest[0] === 'import')) {
+    console.error('--yes is only accepted by n8n import')
+    process.exitCode = 1
+    return
+  }
+
   switch (command) {
     case 'setup':
       await setup()
@@ -133,6 +141,9 @@ export async function run(argv: string[]) {
       break
     case 'secrets':
       await secrets(process.cwd(), rest, { json })
+      break
+    case 'n8n':
+      await n8n(process.cwd(), rest, { yes })
       break
     case 'tilt':
       await tilt(process.cwd(), rest)

@@ -69,6 +69,20 @@ Every command takes `rootDir = process.cwd()` (the root scripts run from the rep
 - `setSecret` writes the key into its file, then every value derived from it (skipped while the hash still fits) and every link, logging `set`/`derived`/`linked` per file, never the value.
 - Exit 1 on a missing key, an unknown, link or derived key, an empty or unstorable value, a missing `.env` or an invalid manifest.
 
+## n8n export
+
+- `exportN8n(rootDir, docker)`: `assertRunning` (`docker compose -p n8n ps --status running -q n8n`, an empty stdout is a stopped n8n), `createContainerDir` (`mkdir -m 700` as `node` under `/tmp`, one sub-folder per kind), then the server CLI per kind (`SERVER_COMMANDS`) through `exec -T -u node`. An exit with `No workflows|credentials found` (`isNothingFound`, read from the message, stdout and stderr of the error) is an empty kind, not a failure.
+- Only then the host: `rm` of `export/<kind>`, `docker compose cp` out, `restrictToOwner` (`0700`, files `0600`: n8n writes with a zero umask). `removeContainerDir` runs in `finally` as `root` and only warns when it fails.
+- Exit 1 with the hint `pnpm run dev` when n8n is not running (`N8nError` carries the hint), or with the docker error, which holds the stderr of n8n.
+
+## n8n import [--yes]
+
+- `importN8n(rootDir, { run, confirm })`: `readExportCounts` (`*.json` per folder; none at all fails before docker is asked), `assertRunning`, then `confirm(counts)`: `false` resolves with `undefined` and nothing is written.
+- `createContainerDir`, `docker compose cp` of every kind with files, `chown -R node:node` as `root` (`docker cp` creates the files as root with the host modes), then the server CLI per kind in `KINDS` order, credentials before workflows. `removeContainerDir` in `finally`.
+- The command function supplies `confirm`: `--yes` answers it; without a terminal (`interactive`, by default `process.stdin.isTTY`) it fails naming `--yes`, since clack ends the process with exit 0 on a prompt nobody answers; otherwise the clack `confirm` (default `false`).
+- Exit 1 on an empty export, a stopped n8n, a missing terminal or a docker error; a declined or cancelled prompt exits 0.
+- Change a flag of the server CLI only after reading its page ([n8n-docs](../../n8n-docs/SKILL.md) skill) and `n8n <command> --help` of the pinned image.
+
 ## reset
 
 - `findEnvFiles`: `findFiles` for `.env` and for `.env.secrets`, list them, warn about the filled `generate` keys with `rotation` `manual` or `never` (a manifest problem is ignored here), `confirm` (default `false`), `rm` each.
