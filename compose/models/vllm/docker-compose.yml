@@ -1,6 +1,7 @@
 # vllm: one container per model of AI_MODELS, one service per AI_RUNTIME profile, see ../../../SPEC.md
-x-vllm: &vllm
+x-vllm:
   # also the hostname on n8n-starter-private: the id of the model's entry in ../models.json, set by `n8n-starter tilt resources` (see ../../../SPEC.md)
+  &vllm
   container_name: vllm-${VLLM_MODEL_ID:-model}
   volumes:
     - ${VOLUMES_PATH:-../../../.volumes}/models/vllm/huggingface:/root/.cache/huggingface
