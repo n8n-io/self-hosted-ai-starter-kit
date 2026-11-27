@@ -176,7 +176,7 @@ The catalogue [compose/models/models.json](./compose/models/models.json) lists `
 
 ### Networks and routing
 
-Two external docker networks, created by `pnpm run setup`: `n8n-starter-public` holds Traefik and every container it routes to, `n8n-starter-private` holds everything else (databases, task runners, model servers). Traefik discovers containers through the socket proxy and routes every exposed service at `<service>.<DOMAIN>`; only n8n is served at the bare `DOMAIN`. Traefik binds `80` on `127.0.0.1` only; postgres (`5432`) and redis (`6379`) are the only other published ports.
+Two external docker networks, created by `pnpm run setup`: `n8n-starter-public` holds Traefik and every container it routes to, `n8n-starter-private` holds everything else (databases, task runners, model servers). Traefik discovers containers through the socket proxy and routes every exposed service at `<service>.<DOMAIN>`; only n8n is served at the bare `DOMAIN`. Traefik binds `80` on `127.0.0.1` only and is the only service that publishes a port; postgres and redis answer on the docker networks only.
 
 | URL (with the default `DOMAIN=n8n.localhost`) | Service |
 | --- | --- |
@@ -221,7 +221,7 @@ All root scripts are thin wrappers, see [package.json](./package.json):
 | `pnpm run setup`, `verify`, `config`, `models`, `secrets`, `reset` | the matching `n8n-starter` command from [packages/cli/](./packages/cli/) |
 | `pnpm run dev` | `tilt up` with the [Tiltfile](./Tiltfile), then `tilt down` once Tilt exits |
 | `pnpm run build`, `pnpm run test` | `pnpm -r run build` / `pnpm -r run test` across all workspace packages |
-| `pnpm run lint`, `pnpm run lint:fix` | `pnpm -r run lint` / `lint:fix`, the scripts of [compose/package.json](./compose/package.json) running [compose/lint.mjs](./compose/lint.mjs): [dclint](https://github.com/zavoloklom/docker-compose-linter) with `--max-warnings 0` (warnings fail too), configured in [compose/.dclintrc](./compose/.dclintrc), `lint:env`, which fails on any bare `${VAR}` in a compose file, `lint:healthcheck`, which fails on a service without a healthcheck, and [compose-lint](https://github.com/tmatens/compose-lint), which checks OWASP/CIS security rules against the baseline in [compose/.compose-lint.yml](./compose/.compose-lint.yml) (needs `docker compose` and a running Docker daemon) |
+| `pnpm run lint`, `pnpm run lint:fix` | `pnpm -r run lint` / `lint:fix`, the scripts of [compose/package.json](./compose/package.json) running [compose/lint.mjs](./compose/lint.mjs): [dclint](https://github.com/zavoloklom/docker-compose-linter) with `--max-warnings 0` (warnings fail too), configured in [compose/.dclintrc](./compose/.dclintrc), `lint:env`, which fails on any bare `${VAR}` in a compose file, `lint:healthcheck`, which fails on a service without a healthcheck, and [compose-lint](https://github.com/tmatens/compose-lint), which checks OWASP/CIS security rules against the baseline in [compose/.compose-lint.yml](./compose/.compose-lint.yml) (needs `docker compose` and a running Docker daemon). `lint:fix` prints the dry-run diff of `compose-lint fix` and runs `dclint --fix`; `pnpm run lint:fix --apply [--only CL-0003]` writes the compose-lint fixes, some of which change behavior (`read_only: true`), so read the diff first |
 
 ### Editing the compose catalogue
 

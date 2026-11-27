@@ -22,7 +22,7 @@ Read the reference the task needs, not all of them:
 
 - [ ] Image tag pinned to an exact version, literally or via `${VAR:?}` from `.env` (`N8N_VERSION`, `OLLAMA_VERSION`, `VLLM_VERSION`, `QDRANT_VERSION`). No floating tag (`latest`, a bare major) and no pinned version with a `:-` default.
 - [ ] Only the external networks `n8n-starter-public` and `n8n-starter-private`, both declared `external: true`. A compose file never creates a network of its own or declares one with a driver.
-- [ ] A service on `n8n-starter-public` carries `traefik.enable=true`, and the other way round. No host `ports:` for a routed service; host ports only where a tool needs direct access (postgres `5432`, redis `6379`). Traefik itself binds `127.0.0.1:80` only, never `0.0.0.0`.
+- [ ] A service on `n8n-starter-public` carries `traefik.enable=true`, and the other way round. No host `ports:` for a routed service, and none for any other service unless a tool needs direct access. Today only traefik publishes one: `127.0.0.1:80`, never `0.0.0.0`.
 - [ ] Every service that keeps running has a `healthcheck` in the compose file: `lint:healthcheck` fails without one. Inherited through `extends` or an anchor counts; an image `HEALTHCHECK` or a disabled one does not. A service that runs once and exits gets none and is exempt as soon as another service of the file waits for it with `condition: service_completed_successfully` (`sandbox-certs`): Docker reports a stopped container with a healthcheck as `unhealthy`, which Tilt shows as failed. Probe with a tool the pinned image ships: `wget` or `curl`, the service's own CLI (`/garage status`), or bash `/dev/tcp` (`qdrant`). Try the probe in the container before writing it down: `docker exec <container> <probe>; echo $?`.
 - [ ] `depends_on: { <svc>: { condition: service_healthy } }` only between services of one project. Never `depends_on` a service of another project: they are separate compose projects, Tilt `resource_deps` and the restart policy cover start order.
 - [ ] `security_opt: [no-new-privileges=true]` where the image allows it. The docker socket is mounted read-only into `docker-socket-proxy` only, never into traefik.
@@ -47,7 +47,6 @@ The current files deviate from the rules above in places. Mention them when rele
 - Not exactly pinned: `postgres:17`, `redis:8-alpine` and `qdrant/qdrant:${QDRANT_VERSION:?}` with `v1.19` in the template.
 - No `no-new-privileges`: traefik, postgres, redis, pgadmin, redisinsight, garage, garage-webui, qdrant; `vllm-gpu-amd` has only `seccomp=unconfined`; `sandbox-runner-1` is `privileged: true` (Docker in Docker, development and testing only, see the Assistant section of SPEC.md).
 - A named volume instead of a `.volumes` bind mount: qdrant `qdrant_storage`.
-- postgres and redis bind `0.0.0.0`.
 - Required (`${VAR:?}`) without being a secret or a pinned version: `POSTGRES_USER`, `DB_POSTGRESDB_USER` and `PGADMIN_DEFAULT_EMAIL`, live in their templates with a placeholder value.
 - The Tilt plan (`tiltResources()` in `packages/cli/src/commands/tilt.ts`) links garage as `web.<DOMAIN>` while its router serves `s3web.<DOMAIN>`.
 

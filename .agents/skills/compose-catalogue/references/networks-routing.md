@@ -23,8 +23,8 @@ Reasoning: [SPEC.md](../../../../SPEC.md), sections "Docker networks" and "Routi
 | 8082 | traefik ping (healthcheck) | no |
 | 5678, 5679 | n8n UI/API and task broker (`n8n-runner` dials `http://n8n:5679`, `n8n-worker-runner` dials `http://n8n-worker:5679`) | no, n8n is routed at the bare `DOMAIN` |
 | 5680 | health check server of the task runner launcher in `n8n-runner` and `n8n-worker-runner` (healthcheck, `/healthz`) | no |
-| 5432 | postgres | yes, `0.0.0.0` (direct tool access) |
-| 6379 | redis | yes, `0.0.0.0` (direct tool access) |
+| 5432 | postgres | no |
+| 6379 | redis | no |
 | 11434 | ollama, `http://ollama:11434` (network alias on `n8n-starter-private`) | no, never routed |
 | 8000 | each vllm container, `http://vllm-<id>:8000/v1`, bearer `VLLM_API_KEY` (`/health` stays open) | no, never routed |
 | 4000 | litellm, `http://litellm:4000/v1`, bearer `LITELLM_MASTER_KEY` | no, routed at `litellm.<DOMAIN>` |

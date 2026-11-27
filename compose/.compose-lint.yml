@@ -27,10 +27,6 @@ rules:
       sandbox-runner-1: "TODO: justify or fix"
       traefik: "TODO: justify or fix"
       vllm-gpu-amd: "TODO: justify or fix"
-  CL-0005:  # MEDIUM — Ports bound to all interfaces
-    exclude_services:
-      postgres: "TODO: justify or fix"
-      redis: "TODO: justify or fix"
   CL-0006:  # MEDIUM — No capability restrictions
     exclude_services:
       docker-socket-proxy: "TODO: justify or fix"

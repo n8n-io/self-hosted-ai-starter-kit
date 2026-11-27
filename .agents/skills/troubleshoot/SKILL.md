@@ -21,7 +21,7 @@ For a model server or the gateway (vLLM, Ollama, LiteLLM), read [references/mode
 
 - A container is named `<project>-<service>-1`: `n8n-n8n-1`, `n8n-n8n-runner-1`, `n8n-n8n-worker-1`, `postgres-postgres-1`, `traefik-traefik-1`. Two set a fixed name: `qdrant`, and `vllm-<id>` per model. `docker ps --format '{{.Names}}\t{{.Status}}'` lists them with their health.
 - On the docker networks a service answers to its compose service name (`n8n`, `postgres`, `redis`, `litellm`), ollama to the alias `ollama`, a vllm model to `vllm-<id>`.
-- From the host only traefik (`127.0.0.1:80`), postgres (`5432`) and redis (`6379`) are published. Browsers resolve `*.localhost` themselves; `curl` may need an `/etc/hosts` entry for `n8n.localhost` and the other hostnames. With `DOMAIN=n8n.local` nothing resolves on its own: every hostname needs a hosts file entry, in the browser too.
+- From the host only traefik (`127.0.0.1:80`) is published; postgres and redis answer on the docker networks only. Browsers resolve `*.localhost` themselves; `curl` may need an `/etc/hosts` entry for `n8n.localhost` and the other hostnames. With `DOMAIN=n8n.local` nothing resolves on its own: every hostname needs a hosts file entry, in the browser too.
 - A healthcheck probe can be run by hand: `docker exec <container> <probe>; echo $?`.
 
 ## Testing a change next to the running stack *(unconfirmed)*
@@ -29,7 +29,7 @@ For a model server or the gateway (vLLM, Ollama, LiteLLM), read [references/mode
 Run the copy under its own project name instead of the `name:` of the compose file, so the test never adopts or recreates the containers Tilt manages: `docker compose -p <name>-test -f <compose file> up -d`, removed with `docker compose -p <name>-test down`. What a second project still shares with the live one, read from the compose files:
 
 - the bind mounts under `.volumes/`: point `VOLUMES_PATH` at a scratch directory;
-- published host ports (traefik `80`, postgres `5432`, redis `6379`): a copy of one of those cannot start while the original runs;
+- the published host port (traefik `80`): a copy of traefik cannot start while the original runs;
 - a fixed `container_name` (`qdrant`, `vllm-<id>`): for vllm pass another `VLLM_MODEL_ID`;
 - the traefik router names and hostnames of its labels: set another `DOMAIN` (compose by hand takes any hostname, e.g. `DOMAIN=test.localhost`; only the CLI restricts it).
 
